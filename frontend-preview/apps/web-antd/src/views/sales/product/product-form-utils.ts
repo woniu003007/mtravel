@@ -221,6 +221,23 @@ export function cleanProductText(value?: string) {
   return result || undefined;
 }
 
+/** 数字字段只有真正传入时才写入 payload，避免旧格式安排项被补一堆无意义 0。 */
+function optionalNumber(value?: number) {
+  return value === undefined || value === null ? undefined : Number(value || 0);
+}
+
+/** 布尔字段只有真正传入时才写入 payload，避免旧格式安排项被补默认 false。 */
+function optionalBoolean(value?: boolean) {
+  return value === undefined || value === null ? undefined : Boolean(value);
+}
+
+/** 移除对象里的 undefined 字段，保持接口 payload 简洁。 */
+function compactObject<T extends Record<string, unknown>>(value: T) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== undefined),
+  ) as T;
+}
+
 /**
  * 计算团队安排参考费用合计。
  *
@@ -228,9 +245,33 @@ export function cleanProductText(value?: string) {
  */
 export function calculateArrangementTotal(items?: SalesProductApi.ArrangementItem[]) {
   return (items || []).reduce(
-    (sum, item) => sum + Number(item.quantity || 0) * Number(item.unitPrice || 0),
+    (sum, item) => sum + arrangementItemTotal(item),
     0,
   );
+}
+
+/** 读取团队安排金额，优先使用结构化合计金额，兼容旧的数量 × 单价格式。 */
+export function arrangementItemTotal(item: SalesProductApi.ArrangementItem) {
+  if (item.totalAmount !== undefined && item.totalAmount !== null) {
+    return Number(item.totalAmount || 0);
+  }
+  return Number(item.quantity || 0) * Number(item.unitPrice || 0);
+}
+
+/** 读取团队安排现结金额。 */
+export function arrangementItemCash(item: SalesProductApi.ArrangementItem) {
+  if (item.cashAmount !== undefined && item.cashAmount !== null) {
+    return Number(item.cashAmount || 0);
+  }
+  return item.settlementType === 'cash' ? arrangementItemTotal(item) : 0;
+}
+
+/** 读取团队安排挂账金额。 */
+export function arrangementItemCredit(item: SalesProductApi.ArrangementItem) {
+  if (item.creditAmount !== undefined && item.creditAmount !== null) {
+    return Number(item.creditAmount || 0);
+  }
+  return item.settlementType === 'credit' ? arrangementItemTotal(item) : 0;
 }
 
 /**
@@ -256,12 +297,9 @@ export function createArrangementOverviewSummary(
     if (!byType[type]) {
       byType[type] = emptyBucket();
     }
-    const amount = Number(item.quantity || 0) * Number(item.unitPrice || 0);
-    if (item.settlementType === 'cash') {
-      byType[type].cash += amount;
-    } else {
-      byType[type].credit += amount;
-    }
+    const amount = arrangementItemTotal(item);
+    byType[type].cash += arrangementItemCash(item);
+    byType[type].credit += arrangementItemCredit(item);
     byType[type].total += amount;
   }
 
@@ -300,15 +338,70 @@ export function buildSalesProductPayload(
   return {
     arrangementItems: (formState.arrangementItems || [])
       .filter((item) => item.itemName?.trim())
-      .map((item) => ({
+      .map((item) => compactObject({
         arrangementContent: cleanProductText(item.arrangementContent),
         arrangementType: item.arrangementType,
+        allocationMode: item.allocationMode,
+        arrivalPlace: cleanProductText(item.arrivalPlace),
+        cashAmount: optionalNumber(item.cashAmount),
+        companyRebateAmount: optionalNumber(item.companyRebateAmount),
+        confirmed: optionalBoolean(item.confirmed),
+        confirmationNo: cleanProductText(item.confirmationNo),
+        consumptionAmount: optionalNumber(item.consumptionAmount),
+        costAmount: optionalNumber(item.costAmount),
+        creditAmount: optionalNumber(item.creditAmount),
+        daysCount: optionalNumber(item.daysCount),
+        departurePlace: cleanProductText(item.departurePlace),
+        driverName: cleanProductText(item.driverName),
+        fundIncluded: cleanProductText(item.fundIncluded),
+        guideCommissionAmount: optionalNumber(item.guideCommissionAmount),
+        guideId: item.guideId,
+        guideName: cleanProductText(item.guideName),
+        headFeeAmount: optionalNumber(item.headFeeAmount),
         itemName: item.itemName.trim(),
+        mealType: cleanProductText(item.mealType),
+        noGuideReport: optionalBoolean(item.noGuideReport),
+        orderScope: cleanProductText(item.orderScope),
+        peopleCount: optionalNumber(item.peopleCount),
+        prepaidAmount: optionalNumber(item.prepaidAmount),
+        projectName: cleanProductText(item.projectName),
+        priceLines: item.priceLines?.length ? (item.priceLines || [])
+          .filter((line) => line.projectName?.trim())
+          .map((line, index) => compactObject({
+            amount: optionalNumber(line.amount),
+            cashAmount: optionalNumber(line.cashAmount),
+            companyRebateAmount: optionalNumber(line.companyRebateAmount),
+            consumptionAmount: optionalNumber(line.consumptionAmount),
+            costPrice: optionalNumber(line.costPrice),
+            creditAmount: optionalNumber(line.creditAmount),
+            guideCommissionAmount: optionalNumber(line.guideCommissionAmount),
+            guideCommissionRate: optionalNumber(line.guideCommissionRate),
+            headFeeAmount: optionalNumber(line.headFeeAmount),
+            projectId: line.projectId,
+            projectName: line.projectName?.trim(),
+            quantity: optionalNumber(line.quantity),
+            remark: cleanProductText(line.remark),
+            salePrice: optionalNumber(line.salePrice),
+            sortOrder: line.sortOrder || index + 1,
+            unitPrice: optionalNumber(line.unitPrice),
+          })) : undefined,
         quantity: Number(item.quantity || 0),
         remark: cleanProductText(item.remark),
+        resourceName: cleanProductText(item.resourceName),
+        responsibleEmployeeId: item.responsibleEmployeeId,
+        responsibleEmployeeName: cleanProductText(item.responsibleEmployeeName),
+        saleAmount: optionalNumber(item.saleAmount),
+        scheduleEndDay: cleanProductText(item.scheduleEndDay),
+        scheduleStartDay: cleanProductText(item.scheduleStartDay),
         settlementType: item.settlementType || 'credit',
+        supplierId: item.supplierId,
+        supplierName: cleanProductText(item.supplierName),
+        totalAmount: optionalNumber(item.totalAmount),
+        trafficType: cleanProductText(item.trafficType),
         unitName: cleanProductText(item.unitName),
         unitPrice: Number(item.unitPrice || 0),
+        vehiclePlate: cleanProductText(item.vehiclePlate),
+        vehicleType: cleanProductText(item.vehicleType),
       })),
     attentionItems: cleanProductText(formState.attentionItems),
     bookingNotice: cleanProductText(formState.bookingNotice),

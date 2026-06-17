@@ -747,88 +747,124 @@ onMounted(async () => {
 
         <Form :model="formState" layout="vertical">
           <div v-show="activeEditTab === 'basic'" class="form-panel">
-            <div class="content-grid">
-              <Form.Item label="产品名称" required>
-                <Input v-model:value="formState.productName" allow-clear placeholder="例如：杭州西湖二日游" />
-              </Form.Item>
-              <Form.Item label="业务类型">
-                <Select
-                  v-model:value="formState.businessType"
-                  allow-clear
-                  :loading="dictionaryLoading"
-                  :options="businessTypeOptions"
-                  placeholder="请选择业务类型"
-                />
-              </Form.Item>
-              <Form.Item label="国内/国际">
-                <Select v-model:value="formState.domesticInternational" :options="domesticOptions" />
-              </Form.Item>
-              <Form.Item label="接团城市">
-                <Cascader
-                  v-model:value="formRegionPath"
-                  allow-clear
-                  change-on-select
-                  :options="regionOptions"
-                  placeholder="可选择省 / 市 / 区县"
-                  show-search
-                />
-              </Form.Item>
-              <Form.Item label="出团类型">
-                <Select v-model:value="formState.tripType" :options="tripTypeOptions" />
-              </Form.Item>
-              <Form.Item label="接待标准">
-                <Select
-                  v-model:value="formState.receptionStandard"
-                  allow-clear
-                  :loading="dictionaryLoading"
-                  :options="receptionStandardOptions"
-                  placeholder="请选择接待标准"
-                />
-              </Form.Item>
-              <Form.Item label="产品主题">
-                <Select
-                  v-model:value="formState.productTheme"
-                  allow-clear
-                  :loading="dictionaryLoading"
-                  :options="productThemeOptions"
-                  placeholder="请选择产品主题"
-                />
-              </Form.Item>
-              <Form.Item label="旅游天数" required>
-                <InputNumber
-                  v-model:value="formState.travelDays"
-                  class="w-full"
-                  :min="1"
-                  @change="handleTravelDaysChange"
-                />
-              </Form.Item>
-              <Form.Item label="截止收客">
-                <InputNumber
-                  v-model:value="formState.closeDaysBefore"
-                  addon-after="天"
-                  class="w-full"
-                  :min="0"
-                />
-              </Form.Item>
-              <Form.Item label="单人房差">
-                <InputNumber
-                  v-model:value="formState.singleRoomDifference"
-                  class="w-full"
-                  :min="0"
-                  :precision="2"
-                  prefix="¥"
-                />
-              </Form.Item>
-              <Form.Item label="预控人数">
-                <InputNumber v-model:value="formState.plannedCapacity" class="w-full" :min="0" />
-              </Form.Item>
-              <Form.Item label="状态">
-                <Select v-model:value="formState.status" :options="statusOptions" />
-              </Form.Item>
+            <div class="product-basic-matrix-layout">
+              <aside class="product-basic-side-label">基本信息</aside>
+              <div class="product-basic-main">
+                <div class="product-basic-row">
+                  <div class="product-basic-label">业务类型</div>
+                  <div class="product-basic-field">
+                    <Select
+                      v-model:value="formState.businessType"
+                      allow-clear
+                      :loading="dictionaryLoading"
+                      :options="businessTypeOptions"
+                      placeholder="请选择业务类型"
+                    />
+                  </div>
+                  <div class="product-basic-label">国内/国际</div>
+                  <div class="product-basic-field">
+                    <Select v-model:value="formState.domesticInternational" :options="domesticOptions" />
+                  </div>
+                </div>
+
+                <div class="product-basic-row single">
+                  <div class="product-basic-label required">线路名称</div>
+                  <div class="product-basic-field">
+                    <Input v-model:value="formState.productName" allow-clear placeholder="例如：杭州西湖二日游" />
+                  </div>
+                </div>
+
+                <div class="product-basic-row">
+                  <div class="product-basic-label">接团城市</div>
+                  <div class="product-basic-field">
+                    <Cascader
+                      v-model:value="formRegionPath"
+                      allow-clear
+                      change-on-select
+                      :options="regionOptions"
+                      placeholder="可选择省 / 市 / 区县"
+                      show-search
+                    />
+                  </div>
+                  <div class="product-basic-label">出团类型</div>
+                  <div class="product-basic-field">
+                    <Select v-model:value="formState.tripType" :options="tripTypeOptions" />
+                  </div>
+                </div>
+
+                <div class="product-basic-row">
+                  <div class="product-basic-label">接待标准</div>
+                  <div class="product-basic-field">
+                    <Select
+                      v-model:value="formState.receptionStandard"
+                      allow-clear
+                      :loading="dictionaryLoading"
+                      :options="receptionStandardOptions"
+                      placeholder="请选择接待标准"
+                    />
+                  </div>
+                  <div class="product-basic-label">产品主题</div>
+                  <div class="product-basic-field">
+                    <Select
+                      v-model:value="formState.productTheme"
+                      allow-clear
+                      :loading="dictionaryLoading"
+                      :options="productThemeOptions"
+                      placeholder="请选择产品主题"
+                    />
+                  </div>
+                </div>
+
+                <div class="product-basic-row quarters">
+                  <div class="product-basic-label required">旅游天数</div>
+                  <div class="product-basic-field">
+                    <InputNumber
+                      v-model:value="formState.travelDays"
+                      class="w-full"
+                      :min="1"
+                      @change="handleTravelDaysChange"
+                    />
+                  </div>
+                  <div class="product-basic-label">截止收客</div>
+                  <div class="product-basic-field">
+                    <InputNumber
+                      v-model:value="formState.closeDaysBefore"
+                      addon-after="天"
+                      class="w-full"
+                      :min="0"
+                    />
+                  </div>
+                </div>
+
+                <div class="product-basic-row quarters">
+                  <div class="product-basic-label">单人房差</div>
+                  <div class="product-basic-field">
+                    <InputNumber
+                      v-model:value="formState.singleRoomDifference"
+                      class="w-full"
+                      :min="0"
+                      :precision="2"
+                      prefix="¥"
+                    />
+                  </div>
+                  <div class="product-basic-label">预控人数</div>
+                  <div class="product-basic-field">
+                    <InputNumber v-model:value="formState.plannedCapacity" class="w-full" :min="0" />
+                  </div>
+                </div>
+
+                <div class="product-basic-row">
+                  <div class="product-basic-label">状态</div>
+                  <div class="product-basic-field">
+                    <Select v-model:value="formState.status" :options="statusOptions" />
+                  </div>
+                  <div class="product-basic-label">备注</div>
+                  <div class="product-basic-field">
+                    <Textarea v-model:value="formState.remark" :auto-size="{ minRows: 2, maxRows: 4 }" />
+                  </div>
+                </div>
+              </div>
             </div>
-            <Form.Item label="备注">
-              <Textarea v-model:value="formState.remark" :auto-size="{ minRows: 2, maxRows: 4 }" />
-            </Form.Item>
           </div>
 
           <div v-show="activeEditTab === 'itinerary'" class="form-panel">
@@ -1083,11 +1119,6 @@ onMounted(async () => {
       </Card>
     </Spin>
 
-    <div class="fixed-action-bar">
-      <Button @click="goBack">返回</Button>
-      <Button type="primary" :loading="saving" @click="saveProduct">保存产品</Button>
-    </div>
-
     <Drawer
       v-model:open="roadbookDrawerOpen"
       class="roadbook-workspace-drawer"
@@ -1248,6 +1279,96 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 18px;
+}
+
+.product-basic-matrix-layout {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+}
+
+.product-basic-side-label {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  min-height: 430px;
+  padding: 26px 18px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #334155;
+  background: #fff;
+  border-right: 1px solid #e5e7eb;
+}
+
+.product-basic-main {
+  min-width: 0;
+  background: #fff;
+}
+
+.product-basic-row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) 120px minmax(0, 1fr);
+  min-height: 58px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.product-basic-row:last-child {
+  border-bottom: 0;
+}
+
+.product-basic-row.single {
+  grid-template-columns: 120px minmax(0, 1fr);
+}
+
+.product-basic-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #334155;
+  text-align: center;
+  background: #f8fafc;
+  border-right: 1px solid #e5e7eb;
+}
+
+.product-basic-label.required::after {
+  margin-left: 4px;
+  color: #f5222d;
+  content: '*';
+}
+
+.product-basic-field {
+  min-width: 0;
+  padding: 11px 12px;
+  border-right: 1px solid #e5e7eb;
+}
+
+.product-basic-field:last-child {
+  border-right: 0;
+}
+
+.product-basic-field :deep(.ant-input),
+.product-basic-field :deep(.ant-input-number),
+.product-basic-field :deep(.ant-select-selector),
+.product-basic-field :deep(.ant-cascader-picker),
+.product-basic-field :deep(.ant-input-affix-wrapper) {
+  width: 100%;
+}
+
+.product-basic-field :deep(.ant-input),
+.product-basic-field :deep(.ant-input-number),
+.product-basic-field :deep(.ant-select-selector),
+.product-basic-field :deep(.ant-input-affix-wrapper) {
+  border-color: #dbe4f0;
+  border-radius: 4px;
+}
+
+.product-basic-field :deep(textarea.ant-input) {
+  min-height: 34px;
 }
 
 .section-toolbar {
@@ -1755,20 +1876,6 @@ onMounted(async () => {
   max-width: 760px;
 }
 
-.fixed-action-bar {
-  position: fixed;
-  right: 24px;
-  bottom: 20px;
-  z-index: 20;
-  display: flex;
-  gap: 10px;
-  padding: 10px 14px;
-  background: rgb(255 255 255 / 96%);
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  box-shadow: 0 10px 30px rgb(15 23 42 / 12%);
-}
-
 @media (max-width: 900px) {
   .form-header {
     flex-direction: column;
@@ -1776,6 +1883,30 @@ onMounted(async () => {
 
   .content-grid {
     grid-template-columns: 1fr;
+  }
+
+  .product-basic-matrix-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .product-basic-side-label {
+    min-height: auto;
+    padding: 14px;
+    border-right: 0;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .product-basic-row,
+  .product-basic-row.single {
+    grid-template-columns: 110px minmax(0, 1fr);
+  }
+
+  .product-basic-row .product-basic-label:nth-of-type(2) {
+    border-left: 0;
+  }
+
+  .product-basic-field {
+    border-right: 0;
   }
 
   .roadbook-workspace {

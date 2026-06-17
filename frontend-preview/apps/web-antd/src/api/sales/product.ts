@@ -17,6 +17,7 @@ export namespace SalesProductApi {
   export type SettlementType = 'cash' | 'credit';
   export type Status = 'active' | 'disabled';
   export type TripType = 'daily' | 'irregular' | 'weekly';
+  export type AllocationMode = 'group_order_average' | 'multi_order_average';
 
   export interface ItineraryDay {
     accommodationNote?: string;
@@ -89,14 +90,70 @@ export namespace SalesProductApi {
   }
 
   export interface ArrangementItem {
+    allocationMode?: AllocationMode;
+    arrivalPlace?: string;
     arrangementContent?: string;
     arrangementType: ArrangementType;
+    cashAmount?: number;
+    companyRebateAmount?: number;
+    confirmed?: boolean;
+    confirmationNo?: string;
+    consumptionAmount?: number;
+    costAmount?: number;
+    creditAmount?: number;
+    daysCount?: number;
+    departurePlace?: string;
+    driverName?: string;
+    fundIncluded?: string;
+    guideCommissionAmount?: number;
+    guideId?: number;
+    guideName?: string;
+    headFeeAmount?: number;
     id?: number;
     itemName: string;
+    mealType?: string;
+    noGuideReport?: boolean;
+    orderScope?: string;
+    peopleCount?: number;
+    prepaidAmount?: number;
+    projectName?: string;
+    priceLines?: ArrangementPriceLine[];
     quantity?: number;
     remark?: string;
+    resourceName?: string;
+    responsibleEmployeeId?: number;
+    responsibleEmployeeName?: string;
+    saleAmount?: number;
+    scheduleEndDay?: string;
+    scheduleStartDay?: string;
     settlementType?: SettlementType;
+    supplierId?: number;
+    supplierName?: string;
+    totalAmount?: number;
+    trafficType?: string;
     unitName?: string;
+    unitPrice?: number;
+    vehiclePlate?: string;
+    vehicleType?: string;
+  }
+
+  export interface ArrangementPriceLine {
+    amount?: number;
+    cashAmount?: number;
+    companyRebateAmount?: number;
+    consumptionAmount?: number;
+    costPrice?: number;
+    creditAmount?: number;
+    guideCommissionAmount?: number;
+    guideCommissionRate?: number;
+    headFeeAmount?: number;
+    id?: number;
+    projectId?: number;
+    projectName?: string;
+    quantity?: number;
+    remark?: string;
+    salePrice?: number;
+    sortOrder?: number;
     unitPrice?: number;
   }
 

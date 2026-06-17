@@ -6,6 +6,8 @@ import com.mtravel.platform.common.BusinessCrudService;
 import com.mtravel.platform.common.PageResult;
 import com.mtravel.platform.sales.product.dto.SalesProductArrangementItemRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductArrangementItemResponse;
+import com.mtravel.platform.sales.product.dto.SalesProductArrangementPriceLineRequest;
+import com.mtravel.platform.sales.product.dto.SalesProductArrangementPriceLineResponse;
 import com.mtravel.platform.sales.product.dto.SalesProductItineraryDayRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductItineraryDayResponse;
 import com.mtravel.platform.sales.product.dto.SalesProductRoadbookPointRequest;
@@ -13,6 +15,7 @@ import com.mtravel.platform.sales.product.dto.SalesProductRoadbookPointResponse;
 import com.mtravel.platform.sales.product.dto.SalesProductResponse;
 import com.mtravel.platform.sales.product.dto.SalesProductSaveRequest;
 import com.mtravel.platform.sales.product.entity.SalesProductArrangementItemEntity;
+import com.mtravel.platform.sales.product.entity.SalesProductArrangementPriceLineEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductDescriptionEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductItineraryDayEntity;
@@ -23,6 +26,7 @@ import com.mtravel.platform.sales.product.enums.SalesProductSettlementType;
 import com.mtravel.platform.sales.product.enums.SalesProductStatus;
 import com.mtravel.platform.sales.product.enums.SalesProductTripType;
 import com.mtravel.platform.sales.product.mapper.SalesProductArrangementItemMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductArrangementPriceLineMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductDescriptionMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductItineraryDayMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductMapper;
@@ -51,6 +55,7 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
     private final SalesProductItineraryDayMapper itineraryMapper;
     private final SalesProductDescriptionMapper descriptionMapper;
     private final SalesProductArrangementItemMapper arrangementMapper;
+    private final SalesProductArrangementPriceLineMapper priceLineMapper;
     private final SalesProductRoadbookPointMapper roadbookMapper;
 
     public SalesProductService(
@@ -58,6 +63,7 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
             SalesProductItineraryDayMapper itineraryMapper,
             SalesProductDescriptionMapper descriptionMapper,
             SalesProductArrangementItemMapper arrangementMapper,
+            SalesProductArrangementPriceLineMapper priceLineMapper,
             SalesProductRoadbookPointMapper roadbookMapper
     ) {
         super(productMapper);
@@ -65,6 +71,7 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
         this.itineraryMapper = itineraryMapper;
         this.descriptionMapper = descriptionMapper;
         this.arrangementMapper = arrangementMapper;
+        this.priceLineMapper = priceLineMapper;
         this.roadbookMapper = roadbookMapper;
     }
 
@@ -317,10 +324,85 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
             entity.setUnitPrice(decimal(item.unitPrice()));
             entity.setUnitName(clean(item.unitName()));
             entity.setSettlementType(SalesProductSettlementType.fromValueOrDefault(item.settlementType()).getValue());
+            entity.setAllocationMode(clean(item.allocationMode()));
+            entity.setScheduleStartDay(clean(item.scheduleStartDay()));
+            entity.setScheduleEndDay(clean(item.scheduleEndDay()));
+            entity.setDeparturePlace(clean(item.departurePlace()));
+            entity.setArrivalPlace(clean(item.arrivalPlace()));
+            entity.setDaysCount(number(item.daysCount()));
+            entity.setResourceName(clean(item.resourceName()));
+            entity.setSupplierId(item.supplierId());
+            entity.setSupplierName(clean(item.supplierName()));
+            entity.setDriverName(clean(item.driverName()));
+            entity.setVehiclePlate(clean(item.vehiclePlate()));
+            entity.setTrafficType(clean(item.trafficType()));
+            entity.setVehicleType(clean(item.vehicleType()));
+            entity.setMealType(clean(item.mealType()));
+            entity.setFundIncluded(clean(item.fundIncluded()));
+            entity.setConfirmed(Boolean.TRUE.equals(item.confirmed()));
+            entity.setConfirmationNo(clean(item.confirmationNo()));
+            entity.setGuideId(item.guideId());
+            entity.setGuideName(clean(item.guideName()));
+            entity.setResponsibleEmployeeId(item.responsibleEmployeeId());
+            entity.setResponsibleEmployeeName(clean(item.responsibleEmployeeName()));
+            entity.setOrderScope(StringUtils.hasText(item.orderScope()) ? clean(item.orderScope()) : "=不关联订单=");
+            entity.setTotalAmount(decimal(item.totalAmount()));
+            entity.setCashAmount(decimal(item.cashAmount()));
+            entity.setCreditAmount(decimal(item.creditAmount()));
+            entity.setPrepaidAmount(decimal(item.prepaidAmount()));
+            entity.setSaleAmount(decimal(item.saleAmount()));
+            entity.setCostAmount(decimal(item.costAmount()));
+            entity.setGuideCommissionAmount(decimal(item.guideCommissionAmount()));
+            entity.setCompanyRebateAmount(decimal(item.companyRebateAmount()));
+            entity.setHeadFeeAmount(decimal(item.headFeeAmount()));
+            entity.setConsumptionAmount(decimal(item.consumptionAmount()));
+            entity.setPeopleCount(decimal(item.peopleCount()));
+            entity.setNoGuideReport(Boolean.TRUE.equals(item.noGuideReport()));
             entity.setRemark(clean(item.remark()));
             entity.setCreatedBy(operator);
             entity.setIsDeleted(false);
             arrangementMapper.insert(entity);
+            saveArrangementPriceLines(productId, entity.getId(), item.priceLines(), tenantId, operator);
+        }
+    }
+
+    /** 保存团队安排下的价格明细行。 */
+    private void saveArrangementPriceLines(
+            Long productId,
+            Long arrangementItemId,
+            List<SalesProductArrangementPriceLineRequest> priceLines,
+            Long tenantId,
+            String operator
+    ) {
+        if (priceLines == null) {
+            return;
+        }
+        int index = 1;
+        for (SalesProductArrangementPriceLineRequest item : priceLines) {
+            SalesProductArrangementPriceLineEntity entity = new SalesProductArrangementPriceLineEntity();
+            entity.setTenantId(tenantId);
+            entity.setProductId(productId);
+            entity.setArrangementItemId(arrangementItemId);
+            entity.setProjectId(item.projectId());
+            entity.setProjectName(clean(item.projectName()));
+            entity.setUnitPrice(decimal(item.unitPrice()));
+            entity.setQuantity(decimal(item.quantity()));
+            entity.setAmount(decimal(item.amount()));
+            entity.setSalePrice(decimal(item.salePrice()));
+            entity.setCostPrice(decimal(item.costPrice()));
+            entity.setCashAmount(decimal(item.cashAmount()));
+            entity.setCreditAmount(decimal(item.creditAmount()));
+            entity.setGuideCommissionAmount(decimal(item.guideCommissionAmount()));
+            entity.setGuideCommissionRate(decimal(item.guideCommissionRate()));
+            entity.setCompanyRebateAmount(decimal(item.companyRebateAmount()));
+            entity.setHeadFeeAmount(decimal(item.headFeeAmount()));
+            entity.setConsumptionAmount(decimal(item.consumptionAmount()));
+            entity.setSortOrder(item.sortOrder() == null ? index : item.sortOrder());
+            entity.setRemark(clean(item.remark()));
+            entity.setCreatedBy(operator);
+            entity.setIsDeleted(false);
+            priceLineMapper.insert(entity);
+            index++;
         }
     }
 
@@ -344,6 +426,12 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
         arrangement.setDeletedAt(now);
         arrangement.setDeletedBy(operator);
         arrangementMapper.update(arrangement, childUpdate(tenantId, productId));
+
+        SalesProductArrangementPriceLineEntity priceLine = new SalesProductArrangementPriceLineEntity();
+        priceLine.setIsDeleted(true);
+        priceLine.setDeletedAt(now);
+        priceLine.setDeletedBy(operator);
+        priceLineMapper.update(priceLine, childUpdate(tenantId, productId));
 
         SalesProductRoadbookPointEntity roadbook = new SalesProductRoadbookPointEntity();
         roadbook.setIsDeleted(true);
@@ -424,15 +512,31 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
                         roadbookByDay.getOrDefault(item.getDayNo(), List.of())
                 ))
                 .toList();
+        List<SalesProductArrangementPriceLineEntity> priceLines = priceLineMapper.selectList(
+                new QueryWrapper<SalesProductArrangementPriceLineEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("product_id", productId)
+                        .eq("is_deleted", false)
+                        .orderByAsc("arrangement_item_id")
+                        .orderByAsc("sort_order")
+                        .orderByAsc("id"));
+        Map<Long, List<SalesProductArrangementPriceLineResponse>> priceLinesByItem = priceLines.stream()
+                .collect(Collectors.groupingBy(
+                        SalesProductArrangementPriceLineEntity::getArrangementItemId,
+                        Collectors.mapping(SalesProductArrangementPriceLineResponse::fromEntity, Collectors.toList())
+                ));
         List<SalesProductArrangementItemResponse> arrangementItems = arrangementMapper.selectList(
-                        new QueryWrapper<SalesProductArrangementItemEntity>()
-                                .eq("tenant_id", tenantId)
-                                .eq("product_id", productId)
-                                .eq("is_deleted", false)
-                                .orderByAsc("arrangement_type")
-                                .orderByAsc("id"))
+                new QueryWrapper<SalesProductArrangementItemEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("product_id", productId)
+                        .eq("is_deleted", false)
+                        .orderByAsc("arrangement_type")
+                        .orderByAsc("id"))
                 .stream()
-                .map(SalesProductArrangementItemResponse::fromEntity)
+                .map(item -> SalesProductArrangementItemResponse.fromEntity(
+                        item,
+                        priceLinesByItem.getOrDefault(item.getId(), List.of())
+                ))
                 .toList();
         return SalesProductResponse.fromDetail(product, description, itineraryDays, arrangementItems);
     }

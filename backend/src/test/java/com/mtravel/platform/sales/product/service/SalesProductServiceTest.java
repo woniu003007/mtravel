@@ -3,16 +3,19 @@ package com.mtravel.platform.sales.product.service;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.mtravel.platform.common.BizException;
 import com.mtravel.platform.sales.product.dto.SalesProductArrangementItemRequest;
+import com.mtravel.platform.sales.product.dto.SalesProductArrangementPriceLineRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductItineraryDayRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductRoadbookPointRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductResponse;
 import com.mtravel.platform.sales.product.dto.SalesProductSaveRequest;
 import com.mtravel.platform.sales.product.entity.SalesProductArrangementItemEntity;
+import com.mtravel.platform.sales.product.entity.SalesProductArrangementPriceLineEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductDescriptionEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductItineraryDayEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductRoadbookPointEntity;
 import com.mtravel.platform.sales.product.mapper.SalesProductArrangementItemMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductArrangementPriceLineMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductDescriptionMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductItineraryDayMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductMapper;
@@ -44,12 +47,14 @@ class SalesProductServiceTest {
         SalesProductItineraryDayMapper itineraryMapper = mock(SalesProductItineraryDayMapper.class);
         SalesProductDescriptionMapper descriptionMapper = mock(SalesProductDescriptionMapper.class);
         SalesProductArrangementItemMapper arrangementMapper = mock(SalesProductArrangementItemMapper.class);
+        SalesProductArrangementPriceLineMapper priceLineMapper = mock(SalesProductArrangementPriceLineMapper.class);
         SalesProductRoadbookPointMapper roadbookMapper = mock(SalesProductRoadbookPointMapper.class);
-        SalesProductService service = service(productMapper, itineraryMapper, descriptionMapper, arrangementMapper, roadbookMapper);
+        SalesProductService service = service(productMapper, itineraryMapper, descriptionMapper, arrangementMapper, priceLineMapper, roadbookMapper);
         ArgumentCaptor<SalesProductEntity> productCaptor = ArgumentCaptor.forClass(SalesProductEntity.class);
         ArgumentCaptor<SalesProductItineraryDayEntity> itineraryCaptor = ArgumentCaptor.forClass(SalesProductItineraryDayEntity.class);
         ArgumentCaptor<SalesProductDescriptionEntity> descriptionCaptor = ArgumentCaptor.forClass(SalesProductDescriptionEntity.class);
         ArgumentCaptor<SalesProductArrangementItemEntity> arrangementCaptor = ArgumentCaptor.forClass(SalesProductArrangementItemEntity.class);
+        ArgumentCaptor<SalesProductArrangementPriceLineEntity> priceLineCaptor = ArgumentCaptor.forClass(SalesProductArrangementPriceLineEntity.class);
         ArgumentCaptor<SalesProductRoadbookPointEntity> roadbookCaptor = ArgumentCaptor.forClass(SalesProductRoadbookPointEntity.class);
         when(productMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
         when(productMapper.insert(any(SalesProductEntity.class))).thenAnswer((Answer<Integer>) invocation -> {
@@ -70,6 +75,12 @@ class SalesProductServiceTest {
         when(itineraryMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
         when(descriptionMapper.selectOne(any(Wrapper.class))).thenReturn(null);
         when(arrangementMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(priceLineMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(arrangementMapper.insert(any(SalesProductArrangementItemEntity.class))).thenAnswer((Answer<Integer>) invocation -> {
+            SalesProductArrangementItemEntity entity = invocation.getArgument(0);
+            entity.setId(9901L);
+            return 1;
+        });
 
         SalesProductResponse response = service.create(request(), 1L, "admin");
 
@@ -92,6 +103,15 @@ class SalesProductServiceTest {
         verify(arrangementMapper).insert(arrangementCaptor.capture());
         assertThat(arrangementCaptor.getValue().getArrangementType()).isEqualTo("hotel");
         assertThat(arrangementCaptor.getValue().getSettlementType()).isEqualTo("credit");
+        assertThat(arrangementCaptor.getValue().getScheduleStartDay()).isEqualTo("第1天");
+        assertThat(arrangementCaptor.getValue().getScheduleEndDay()).isEqualTo("第2天");
+        assertThat(arrangementCaptor.getValue().getSupplierName()).isEqualTo("苏州酒店供应商");
+        assertThat(arrangementCaptor.getValue().getCashAmount()).isEqualByComparingTo("20.00");
+        assertThat(arrangementCaptor.getValue().getCreditAmount()).isEqualByComparingTo("200.00");
+        verify(priceLineMapper).insert(priceLineCaptor.capture());
+        assertThat(priceLineCaptor.getValue().getArrangementItemId()).isEqualTo(9901L);
+        assertThat(priceLineCaptor.getValue().getProjectName()).isEqualTo("标间");
+        assertThat(priceLineCaptor.getValue().getAmount()).isEqualByComparingTo("220.00");
     }
 
     @Test
@@ -102,6 +122,7 @@ class SalesProductServiceTest {
                 mock(SalesProductItineraryDayMapper.class),
                 mock(SalesProductDescriptionMapper.class),
                 mock(SalesProductArrangementItemMapper.class),
+                mock(SalesProductArrangementPriceLineMapper.class),
                 mock(SalesProductRoadbookPointMapper.class)
         );
         when(productMapper.selectCount(any(Wrapper.class))).thenReturn(1L);
@@ -116,9 +137,10 @@ class SalesProductServiceTest {
             SalesProductItineraryDayMapper itineraryMapper,
             SalesProductDescriptionMapper descriptionMapper,
             SalesProductArrangementItemMapper arrangementMapper,
+            SalesProductArrangementPriceLineMapper priceLineMapper,
             SalesProductRoadbookPointMapper roadbookMapper
     ) {
-        return new SalesProductService(productMapper, itineraryMapper, descriptionMapper, arrangementMapper, roadbookMapper);
+        return new SalesProductService(productMapper, itineraryMapper, descriptionMapper, arrangementMapper, priceLineMapper, roadbookMapper);
     }
 
     private SalesProductSaveRequest request() {
@@ -182,7 +204,59 @@ class SalesProductServiceTest {
                         new BigDecimal("220.00"),
                         "间夜",
                         "credit",
-                        "按确认占房执行"
+                        "按确认占房执行",
+                        "group_order_average",
+                        "第1天",
+                        "第2天",
+                        null,
+                        null,
+                        2,
+                        "苏州四钻酒店",
+                        1001L,
+                        "苏州酒店供应商",
+                        null,
+                        null,
+                        null,
+                        null,
+                        "桌早",
+                        "不含",
+                        true,
+                        "HT20260617001",
+                        null,
+                        null,
+                        3001L,
+                        "张房调",
+                        "=不关联订单=",
+                        new BigDecimal("220.00"),
+                        new BigDecimal("20.00"),
+                        new BigDecimal("200.00"),
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        false,
+                        List.of(new SalesProductArrangementPriceLineRequest(
+                                501L,
+                                "标间",
+                                new BigDecimal("220.00"),
+                                BigDecimal.ONE,
+                                new BigDecimal("220.00"),
+                                BigDecimal.ZERO,
+                                BigDecimal.ZERO,
+                                new BigDecimal("20.00"),
+                                new BigDecimal("200.00"),
+                                BigDecimal.ZERO,
+                                BigDecimal.ZERO,
+                                BigDecimal.ZERO,
+                                BigDecimal.ZERO,
+                                BigDecimal.ZERO,
+                                1,
+                                "按确认占房执行"
+                        ))
                 )),
                 "测试产品"
         );

@@ -212,6 +212,40 @@ CREATE TABLE IF NOT EXISTS sales_product_arrangement_items (
   is_deleted boolean NOT NULL DEFAULT false,
   deleted_at timestamptz,
   deleted_by varchar(64),
+  allocation_mode varchar(40),
+  schedule_start_day varchar(40),
+  schedule_end_day varchar(40),
+  departure_place varchar(120),
+  arrival_place varchar(120),
+  days_count integer NOT NULL DEFAULT 0,
+  resource_name varchar(200),
+  supplier_id bigint,
+  supplier_name varchar(200),
+  driver_name varchar(100),
+  vehicle_plate varchar(40),
+  traffic_type varchar(40),
+  vehicle_type varchar(40),
+  meal_type varchar(40),
+  fund_included varchar(40),
+  confirmed boolean NOT NULL DEFAULT false,
+  confirmation_no varchar(100),
+  guide_id bigint,
+  guide_name varchar(100),
+  responsible_employee_id bigint,
+  responsible_employee_name varchar(100),
+  order_scope varchar(120) NOT NULL DEFAULT '=不关联订单=',
+  total_amount numeric(12,2) NOT NULL DEFAULT 0,
+  cash_amount numeric(12,2) NOT NULL DEFAULT 0,
+  credit_amount numeric(12,2) NOT NULL DEFAULT 0,
+  prepaid_amount numeric(12,2) NOT NULL DEFAULT 0,
+  sale_amount numeric(12,2) NOT NULL DEFAULT 0,
+  cost_amount numeric(12,2) NOT NULL DEFAULT 0,
+  guide_commission_amount numeric(12,2) NOT NULL DEFAULT 0,
+  company_rebate_amount numeric(12,2) NOT NULL DEFAULT 0,
+  head_fee_amount numeric(12,2) NOT NULL DEFAULT 0,
+  consumption_amount numeric(12,2) NOT NULL DEFAULT 0,
+  people_count numeric(12,2) NOT NULL DEFAULT 0,
+  no_guide_report boolean NOT NULL DEFAULT false,
   CONSTRAINT fk_sales_product_arrangement_product
     FOREIGN KEY (tenant_id, product_id) REFERENCES sales_products (tenant_id, id),
   CONSTRAINT chk_sales_product_arrangement_type CHECK (
@@ -219,7 +253,25 @@ CREATE TABLE IF NOT EXISTS sales_product_arrangement_items (
   ),
   CONSTRAINT chk_sales_product_arrangement_quantity CHECK (quantity >= 0),
   CONSTRAINT chk_sales_product_arrangement_unit_price CHECK (unit_price >= 0),
-  CONSTRAINT chk_sales_product_arrangement_settlement CHECK (settlement_type IN ('cash', 'credit'))
+  CONSTRAINT chk_sales_product_arrangement_settlement CHECK (settlement_type IN ('cash', 'credit')),
+  CONSTRAINT chk_sales_product_arrangement_allocation CHECK (
+    allocation_mode IS NULL OR allocation_mode IN ('group_order_average', 'multi_order_average')
+  ),
+  CONSTRAINT chk_sales_product_arrangement_days CHECK (days_count >= 0),
+  CONSTRAINT chk_sales_product_arrangement_amounts CHECK (
+    total_amount >= 0
+    AND cash_amount >= 0
+    AND credit_amount >= 0
+    AND prepaid_amount >= 0
+    AND sale_amount >= 0
+    AND cost_amount >= 0
+    AND guide_commission_amount >= 0
+    AND company_rebate_amount >= 0
+    AND head_fee_amount >= 0
+    AND consumption_amount >= 0
+    AND people_count >= 0
+  ),
+  CONSTRAINT uk_sales_product_arrangement_tenant_id_id UNIQUE (tenant_id, id)
 );
 
 DROP TRIGGER IF EXISTS trg_sales_product_arrangement_items_updated_at ON sales_product_arrangement_items;
@@ -229,6 +281,119 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE INDEX IF NOT EXISTS idx_sales_product_arrangement_product
   ON sales_product_arrangement_items (tenant_id, is_deleted, product_id, arrangement_type);
+
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS allocation_mode varchar(40);
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS schedule_start_day varchar(40);
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS schedule_end_day varchar(40);
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS departure_place varchar(120);
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS arrival_place varchar(120);
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS days_count integer NOT NULL DEFAULT 0;
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS resource_name varchar(200);
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS supplier_id bigint;
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS supplier_name varchar(200);
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS driver_name varchar(100);
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS vehicle_plate varchar(40);
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS traffic_type varchar(40);
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS vehicle_type varchar(40);
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS meal_type varchar(40);
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS fund_included varchar(40);
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS confirmed boolean NOT NULL DEFAULT false;
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS confirmation_no varchar(100);
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS guide_id bigint;
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS guide_name varchar(100);
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS responsible_employee_id bigint;
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS responsible_employee_name varchar(100);
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS order_scope varchar(120) NOT NULL DEFAULT '=不关联订单=';
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS total_amount numeric(12,2) NOT NULL DEFAULT 0;
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS cash_amount numeric(12,2) NOT NULL DEFAULT 0;
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS credit_amount numeric(12,2) NOT NULL DEFAULT 0;
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS prepaid_amount numeric(12,2) NOT NULL DEFAULT 0;
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS sale_amount numeric(12,2) NOT NULL DEFAULT 0;
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS cost_amount numeric(12,2) NOT NULL DEFAULT 0;
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS guide_commission_amount numeric(12,2) NOT NULL DEFAULT 0;
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS company_rebate_amount numeric(12,2) NOT NULL DEFAULT 0;
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS head_fee_amount numeric(12,2) NOT NULL DEFAULT 0;
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS consumption_amount numeric(12,2) NOT NULL DEFAULT 0;
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS people_count numeric(12,2) NOT NULL DEFAULT 0;
+ALTER TABLE sales_product_arrangement_items ADD COLUMN IF NOT EXISTS no_guide_report boolean NOT NULL DEFAULT false;
+ALTER TABLE sales_product_arrangement_items DROP CONSTRAINT IF EXISTS chk_sales_product_arrangement_allocation;
+ALTER TABLE sales_product_arrangement_items ADD CONSTRAINT chk_sales_product_arrangement_allocation CHECK (
+  allocation_mode IS NULL OR allocation_mode IN ('group_order_average', 'multi_order_average')
+);
+ALTER TABLE sales_product_arrangement_items DROP CONSTRAINT IF EXISTS chk_sales_product_arrangement_days;
+ALTER TABLE sales_product_arrangement_items ADD CONSTRAINT chk_sales_product_arrangement_days CHECK (days_count >= 0);
+ALTER TABLE sales_product_arrangement_items DROP CONSTRAINT IF EXISTS chk_sales_product_arrangement_amounts;
+ALTER TABLE sales_product_arrangement_items ADD CONSTRAINT chk_sales_product_arrangement_amounts CHECK (
+  total_amount >= 0
+  AND cash_amount >= 0
+  AND credit_amount >= 0
+  AND prepaid_amount >= 0
+  AND sale_amount >= 0
+  AND cost_amount >= 0
+  AND guide_commission_amount >= 0
+  AND company_rebate_amount >= 0
+  AND head_fee_amount >= 0
+  AND consumption_amount >= 0
+  AND people_count >= 0
+);
+ALTER TABLE sales_product_arrangement_items DROP CONSTRAINT IF EXISTS uk_sales_product_arrangement_tenant_id_id;
+ALTER TABLE sales_product_arrangement_items ADD CONSTRAINT uk_sales_product_arrangement_tenant_id_id UNIQUE (tenant_id, id);
+
+CREATE TABLE IF NOT EXISTS sales_product_arrangement_price_lines (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  product_id bigint NOT NULL,
+  arrangement_item_id bigint NOT NULL,
+  project_id bigint,
+  project_name varchar(120),
+  unit_price numeric(12,2) NOT NULL DEFAULT 0,
+  quantity numeric(12,2) NOT NULL DEFAULT 0,
+  amount numeric(12,2) NOT NULL DEFAULT 0,
+  sale_price numeric(12,2) NOT NULL DEFAULT 0,
+  cost_price numeric(12,2) NOT NULL DEFAULT 0,
+  cash_amount numeric(12,2) NOT NULL DEFAULT 0,
+  credit_amount numeric(12,2) NOT NULL DEFAULT 0,
+  guide_commission_amount numeric(12,2) NOT NULL DEFAULT 0,
+  guide_commission_rate numeric(8,4) NOT NULL DEFAULT 0,
+  company_rebate_amount numeric(12,2) NOT NULL DEFAULT 0,
+  head_fee_amount numeric(12,2) NOT NULL DEFAULT 0,
+  consumption_amount numeric(12,2) NOT NULL DEFAULT 0,
+  sort_order integer NOT NULL DEFAULT 1,
+  created_by varchar(80),
+  remark text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  is_deleted boolean NOT NULL DEFAULT false,
+  deleted_at timestamptz,
+  deleted_by varchar(64),
+  CONSTRAINT fk_sales_product_arrangement_price_product
+    FOREIGN KEY (tenant_id, product_id) REFERENCES sales_products (tenant_id, id),
+  CONSTRAINT fk_sales_product_arrangement_price_item
+    FOREIGN KEY (tenant_id, arrangement_item_id) REFERENCES sales_product_arrangement_items (tenant_id, id),
+  CONSTRAINT chk_sales_product_arrangement_price_amounts CHECK (
+    unit_price >= 0
+    AND quantity >= 0
+    AND amount >= 0
+    AND sale_price >= 0
+    AND cost_price >= 0
+    AND cash_amount >= 0
+    AND credit_amount >= 0
+    AND guide_commission_amount >= 0
+    AND guide_commission_rate >= 0
+    AND company_rebate_amount >= 0
+    AND head_fee_amount >= 0
+    AND consumption_amount >= 0
+  ),
+  CONSTRAINT chk_sales_product_arrangement_price_sort CHECK (sort_order >= 1)
+);
+
+DROP TRIGGER IF EXISTS trg_sales_product_arrangement_price_lines_updated_at ON sales_product_arrangement_price_lines;
+CREATE TRIGGER trg_sales_product_arrangement_price_lines_updated_at
+BEFORE UPDATE ON sales_product_arrangement_price_lines
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_sales_product_arrangement_price_item
+  ON sales_product_arrangement_price_lines (tenant_id, is_deleted, product_id, arrangement_item_id, sort_order);
 
 COMMENT ON TABLE sales_products IS '销售产品模板主表。用于维护线路产品的基础资料，后续团期和团队从产品模板生成。';
 COMMENT ON COLUMN sales_products.id IS '销售产品主键ID，系统内部使用。';
@@ -335,6 +500,40 @@ COMMENT ON COLUMN sales_product_arrangement_items.quantity IS '默认数量。';
 COMMENT ON COLUMN sales_product_arrangement_items.unit_price IS '默认单价或费用参考。';
 COMMENT ON COLUMN sales_product_arrangement_items.unit_name IS '计量单位。';
 COMMENT ON COLUMN sales_product_arrangement_items.settlement_type IS '结算类型。cash表示现结，credit表示挂账。';
+COMMENT ON COLUMN sales_product_arrangement_items.allocation_mode IS '费用归属模式。group_order_average表示全团或订单均摊，multi_order_average表示多订单均摊成本。';
+COMMENT ON COLUMN sales_product_arrangement_items.schedule_start_day IS '使用开始日期或行程第几天。';
+COMMENT ON COLUMN sales_product_arrangement_items.schedule_end_day IS '使用结束日期或退房日期。';
+COMMENT ON COLUMN sales_product_arrangement_items.departure_place IS '出发地，主要用于大交通安排。';
+COMMENT ON COLUMN sales_product_arrangement_items.arrival_place IS '目的地，主要用于大交通安排。';
+COMMENT ON COLUMN sales_product_arrangement_items.days_count IS '天数、晚数或使用天数。';
+COMMENT ON COLUMN sales_product_arrangement_items.resource_name IS '资源名称，例如酒店、景区、餐厅或购物店。';
+COMMENT ON COLUMN sales_product_arrangement_items.supplier_id IS '供应商ID。';
+COMMENT ON COLUMN sales_product_arrangement_items.supplier_name IS '供应商名称快照，便于历史产品模板回显。';
+COMMENT ON COLUMN sales_product_arrangement_items.driver_name IS '司机姓名或联系方式，主要用于用车安排。';
+COMMENT ON COLUMN sales_product_arrangement_items.vehicle_plate IS '车牌号，主要用于用车安排。';
+COMMENT ON COLUMN sales_product_arrangement_items.traffic_type IS '交通类型，例如飞机、高铁、火车。';
+COMMENT ON COLUMN sales_product_arrangement_items.vehicle_type IS '车型，例如7座、39座、54座。';
+COMMENT ON COLUMN sales_product_arrangement_items.meal_type IS '用餐时间或餐型，例如早餐、中餐、晚餐。';
+COMMENT ON COLUMN sales_product_arrangement_items.fund_included IS '酒店基金是否包含。';
+COMMENT ON COLUMN sales_product_arrangement_items.confirmed IS '是否已确认。';
+COMMENT ON COLUMN sales_product_arrangement_items.confirmation_no IS '确认号。';
+COMMENT ON COLUMN sales_product_arrangement_items.guide_id IS '导游ID。';
+COMMENT ON COLUMN sales_product_arrangement_items.guide_name IS '导游姓名快照。';
+COMMENT ON COLUMN sales_product_arrangement_items.responsible_employee_id IS '责任员工ID，例如房调、车调或计调。';
+COMMENT ON COLUMN sales_product_arrangement_items.responsible_employee_name IS '责任员工名称快照。';
+COMMENT ON COLUMN sales_product_arrangement_items.order_scope IS '订单归属说明。产品模板阶段默认不关联正式订单。';
+COMMENT ON COLUMN sales_product_arrangement_items.total_amount IS '合计成本或总金额。';
+COMMENT ON COLUMN sales_product_arrangement_items.cash_amount IS '现结金额。';
+COMMENT ON COLUMN sales_product_arrangement_items.credit_amount IS '挂账金额。';
+COMMENT ON COLUMN sales_product_arrangement_items.prepaid_amount IS '预付款金额。';
+COMMENT ON COLUMN sales_product_arrangement_items.sale_amount IS '收入合计，主要用于自费项目。';
+COMMENT ON COLUMN sales_product_arrangement_items.cost_amount IS '成本合计。';
+COMMENT ON COLUMN sales_product_arrangement_items.guide_commission_amount IS '导游提成金额。';
+COMMENT ON COLUMN sales_product_arrangement_items.company_rebate_amount IS '公司返佣金额。';
+COMMENT ON COLUMN sales_product_arrangement_items.head_fee_amount IS '人头费金额。';
+COMMENT ON COLUMN sales_product_arrangement_items.consumption_amount IS '消费金额。';
+COMMENT ON COLUMN sales_product_arrangement_items.people_count IS '人数。';
+COMMENT ON COLUMN sales_product_arrangement_items.no_guide_report IS '是否无需导游报账，同步计调审核数据。';
 COMMENT ON COLUMN sales_product_arrangement_items.created_by IS '创建人账号或名称。';
 COMMENT ON COLUMN sales_product_arrangement_items.remark IS '备注。';
 COMMENT ON COLUMN sales_product_arrangement_items.created_at IS '创建时间。';
@@ -343,9 +542,38 @@ COMMENT ON COLUMN sales_product_arrangement_items.is_deleted IS '是否已删除
 COMMENT ON COLUMN sales_product_arrangement_items.deleted_at IS '删除时间。';
 COMMENT ON COLUMN sales_product_arrangement_items.deleted_by IS '删除人账号或名称。';
 
+COMMENT ON TABLE sales_product_arrangement_price_lines IS '销售产品团队安排价格明细表。用于保存团队安排项目下多行价格信息。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.id IS '价格明细主键ID。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.tenant_id IS '租户ID。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.product_id IS '所属销售产品ID。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.arrangement_item_id IS '所属团队安排项目ID。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.project_id IS '费用项目ID。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.project_name IS '费用项目名称。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.unit_price IS '单价。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.quantity IS '数量。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.amount IS '小计金额。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.sale_price IS '自费项目销售单价。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.cost_price IS '自费项目成本单价。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.cash_amount IS '现结金额。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.credit_amount IS '挂账金额。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.guide_commission_amount IS '导游提成金额。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.guide_commission_rate IS '导游提成比例。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.company_rebate_amount IS '公司返佣金额。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.head_fee_amount IS '人头费金额。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.consumption_amount IS '消费金额。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.sort_order IS '排序号，数字越小越靠前。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.created_by IS '创建人账号或名称。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.remark IS '备注。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.created_at IS '创建时间。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.updated_at IS '更新时间。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.is_deleted IS '是否已删除。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.deleted_at IS '删除时间。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.deleted_by IS '删除人账号或名称。';
+
 COMMENT ON INDEX uk_sales_products_tenant_name_active IS '产品名称唯一索引，仅约束同一租户下未删除产品。';
 COMMENT ON INDEX uk_sales_product_itinerary_day_active IS '每日行程唯一索引，仅约束同一产品下未删除行程天数。';
 COMMENT ON INDEX uk_sales_product_descriptions_product_active IS '产品说明唯一索引，仅约束同一产品下未删除说明。';
 COMMENT ON INDEX uk_sales_product_roadbook_point_order_active IS '路书地点顺序唯一索引，仅约束同一产品同一天未删除地点顺序。';
+COMMENT ON INDEX idx_sales_product_arrangement_price_item IS '团队安排价格明细查询索引，用于按产品和安排项回显价格信息。';
 
 COMMIT;
