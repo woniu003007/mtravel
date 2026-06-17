@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 500" role="img" aria-label="旅游接待管理系统业务插画">
+  <defs>
+    <linearGradient id="blob" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#e8f5ff"/>
+      <stop offset="1" stop-color="#eef4ff"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#effbfc"/>
+    </linearGradient>
+    <linearGradient id="primary" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#20c4cd"/>
+      <stop offset="1" stop-color="#0f9aa7"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#8db5ff"/>
+      <stop offset="1" stop-color="#5f7cf0"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#6b7a99" flood-opacity=".18"/>
+    </filter>
+  </defs>
+
+  <path d="M111 111c61-84 150-69 229-35 81 35 132-6 199-12 91-8 142 72 119 164-13 52 16 91 23 139 10 74-59 117-132 92-74-25-127 18-203 13-77-5-110-55-172-63-66-9-126-18-139-80-12-59 43-91 37-143-3-29 17-45 39-75Z" fill="url(#blob)"/>
+
+  <g opacity=".45" stroke="#9fb9ee" stroke-width="2" stroke-linecap="round" stroke-dasharray="7 8" fill="none">
+    <path d="M169 273c79-91 187-124 310-79 47 18 78 42 126 29"/>
+    <path d="M218 337c118-70 233-83 379-23"/>
+    <path d="M262 153c20 74 52 126 117 166"/>
+  </g>
+
+  <g opacity=".28" fill="#8db5ff">
+    <path d="M171 182c18-30 42-43 74-39l-23 72Z"/>
+    <path d="M538 111l68 13-48 24Z"/>
+    <path d="M603 347l62 35-71 5Z"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="176" y="143" width="414" height="260" rx="24" fill="#ffffff"/>
+    <rect x="198" y="169" width="370" height="203" rx="14" fill="url(#screen)" stroke="#cde8ed"/>
+    <rect x="198" y="169" width="370" height="42" rx="14" fill="url(#primary)"/>
+    <rect x="198" y="198" width="370" height="14" fill="#0f9aa7"/>
+
+    <circle cx="226" cy="190" r="6" fill="#ffffff" opacity=".85"/>
+    <rect x="246" y="184" width="60" height="12" rx="6" fill="#ffffff" opacity=".84"/>
+    <rect x="455" y="184" width="84" height="12" rx="6" fill="#ffffff" opacity=".6"/>
+
+    <rect x="221" y="232" width="58" height="52" rx="10" fill="#e9fbfb"/>
+    <rect x="294" y="232" width="58" height="52" rx="10" fill="#eef4ff"/>
+    <rect x="367" y="232" width="58" height="52" rx="10" fill="#e9fbfb"/>
+    <rect x="440" y="232" width="58" height="52" rx="10" fill="#eef4ff"/>
+    <rect x="513" y="232" width="32" height="52" rx="10" fill="#e9fbfb"/>
+
+    <g fill="url(#primary)">
+      <rect x="238" y="253" width="24" height="20" rx="5"/>
+      <rect x="311" y="248" width="24" height="25" rx="5"/>
+      <rect x="384" y="243" width="24" height="30" rx="5"/>
+      <rect x="457" y="250" width="24" height="23" rx="5"/>
+      <rect x="520" y="246" width="14" height="27" rx="4"/>
+    </g>
+
+    <rect x="221" y="310" width="150" height="12" rx="6" fill="#c8d8ef"/>
+    <rect x="221" y="334" width="214" height="12" rx="6" fill="#dbe7f7"/>
+    <rect x="392" y="310" width="138" height="36" rx="10" fill="#e8f5ff"/>
+    <rect x="411" y="321" width="92" height="10" rx="5" fill="url(#accent)" opacity=".72"/>
+  </g>
+
+  <g>
+    <rect x="327" y="401" width="112" height="18" rx="9" fill="#bdd2ee"/>
+    <rect x="286" y="420" width="194" height="18" rx="9" fill="#9fb9ee"/>
+  </g>
+
+  <g transform="translate(109 255)">
+    <circle cx="55" cy="31" r="23" fill="#ffbd59"/>
+    <path d="M34 64c15-18 40-20 56-3 11 13 11 42 4 78H29c-7-38-5-62 5-75Z" fill="#20c4cd"/>
+    <path d="M75 95c45-29 72-52 95-74" stroke="#20c4cd" stroke-width="14" stroke-linecap="round"/>
+    <path d="M93 137l-10 76" stroke="#5f7cf0" stroke-width="18" stroke-linecap="round"/>
+    <path d="M41 137l-14 76" stroke="#34458f" stroke-width="18" stroke-linecap="round"/>
+    <path d="M91 95c21 8 38 18 53 34" stroke="#20c4cd" stroke-width="14" stroke-linecap="round"/>
+    <rect x="132" y="108" width="46" height="34" rx="7" fill="#34458f"/>
+  </g>
+
+  <g transform="translate(586 253)">
+    <circle cx="33" cy="30" r="22" fill="#ffbd59"/>
+    <path d="M12 63c18-17 45-16 58 3 8 12 8 36 2 70H9C2 101 2 76 12 63Z" fill="#5f7cf0"/>
+    <path d="M18 92c-36-11-58-28-76-52" stroke="#5f7cf0" stroke-width="14" stroke-linecap="round"/>
+    <path d="M72 92c34-7 54-24 69-50" stroke="#5f7cf0" stroke-width="14" stroke-linecap="round"/>
+    <path d="M23 134l-4 75" stroke="#34458f" stroke-width="18" stroke-linecap="round"/>
+    <path d="M59 134l21 75" stroke="#5f7cf0" stroke-width="18" stroke-linecap="round"/>
+  </g>
+
+  <g opacity=".5" fill="none" stroke="#8db5ff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M126 415h128"/>
+    <path d="M514 415h139"/>
+    <path d="M80 438h604"/>
+  </g>
+
+  <g transform="translate(496 77)" opacity=".68" fill="none" stroke="#9fb9ee" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M0 41h128"/>
+    <path d="M21 41c8-24 28-38 52-38h22c25 0 47 15 57 38"/>
+    <circle cx="37" cy="47" r="14"/>
+    <circle cx="111" cy="47" r="14"/>
+  </g>
+
+  <g transform="translate(130 77)" opacity=".65" fill="none" stroke="#9fb9ee" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 65V31l28-20 29 20v34"/>
+    <path d="M18 65h82"/>
+    <path d="M46 65V44h22v21"/>
+  </g>
+</svg>

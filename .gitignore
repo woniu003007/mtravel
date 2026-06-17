@@ -1,0 +1,64 @@
+# macOS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# logs / temp
+*.log
+logs/
+__pycache__/
+*.py[cod]
+.cache/
+.temp/
+.turbo/
+.vite/
+.stylelintcache
+.eslintcache
+
+# local agents / browser caches
+.omx/
+.playwright-cli/
+.playwright-mcp/
+.agent/
+.agents/
+.claude/
+.codex/
+
+# dependencies
+node_modules/
+**/node_modules/
+
+# frontend build output
+dist/
+dist-ssr/
+dev-dist/
+.nitro/
+.output/
+coverage/
+*.local
+*.zip
+*.tar
+*.war
+
+# backend build/runtime output
+backend/target/
+backend/data/
+backend/logs/
+
+# environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+
+# generated deliverable output, can be regenerated from scripts/source docs
+output/
+outputs/
+
+# local backups
+backups/

@@ -1,0 +1,190 @@
+package com.mtravel.platform.sales.product.service;
+
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.mtravel.platform.common.BizException;
+import com.mtravel.platform.sales.product.dto.SalesProductArrangementItemRequest;
+import com.mtravel.platform.sales.product.dto.SalesProductItineraryDayRequest;
+import com.mtravel.platform.sales.product.dto.SalesProductRoadbookPointRequest;
+import com.mtravel.platform.sales.product.dto.SalesProductResponse;
+import com.mtravel.platform.sales.product.dto.SalesProductSaveRequest;
+import com.mtravel.platform.sales.product.entity.SalesProductArrangementItemEntity;
+import com.mtravel.platform.sales.product.entity.SalesProductDescriptionEntity;
+import com.mtravel.platform.sales.product.entity.SalesProductEntity;
+import com.mtravel.platform.sales.product.entity.SalesProductItineraryDayEntity;
+import com.mtravel.platform.sales.product.entity.SalesProductRoadbookPointEntity;
+import com.mtravel.platform.sales.product.mapper.SalesProductArrangementItemMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductDescriptionMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductItineraryDayMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductRoadbookPointMapper;
+import java.math.BigDecimal;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.stubbing.Answer;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * 销售产品服务测试。
+ *
+ * <p>产品管理是线路模板，不是轻量商品列表。本测试固定产品主档、行程、产品说明和团队安排
+ * 四块数据一起保存的行为，避免后续把老系统的产品能力缩成简单名称价格表。</p>
+ */
+class SalesProductServiceTest {
+
+    @Test
+    void createShouldPersistProductTemplateWithItineraryDescriptionAndArrangement() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductItineraryDayMapper itineraryMapper = mock(SalesProductItineraryDayMapper.class);
+        SalesProductDescriptionMapper descriptionMapper = mock(SalesProductDescriptionMapper.class);
+        SalesProductArrangementItemMapper arrangementMapper = mock(SalesProductArrangementItemMapper.class);
+        SalesProductRoadbookPointMapper roadbookMapper = mock(SalesProductRoadbookPointMapper.class);
+        SalesProductService service = service(productMapper, itineraryMapper, descriptionMapper, arrangementMapper, roadbookMapper);
+        ArgumentCaptor<SalesProductEntity> productCaptor = ArgumentCaptor.forClass(SalesProductEntity.class);
+        ArgumentCaptor<SalesProductItineraryDayEntity> itineraryCaptor = ArgumentCaptor.forClass(SalesProductItineraryDayEntity.class);
+        ArgumentCaptor<SalesProductDescriptionEntity> descriptionCaptor = ArgumentCaptor.forClass(SalesProductDescriptionEntity.class);
+        ArgumentCaptor<SalesProductArrangementItemEntity> arrangementCaptor = ArgumentCaptor.forClass(SalesProductArrangementItemEntity.class);
+        ArgumentCaptor<SalesProductRoadbookPointEntity> roadbookCaptor = ArgumentCaptor.forClass(SalesProductRoadbookPointEntity.class);
+        when(productMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
+        when(productMapper.insert(any(SalesProductEntity.class))).thenAnswer((Answer<Integer>) invocation -> {
+            SalesProductEntity entity = invocation.getArgument(0);
+            entity.setId(88L);
+            return 1;
+        });
+        when(productMapper.selectOne(any(Wrapper.class))).thenAnswer(invocation -> {
+            SalesProductEntity entity = new SalesProductEntity();
+            entity.setId(88L);
+            entity.setTenantId(1L);
+            entity.setProductName("苏州园林二日游");
+            entity.setTravelDays(2);
+            entity.setStatus("active");
+            entity.setIsDeleted(false);
+            return entity;
+        });
+        when(itineraryMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(descriptionMapper.selectOne(any(Wrapper.class))).thenReturn(null);
+        when(arrangementMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+
+        SalesProductResponse response = service.create(request(), 1L, "admin");
+
+        assertThat(response.id()).isEqualTo(88L);
+        verify(productMapper).insert(productCaptor.capture());
+        assertThat(productCaptor.getValue().getProductName()).isEqualTo("苏州园林二日游");
+        assertThat(productCaptor.getValue().getTripType()).isEqualTo("daily");
+        verify(itineraryMapper).insert(itineraryCaptor.capture());
+        assertThat(itineraryCaptor.getValue().getProductId()).isEqualTo(88L);
+        assertThat(itineraryCaptor.getValue().getDayNo()).isEqualTo(1);
+        assertThat(itineraryCaptor.getValue().getRoadbookSummary()).isEqualTo("苏州站 -> 拙政园");
+        assertThat(itineraryCaptor.getValue().getRoadbookTotalDistanceMeters()).isEqualTo(12_300);
+        verify(roadbookMapper).insert(roadbookCaptor.capture());
+        assertThat(roadbookCaptor.getValue().getProductId()).isEqualTo(88L);
+        assertThat(roadbookCaptor.getValue().getDayNo()).isEqualTo(1);
+        assertThat(roadbookCaptor.getValue().getPlaceName()).isEqualTo("苏州站");
+        assertThat(roadbookCaptor.getValue().getDistanceToNextMeters()).isEqualTo(12_300);
+        verify(descriptionMapper).insert(descriptionCaptor.capture());
+        assertThat(descriptionCaptor.getValue().getFeeIncluded()).contains("首道门票");
+        verify(arrangementMapper).insert(arrangementCaptor.capture());
+        assertThat(arrangementCaptor.getValue().getArrangementType()).isEqualTo("hotel");
+        assertThat(arrangementCaptor.getValue().getSettlementType()).isEqualTo("credit");
+    }
+
+    @Test
+    void createShouldRejectDuplicateProductNameInSameTenant() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductService service = service(
+                productMapper,
+                mock(SalesProductItineraryDayMapper.class),
+                mock(SalesProductDescriptionMapper.class),
+                mock(SalesProductArrangementItemMapper.class),
+                mock(SalesProductRoadbookPointMapper.class)
+        );
+        when(productMapper.selectCount(any(Wrapper.class))).thenReturn(1L);
+
+        assertThatThrownBy(() -> service.create(request(), 1L, "admin"))
+                .isInstanceOf(BizException.class)
+                .hasMessage("产品名称已存在");
+    }
+
+    private SalesProductService service(
+            SalesProductMapper productMapper,
+            SalesProductItineraryDayMapper itineraryMapper,
+            SalesProductDescriptionMapper descriptionMapper,
+            SalesProductArrangementItemMapper arrangementMapper,
+            SalesProductRoadbookPointMapper roadbookMapper
+    ) {
+        return new SalesProductService(productMapper, itineraryMapper, descriptionMapper, arrangementMapper, roadbookMapper);
+    }
+
+    private SalesProductSaveRequest request() {
+        return new SalesProductSaveRequest(
+                "苏州园林二日游",
+                "疗休养",
+                "domestic",
+                "江苏省",
+                "苏州市",
+                "姑苏区",
+                "daily",
+                "携程四钻",
+                "观光",
+                2,
+                1,
+                new BigDecimal("120.00"),
+                40,
+                "active",
+                List.of(new SalesProductItineraryDayRequest(
+                        1,
+                        "各地赴苏州",
+                        "集合后游览苏州园林。",
+                        "苏州市区四钻酒店",
+                        "苏州酒店",
+                        new BigDecimal("0"),
+                        true,
+                        true,
+                        true,
+                        "拙政园",
+                        "苏州站 -> 拙政园",
+                        12_300,
+                        1_800,
+                        List.of(new SalesProductRoadbookPointRequest(
+                                1,
+                                "苏州站",
+                                "江苏省苏州市姑苏区苏站路",
+                                "120.617367",
+                                "31.335374",
+                                "departure",
+                                0,
+                                12_300,
+                                1_800,
+                                "接站"
+                        ))
+                )),
+                "报名需提供游客名单。",
+                "苏州园林二日标准产品。",
+                "含首道门票和住宿。",
+                "不含个人消费。",
+                "儿童按不占床安排。",
+                "无购物。",
+                "自费项目自愿参加。",
+                "无赠送。",
+                "请携带身份证。",
+                "以确认件为准。",
+                List.of(new SalesProductArrangementItemRequest(
+                        "hotel",
+                        "住宿",
+                        "苏州市区四钻酒店",
+                        new BigDecimal("1"),
+                        new BigDecimal("220.00"),
+                        "间夜",
+                        "credit",
+                        "按确认占房执行"
+                )),
+                "测试产品"
+        );
+    }
+}
