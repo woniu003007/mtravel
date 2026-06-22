@@ -176,10 +176,19 @@ describe('sales product form helpers', () => {
 
     expect(arrangementPageSource).toContain('openArrangementEditor(section.value)');
     expect(arrangementPageSource).toContain('saveArrangementEditor');
+    expect(arrangementPageSource).toContain('persistArrangementChanges');
+    expect(arrangementPageSource).toContain("editingArrangementIndex.value >= 0 ? '安排信息已修改' : '安排信息已保存'");
     expect(arrangementPageSource).toContain('traffic-arrangement-modal');
     expect(arrangementPageSource).toContain('activeEditorTitle');
     expect(arrangementPageSource).toContain('全团/订单均摊');
     expect(arrangementPageSource).toContain('多订单均摊成本');
+    expect(arrangementPageSource).toContain('showMultiOrderAveragePriceNotice');
+    expect(arrangementPageSource).toContain('多订单均摊成本时，价格信息组成只能统一写成一条记录，点击 ⊕ 失效');
+    expect(arrangementPageSource).toContain('addArrangementPriceLine');
+    expect(arrangementPageSource).toContain('removeArrangementPriceLine');
+    expect(arrangementPageSource).toContain('arrangementForm.priceLines');
+    expect(arrangementPageSource).toContain(':disabled="showMultiOrderAveragePriceNotice"');
+    expect(arrangementPageSource).toContain(':class="{ disabled: showMultiOrderAveragePriceNotice }"');
     expect(arrangementPageSource).toContain('交通类型');
     expect(arrangementPageSource).toContain('日期行程');
     expect(arrangementPageSource).toContain('供应商');
@@ -190,15 +199,301 @@ describe('sales product form helpers', () => {
     expect(arrangementPageSource).toContain('无需导游报账，同步更新导游报账和计调审核数据');
   });
 
+  it('allows editing saved arrangement rows from the section table', () => {
+    const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+
+    expect(arrangementPageSource).toContain('editingArrangementIndex');
+    expect(arrangementPageSource).toContain('hydrateArrangementFormFromItem');
+    expect(arrangementPageSource).toContain('openArrangementEditor(section.value, item)');
+    expect(arrangementPageSource).toContain('保存修改');
+    expect(arrangementPageSource).toContain('新增安排');
+    expect(arrangementPageSource).toContain("editingArrangementIndex.value >= 0 ? '安排信息已修改' : '安排信息已保存'");
+    expect(arrangementPageSource).toContain('nextItems[editingArrangementIndex.value] = arrangementItem');
+    expect(arrangementPageSource).not.toContain("if (column === '操作') return '--';");
+  });
+
+  it('keeps arrangement remark as manual text instead of auto-generated system fields', () => {
+    const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+
+    expect(arrangementPageSource).toContain('manualRemarkText');
+    expect(arrangementPageSource).toContain('remark: manualRemarkText(arrangementForm.remark)');
+    expect(arrangementPageSource).toContain('remark: manualRemarkText(item.remark)');
+    expect(arrangementPageSource).not.toContain('`费用归属：${allocationLabel(arrangementForm.allocationMode)}`');
+    expect(arrangementPageSource).not.toContain('`订单信息：${arrangementForm.orderScope || \'=不关联订单=\'}`');
+    expect(arrangementPageSource).not.toContain("arrangementForm.noGuideReport ? '无需导游报账，同步更新导游报账和计调审核数据' : ''");
+  });
+
+  it('uses old-system per-field quick editors for team profile fields', () => {
+    const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+
+    expect(arrangementPageSource).toContain('teamProfile');
+    expect(arrangementPageSource).toContain('TEAM_PROFILE_MARKER');
+    expect(arrangementPageSource).toContain('openTeamProfileEditor');
+    expect(arrangementPageSource).toContain('saveTeamProfileEditor');
+    expect(arrangementPageSource).toContain('quickProfileEditorOpen');
+    expect(arrangementPageSource).toContain('quickProfileEditorType');
+    expect(arrangementPageSource).toContain('activeQuickProfileEditor');
+    expect(arrangementPageSource).toContain("editorType: 'business_type'");
+    expect(arrangementPageSource).toContain("editorType: 'department'");
+    expect(arrangementPageSource).toContain("editorType: 'operator'");
+    expect(arrangementPageSource).toContain("editorType: 'escort'");
+    expect(arrangementPageSource).toContain("openTeamProfileEditor('internal_note')");
+    expect(arrangementPageSource).toContain('修改业务类型');
+    expect(arrangementPageSource).toContain('选择业务类型');
+    expect(arrangementPageSource).toContain('修改业务部门');
+    expect(arrangementPageSource).toContain('所属部门');
+    expect(arrangementPageSource).toContain('修改操作计调');
+    expect(arrangementPageSource).toContain('操作计调');
+    expect(arrangementPageSource).toContain('团队全陪信息');
+    expect(arrangementPageSource).toContain('内部备注');
+    expect(arrangementPageSource).toContain('提交保存');
+    expect(arrangementPageSource).toContain('保存信息');
+    expect(arrangementPageSource).not.toContain('修改团队快捷信息');
+    expect(arrangementPageSource).not.toContain('teamProfileModalOpen');
+    expect(arrangementPageSource).toContain("label: '部门'");
+    expect(arrangementPageSource).toContain("label: '操作计调'");
+    expect(arrangementPageSource).toContain("label: '全陪'");
+    expect(arrangementPageSource).toContain('teamProfile.departmentName ||');
+    expect(arrangementPageSource).toContain('teamProfile.operatorName ||');
+    expect(arrangementPageSource).toContain('teamProfile.escortName ||');
+    expect(arrangementPageSource).toContain('teamProfile.totalDistanceText ||');
+    expect(arrangementPageSource).toContain('teamProfile.internalNote ||');
+    expect(arrangementPageSource).toContain('getEnterpriseDepartmentAll');
+    expect(arrangementPageSource).toContain('getProductDictionaryAll');
+    expect(arrangementPageSource).toContain('@click="item.editorType && openTeamProfileEditor(item.editorType)"');
+    expect(arrangementPageSource).not.toContain("label: '部门', value: '总部'");
+    expect(arrangementPageSource).not.toContain("label: '操作计调', value: '团队阶段指定'");
+    expect(arrangementPageSource).not.toContain("label: '全陪', value: '--'");
+    expect(arrangementPageSource).not.toContain('<Button type="link" size="small" @click="showStaticFeatureTip">');
+  });
+
+  it('keeps the hotel editor field order aligned with the old system', () => {
+    const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+    const hotelLayoutSource = arrangementPageSource.slice(arrangementPageSource.indexOf('hotel-old-system-layout'));
+
+    expect(arrangementPageSource).toContain("activeEditorType === 'hotel'");
+    expect(arrangementPageSource).toContain('hotel-old-system-layout');
+    expect(hotelLayoutSource.indexOf('酒店名称')).toBeLessThan(hotelLayoutSource.indexOf('早餐基金'));
+    expect(hotelLayoutSource.indexOf('早餐基金')).toBeLessThan(hotelLayoutSource.indexOf('入住退房'));
+    expect(hotelLayoutSource.indexOf('入住退房')).toBeLessThan(hotelLayoutSource.indexOf('<span>供应商</span>'));
+    expect(hotelLayoutSource.indexOf('<span>供应商</span>')).toBeLessThan(hotelLayoutSource.indexOf('<span>价格信息</span>'));
+    expect(hotelLayoutSource.indexOf('<span>价格信息</span>')).toBeLessThan(hotelLayoutSource.indexOf('<span>结算方式</span>'));
+    expect(hotelLayoutSource.indexOf('<span>结算方式</span>')).toBeLessThan(hotelLayoutSource.indexOf('责任房调'));
+  });
+
+  it('keeps the vehicle editor field order aligned with the old system', () => {
+    const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+    const vehicleLayoutStart = arrangementPageSource.indexOf('vehicle-old-system-layout');
+    const vehicleLayoutSource = arrangementPageSource.slice(
+      vehicleLayoutStart,
+      arrangementPageSource.indexOf('<template v-else>', vehicleLayoutStart),
+    );
+
+    expect(arrangementPageSource).toContain("activeEditorType === 'vehicle'");
+    expect(arrangementPageSource).toContain('vehicle-old-system-layout');
+    expect(vehicleLayoutSource.indexOf('<span>座位数</span>')).toBeLessThan(vehicleLayoutSource.indexOf('<span>用车时间</span>'));
+    expect(vehicleLayoutSource.indexOf('<span>用车时间</span>')).toBeLessThan(vehicleLayoutSource.indexOf('<span>司机车号</span>'));
+    expect(vehicleLayoutSource.indexOf('<span>司机车号</span>')).toBeLessThan(vehicleLayoutSource.indexOf('<span>供应商</span>'));
+    expect(vehicleLayoutSource.indexOf('<span>供应商</span>')).toBeLessThan(vehicleLayoutSource.indexOf('<span>价格信息</span>'));
+    expect(vehicleLayoutSource.indexOf('<span>价格信息</span>')).toBeLessThan(vehicleLayoutSource.indexOf('<span>结算方式</span>'));
+    expect(vehicleLayoutSource.indexOf('<span>结算方式</span>')).toBeLessThan(vehicleLayoutSource.indexOf('责任车调'));
+    expect(vehicleLayoutSource.indexOf('责任车调')).toBeLessThan(vehicleLayoutSource.indexOf('订单信息'));
+    expect(vehicleLayoutSource.indexOf('订单信息')).toBeLessThan(vehicleLayoutSource.indexOf('备注信息'));
+    expect(vehicleLayoutSource).toContain('司机信息');
+    expect(vehicleLayoutSource).toContain('车牌号');
+    expect(vehicleLayoutSource).toContain('placeholder="手动输入司机姓名/电话"');
+    expect(vehicleLayoutSource).toContain('placeholder="手动输入车牌号"');
+    expect(vehicleLayoutSource).toContain(':options="driverHistoryOptions"');
+    expect(vehicleLayoutSource).toContain(':options="vehiclePlateHistoryOptions"');
+    expect(vehicleLayoutSource).not.toContain(':options="driverInfoOptions"');
+    expect(vehicleLayoutSource).not.toContain(':options="vehiclePlateOptions"');
+    expect(arrangementPageSource).toContain('getVehicleUsageHistorySuggestions');
+    expect(arrangementPageSource).toContain('recordVehicleUsageHistory');
+    expect(arrangementPageSource).toContain("recordVehicleHistoryUsage('driver_info'");
+    expect(arrangementPageSource).toContain("recordVehicleHistoryUsage('vehicle_plate'");
+  });
+
+  it('uses seat count wording and no region fields for vehicle quote calculation', () => {
+    const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+    const quotePageSource = readAppFile('src/views/dispatch/vehicle-quote/index.vue');
+
+    expect(quotePageSource).toContain('座位数');
+    expect(quotePageSource).toContain('座位数 / 状态');
+    expect(quotePageSource).not.toContain('适用地区');
+    expect(quotePageSource).not.toContain('formatRegion');
+    expect(quotePageSource).not.toContain('ruleRegionPath');
+    expect(quotePageSource).not.toContain('calcRegionPath');
+    expect(quotePageSource).not.toContain('Cascader');
+    expect(arrangementPageSource).toContain('<span>座位数</span>');
+    expect(arrangementPageSource).toContain('Form.Item label="座位数"');
+    expect(arrangementPageSource).toContain('Form.Item label="规则座位数"');
+    expect(arrangementPageSource).not.toContain('province: formState.province');
+    expect(arrangementPageSource).not.toContain('city: formState.city');
+    expect(arrangementPageSource).not.toContain('district: formState.district');
+    expect(quotePageSource).not.toContain('vehicleTypeOptions');
+    expect(arrangementPageSource).not.toContain('vehicleTypeOptions');
+    expect(quotePageSource).toContain('v-model:value="querySeatCount"');
+    expect(quotePageSource).toContain('v-model:value="calcVehicleType"');
+    expect(quotePageSource).toContain('v-model:value="formSeatCount"');
+    expect(quotePageSource).toContain('addon-after="座"');
+    expect(quotePageSource).toContain('function vehicleTypeFromSeatCount');
+    expect(quotePageSource).toContain('function seatCountFromVehicleType');
+    expect(arrangementPageSource).toContain('function seatCountFromVehicleType');
+    expect(quotePageSource).toContain('placeholder="请输入座位数"');
+    expect(arrangementPageSource).toContain('placeholder="请选择座位数规则"');
+    expect(arrangementPageSource).toContain('v-model:value="arrangementForm.vehicleType"');
+    expect(arrangementPageSource).toContain(':options="vehicleQuoteRuleOptions"');
+    expect(arrangementPageSource).not.toContain('v-model:value="arrangementVehicleSeatCount"');
+    expect(arrangementPageSource).not.toContain('addon-after="座"');
+    expect(arrangementPageSource).not.toContain('function vehicleTypeFromSeatCount');
+    expect(arrangementPageSource).not.toContain('placeholder="请输入座位数"');
+    expect(quotePageSource).not.toContain('placeholder="手动输入，如 7座、19座、39座"');
+    expect(arrangementPageSource).not.toContain('placeholder="手动输入，如 7座、19座、39座"');
+  });
+
+  it('uses configured vehicle quote rules for quick and map quote seat selection', () => {
+    const quotePageSource = readAppFile('src/views/dispatch/vehicle-quote/index.vue');
+
+    expect(quotePageSource).toContain('getVehicleQuoteRuleAll');
+    expect(quotePageSource).toContain('quoteRuleOptions');
+    expect(quotePageSource).toContain('loadQuoteRuleOptions');
+    expect(quotePageSource).toContain('v-model:value="calcVehicleType"');
+    expect(quotePageSource).toContain('v-model:value="mapQuoteVehicleType"');
+    expect(quotePageSource).toContain(':options="quoteRuleOptions"');
+    expect(quotePageSource).toContain('placeholder="请选择座位数规则"');
+    expect(quotePageSource).not.toContain('v-model:value="calcSeatCount"');
+    expect(quotePageSource).not.toContain('v-model:value="mapQuoteSeatCount"');
+    expect(quotePageSource).toContain("await Promise.all([loadRules(), loadQuoteRuleOptions()])");
+  });
+
+  it('uses configured vehicle quote rules for team arrangement vehicle seat selection', () => {
+    const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+
+    expect(arrangementPageSource).toContain('getVehicleQuoteRuleAll');
+    expect(arrangementPageSource).toContain('vehicleQuoteRuleOptions');
+    expect(arrangementPageSource).toContain('loadVehicleQuoteRuleOptions');
+    expect(arrangementPageSource).toContain('v-model:value="arrangementForm.vehicleType"');
+    expect(arrangementPageSource).toContain(':options="vehicleQuoteRuleOptions"');
+    expect(arrangementPageSource).toContain('placeholder="请选择座位数规则"');
+    expect(arrangementPageSource).not.toContain('v-model:value="arrangementVehicleSeatCount"');
+    expect(arrangementPageSource).not.toContain('请先填写座位数');
+    expect(arrangementPageSource).toContain('请先选择座位数规则');
+  });
+
+  it('opens product roadbook map editor from vehicle arrangement distance panel', () => {
+    const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+    const formPageSource = readAppFile('src/views/sales/product/form.vue');
+
+    expect(arrangementPageSource).toContain('openProductRoadbookEditor');
+    expect(arrangementPageSource).toContain('编辑路书地图');
+    expect(arrangementPageSource).toContain("tab: 'itinerary'");
+    expect(arrangementPageSource).toContain('roadbookDay');
+    expect(formPageSource).toContain('requestedRoadbookDayIndex');
+    expect(formPageSource).toContain('openRequestedRoadbookDrawer');
+    expect(formPageSource).toContain('route.query.roadbookDay');
+  });
+
+  it('does not show real vehicle inquiry records inside product template arrangement', () => {
+    const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+
+    expect(arrangementPageSource).not.toContain('车队询价记录');
+    expect(arrangementPageSource).not.toContain('新增询价');
+    expect(arrangementPageSource).not.toContain('vehicle-inquiry-panel');
+    expect(arrangementPageSource).not.toContain('addVehicleInquiryRecord');
+    expect(arrangementPageSource).not.toContain('员工在微信群问车队后');
+  });
+
+  it('auto calculates vehicle day count from start and end day in team arrangement', () => {
+    const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+    const vehicleLayoutStart = arrangementPageSource.indexOf('<template v-else-if="activeEditorType === \'vehicle\'">');
+    const vehicleLayoutSource = arrangementPageSource.slice(
+      vehicleLayoutStart,
+      arrangementPageSource.indexOf('<template v-else>', vehicleLayoutStart),
+    );
+
+    expect(arrangementPageSource).toContain('syncVehicleDaysCount');
+    expect(arrangementPageSource).toContain('const days = end - start + 1');
+    expect(vehicleLayoutSource).toContain('@change="syncVehicleDaysCount"');
+    expect(vehicleLayoutSource).toContain('v-model:value="arrangementForm.daysCount" disabled');
+    expect(vehicleLayoutSource).not.toContain('<InputNumber v-model:value="arrangementForm.daysCount" :min="0" :precision="0" />');
+  });
+
+  it('renders vehicle quote rules with visible table columns and unified list styling', () => {
+    const quotePageSource = readAppFile('src/views/dispatch/vehicle-quote/index.vue');
+
+    expect(quotePageSource).not.toContain(':columns="[]"');
+    expect(quotePageSource).toContain('class="vehicle-quote-table"');
+    expect(quotePageSource).toContain('<Table.Column title="座位数"');
+    expect(quotePageSource).toContain('<Table.Column title="基础价"');
+    expect(quotePageSource).toContain('<Table.Column title="基础公里"');
+    expect(quotePageSource).toContain('<Table.Column title="操作"');
+    expect(quotePageSource).toContain('.vehicle-quote-table');
+  });
+
+  it('adds a full-screen map quote drawer beside quick vehicle quote', () => {
+    const quotePageSource = readAppFile('src/views/dispatch/vehicle-quote/index.vue');
+
+    expect(quotePageSource).toContain('打开地图报价');
+    expect(quotePageSource).toContain('mapQuoteDrawerOpen');
+    expect(quotePageSource).toContain('class="vehicle-map-quote-drawer"');
+    expect(quotePageSource).toContain('width="calc(100vw - 32px)"');
+    expect(quotePageSource).toContain('vehicle-map-quote-workspace');
+    expect(quotePageSource).toContain('vehicle-map-container');
+    expect(quotePageSource).toContain('vehicle-map-side-panel');
+    expect(quotePageSource).toContain('searchAmapTips');
+    expect(quotePageSource).toContain('getAmapJsConfig');
+    expect(quotePageSource).toContain('calculateRoadbookRoute');
+    expect(quotePageSource).toContain('handleMapQuoteMapClick');
+    expect(quotePageSource).toContain('destroyMapQuoteMap');
+    expect(quotePageSource).toContain('calculateMapQuoteRoute');
+    expect(quotePageSource).toContain('calculateMapQuotePrice');
+    expect(quotePageSource).toContain('mapQuoteVehicleType');
+    expect(quotePageSource).toContain('mapQuotePoints');
+    expect(quotePageSource).toContain('地图报价');
+    expect(quotePageSource).toContain('搜索地址或直接点地图');
+    expect(quotePageSource).toContain('总里程');
+    expect(quotePageSource).toContain('预计车程');
+    expect(quotePageSource).toContain('参考报价');
+    expect(quotePageSource).toContain('这是高德驾车路线距离，不是直线距离');
+  });
+
+  it('highlights map quote result metrics in a compact toolbar summary', () => {
+    const quotePageSource = readAppFile('src/views/dispatch/vehicle-quote/index.vue');
+
+    expect(quotePageSource).toContain('vehicle-map-toolbar-main');
+    expect(quotePageSource).toContain('vehicle-map-route-line');
+    expect(quotePageSource).toContain('vehicle-map-metric-strip');
+    expect(quotePageSource).toContain('vehicle-map-metric-item');
+    expect(quotePageSource).toContain('vehicle-map-metric-item price');
+    expect(quotePageSource).toContain('vehicle-map-metric-label');
+    expect(quotePageSource).toContain('vehicle-map-metric-value');
+    expect(quotePageSource).toContain('参考报价');
+    expect(quotePageSource).toContain('总里程');
+    expect(quotePageSource).toContain('预计车程');
+    expect(quotePageSource).not.toContain('vehicle-map-result-panel');
+    expect(quotePageSource).not.toContain('vehicle-map-result-card');
+    expect(quotePageSource).not.toContain('vehicle-map-meta span');
+  });
+
+  it('explains vehicle quote rule fields inside the rule modal', () => {
+    const quotePageSource = readAppFile('src/views/dispatch/vehicle-quote/index.vue');
+
+    expect(quotePageSource).toContain('只填写数字，例如 7、19、39');
+    expect(quotePageSource).toContain('基础公里以内的起步参考价');
+    expect(quotePageSource).toContain('超过基础公里后，每多 1 公里增加的参考费用');
+    expect(quotePageSource).toContain('1.00 不浮动，1.10 表示上浮 10%');
+    expect(quotePageSource).toContain('参考价 = max(基础价 + 超出公里 × 超公里单价, 最低价) × 浮动系数');
+    expect(quotePageSource).toContain('当前先不按地区区分报价，只按座位数和路书公里测算');
+  });
+
   it('uses real dropdown APIs for all team arrangement category editors', () => {
     const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
 
     expect(arrangementPageSource).toContain('getSupplierAll');
     expect(arrangementPageSource).toContain('getExpenseItemAll');
     expect(arrangementPageSource).toContain('getEnterpriseEmployeeAll');
-    expect(arrangementPageSource).toContain('getHotelResourcePage');
-    expect(arrangementPageSource).toContain('getScenicResourcePage');
     expect(arrangementPageSource).toContain('getPurchaseResourcePage');
+    expect(arrangementPageSource).toContain('getPurchaseRelationPage');
     expect(arrangementPageSource).toContain('getGroundAgentPage');
     expect(arrangementPageSource).toContain('supplierCategoryMap');
     expect(arrangementPageSource).toContain('expenseResourceTypeMap');
@@ -207,6 +502,77 @@ describe('sales product form helpers', () => {
     expect(arrangementPageSource).not.toContain('大交通供应商A');
     expect(arrangementPageSource).not.toContain('机票票务供应商');
     expect(arrangementPageSource).not.toContain('火车票服务商');
+  });
+
+  it('loads scenic arrangement resources from purchase relation and refreshes suppliers after selecting a scenic resource', () => {
+    const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+
+    expect(arrangementPageSource).toContain('getPurchaseRelationPage');
+    expect(arrangementPageSource).toContain('getRelationTicketTemplateDetail');
+    expect(arrangementPageSource).toContain('scenicResourceRelationOptions');
+    expect(arrangementPageSource).toContain('scenicTicketTemplate');
+    expect(arrangementPageSource).toContain('selectedScenicResourceRelation');
+    expect(arrangementPageSource).toContain('loadScenicSupplierOptions');
+    expect(arrangementPageSource).toContain('loadSelectedScenicTicketTemplate');
+    expect(arrangementPageSource).toContain('applySelectedResource');
+    expect(arrangementPageSource).toContain('openScenicTemplateConfigPage');
+    expect(arrangementPageSource).toContain('templateRelationId');
+    expect(arrangementPageSource).toContain('游客名单模板');
+    expect(arrangementPageSource).toContain("resourceType: 'scenic'");
+    expect(arrangementPageSource).toContain('@change="applySelectedResource"');
+    expect(arrangementPageSource).not.toContain('pageSize: 500');
+    expect(arrangementPageSource).not.toContain("import { getScenicResourcePage } from '#/api/purchase/scenic'");
+    expect(arrangementPageSource).not.toContain("getScenicResourcePage({ page: 1, pageSize: 200, status: 'active' })");
+  });
+
+  it('opens purchase relation ticket template drawer from scenic arrangement deep link', () => {
+    const relationPageSource = readAppFile('src/views/purchase/relation/index.vue');
+
+    expect(relationPageSource).toContain('useRoute');
+    expect(relationPageSource).toContain('openTemplateDrawerFromRoute');
+    expect(relationPageSource).toContain('route.query.templateRelationId');
+    expect(relationPageSource).toContain('query.resourceType =');
+    expect(relationPageSource).toContain('openTemplateDrawer(row)');
+  });
+
+  it('loads hotel arrangement dropdown from resource overview and opens add hotel page', () => {
+    const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+    const hotelLayoutSource = arrangementPageSource.slice(arrangementPageSource.indexOf('hotel-old-system-layout'));
+
+    expect(arrangementPageSource).not.toContain("import { getHotelResourcePage } from '#/api/purchase/hotel'");
+    expect(arrangementPageSource).toContain("resourceType: 'hotel'");
+    expect(arrangementPageSource).toContain('openHotelCreatePage');
+    expect(arrangementPageSource).toContain("path: '/purchase/resource'");
+    expect(arrangementPageSource).toContain("create: '1'");
+    expect(arrangementPageSource).toContain("resourceType: 'hotel'");
+    expect(hotelLayoutSource).toContain('@click="openHotelCreatePage"');
+    expect(hotelLayoutSource).toContain('添加酒店');
+  });
+
+  it('uses region cascaders and real traffic suppliers in the traffic arrangement editor', () => {
+    const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+    const crudPageSource = readAppFile('src/views/_business/crud/CrudPage.vue');
+
+    expect(arrangementPageSource).toContain('Cascader');
+    expect(arrangementPageSource).toContain('buildRegionOptions');
+    expect(arrangementPageSource).toContain('departureRegionPath');
+    expect(arrangementPageSource).toContain('arrivalRegionPath');
+    expect(arrangementPageSource).toContain("traffic: 'traffic'");
+    expect(arrangementPageSource).toContain('getSupplierAll(supplierCategory)');
+    expect(arrangementPageSource).toContain('formatTrafficRegionPath');
+    expect(arrangementPageSource).toContain('openSupplierCreatePage');
+    expect(arrangementPageSource).toContain('router.resolve');
+    expect(arrangementPageSource).toContain("path: '/purchase/supplier'");
+    expect(arrangementPageSource).toContain('category: supplierCategoryMap[activeEditorType.value]');
+    expect(arrangementPageSource).toContain("create: '1'");
+    expect(arrangementPageSource).toContain("window.open(routeInfo.href, '_blank', 'noopener,noreferrer')");
+    expect(crudPageSource).toContain('applyRoutePreset');
+    expect(crudPageSource).toContain("route.query.create === '1'");
+    expect(crudPageSource).toContain('openCreateModal()');
+    expect(arrangementPageSource).not.toContain('placeholder="请输入出发地"');
+    expect(arrangementPageSource).not.toContain('placeholder="请输入目的地"');
+    expect(arrangementPageSource).not.toContain('v-model:value="arrangementForm.departurePlace"');
+    expect(arrangementPageSource).not.toContain('v-model:value="arrangementForm.arrivalPlace"');
   });
 
   it('uses old-system field sets for each team arrangement editor instead of a generic modal', () => {
@@ -293,6 +659,108 @@ describe('sales product form helpers', () => {
       projectName: '标间',
       quantity: 1,
       unitPrice: 220,
+    });
+  });
+
+  it('keeps vehicle quote snapshots and inquiry records in the product payload', () => {
+    const payload = buildSalesProductPayload(
+      {
+        domesticInternational: 'domestic',
+        productName: '测试用车产品',
+        status: 'active',
+        travelDays: 3,
+        tripType: 'irregular',
+        arrangementItems: [
+          {
+            arrangementType: 'vehicle',
+            cashAmount: 0,
+            creditAmount: 2220.35,
+            daysCount: 3,
+            driverName: '王131749',
+            itemName: '39座-车费',
+            priceLines: [
+              {
+                amount: 2220.35,
+                projectName: '车费',
+                quantity: 1,
+                unitPrice: 2220.35,
+              },
+            ],
+            quantity: 1,
+            scheduleEndDay: '第3天',
+            scheduleStartDay: '第1天',
+            settlementType: 'credit',
+            supplierName: '浙江安心客运有限公司',
+            totalAmount: 2220.35,
+            unitPrice: 2220.35,
+            vehicleInquiryRecords: [
+              {
+                availableVehicleCount: 1,
+                groupName: '用车报价群',
+                includesDriverMeal: true,
+                includesParking: true,
+                includesToll: true,
+                inquiryMethod: 'wechat_group',
+                inquiryPerson: '张车调',
+                quotedAmount: 2220.35,
+                remark: '报价可用',
+                replyPerson: '王经理',
+                selected: true,
+                sortOrder: 1,
+                supplierName: '浙江安心客运有限公司',
+              },
+            ],
+            vehiclePlate: '浙233',
+            vehicleQuoteSnapshot: {
+              calculatedAmount: 2220.35,
+              confirmedAmount: 2220.35,
+              endDayNo: 3,
+              quoteRuleId: 39,
+              routeSummary: '第1天-第3天路书',
+              ruleBaseKilometers: 100,
+              ruleBasePrice: 1200,
+              ruleExtraKilometerPrice: 6,
+              ruleFloatRate: 1,
+              ruleMinimumPrice: 900,
+              ruleVehicleType: '39座',
+              scheduleEndDay: '第3天',
+              scheduleStartDay: '第1天',
+              startDayNo: 1,
+              syncedDistanceMeters: 249_400,
+              syncedDurationSeconds: 17_340,
+            },
+            vehicleType: '39座',
+          },
+        ],
+      },
+      [],
+    );
+
+    expect(payload.arrangementItems?.[0]).toMatchObject({
+      daysCount: 3,
+      driverName: '王131749',
+      supplierName: '浙江安心客运有限公司',
+      vehiclePlate: '浙233',
+      vehicleType: '39座',
+    });
+    expect(payload.arrangementItems?.[0]?.vehicleQuoteSnapshot).toMatchObject({
+      calculatedAmount: 2220.35,
+      confirmedAmount: 2220.35,
+      endDayNo: 3,
+      routeSummary: '第1天-第3天路书',
+      ruleVehicleType: '39座',
+      startDayNo: 1,
+      syncedDistanceMeters: 249_400,
+      syncedDurationSeconds: 17_340,
+    });
+    expect(payload.arrangementItems?.[0]?.vehicleInquiryRecords?.[0]).toMatchObject({
+      includesDriverMeal: true,
+      includesParking: true,
+      includesToll: true,
+      inquiryMethod: 'wechat_group',
+      quotedAmount: 2220.35,
+      selected: true,
+      supplierName: '浙江安心客运有限公司',
     });
   });
 

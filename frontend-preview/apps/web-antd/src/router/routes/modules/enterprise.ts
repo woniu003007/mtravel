@@ -1,6 +1,5 @@
 import type { RouteRecordRaw } from 'vue-router';
 
-const PrototypePage = () => import('#/views/_business/PrototypePage.vue');
 const BankAccountPage = () => import('#/views/enterprise/bank-account/index.vue');
 const CompanyInfoPage = () => import('#/views/enterprise/company-info/index.vue');
 const DepartmentPage = () => import('#/views/enterprise/department/index.vue');
@@ -23,10 +22,8 @@ const routes: RouteRecordRaw[] = [
       { name: 'Role', path: '/enterprise/role', component: RolePage, meta: { icon: 'lucide:shield', title: '角色权限' } },
       { name: 'Employee', path: '/enterprise/employee', component: EmployeePage, meta: { icon: 'lucide:users', title: '员工管理' } },
       { name: 'Guide', path: '/enterprise/guide', component: GuidePage, meta: { icon: 'lucide:map-pin', title: '导游管理' } },
-      { name: 'ContractTemplate', path: '/enterprise/contract-template', component: PrototypePage, props: { pageKey: 'enterprise-contract-template' }, meta: { icon: 'lucide:file-text', title: '合同模板管理' } },
       { name: 'ExpenseItem', path: '/enterprise/expense-item', component: ExpenseItemPage, meta: { icon: 'lucide:receipt', title: '费用项目' } },
       { name: 'ProductDictionary', path: '/enterprise/product-dictionary', component: ProductDictionaryPage, meta: { icon: 'lucide:list-checks', title: '产品字典' } },
-      { name: 'Station', path: '/enterprise/station', component: PrototypePage, props: { pageKey: 'enterprise-station' }, meta: { icon: 'lucide:train', title: '接送站管理' } },
     ],
   },
 ];

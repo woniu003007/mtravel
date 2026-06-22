@@ -53,11 +53,13 @@ public record SalesProductArrangementItemResponse(
         BigDecimal consumptionAmount,
         BigDecimal peopleCount,
         Boolean noGuideReport,
-        List<SalesProductArrangementPriceLineResponse> priceLines
+        List<SalesProductArrangementPriceLineResponse> priceLines,
+        SalesProductVehicleQuoteSnapshotResponse vehicleQuoteSnapshot,
+        List<SalesProductVehicleInquiryResponse> vehicleInquiryRecords
 ) {
     /** 将团队安排参数实体转换为接口响应。 */
     public static SalesProductArrangementItemResponse fromEntity(SalesProductArrangementItemEntity entity) {
-        return fromEntity(entity, List.of());
+        return fromEntity(entity, List.of(), null, List.of());
     }
 
     /**
@@ -70,6 +72,24 @@ public record SalesProductArrangementItemResponse(
     public static SalesProductArrangementItemResponse fromEntity(
             SalesProductArrangementItemEntity entity,
             List<SalesProductArrangementPriceLineResponse> priceLines
+    ) {
+        return fromEntity(entity, priceLines, null, List.of());
+    }
+
+    /**
+     * 将团队安排参数实体、价格明细、用车快照和询价记录转换为接口响应。
+     *
+     * @param entity 团队安排参数实体
+     * @param priceLines 该安排项下的价格明细
+     * @param vehicleQuoteSnapshot 用车报价测算快照，非用车安排为空
+     * @param vehicleInquiryRecords 用车询价记录，非用车安排为空列表
+     * @return 前端团队安排模板页使用的响应对象
+     */
+    public static SalesProductArrangementItemResponse fromEntity(
+            SalesProductArrangementItemEntity entity,
+            List<SalesProductArrangementPriceLineResponse> priceLines,
+            SalesProductVehicleQuoteSnapshotResponse vehicleQuoteSnapshot,
+            List<SalesProductVehicleInquiryResponse> vehicleInquiryRecords
     ) {
         return new SalesProductArrangementItemResponse(
                 entity.getId(),
@@ -115,7 +135,9 @@ public record SalesProductArrangementItemResponse(
                 entity.getConsumptionAmount(),
                 entity.getPeopleCount(),
                 entity.getNoGuideReport(),
-                priceLines == null ? List.of() : priceLines
+                priceLines == null ? List.of() : priceLines,
+                vehicleQuoteSnapshot,
+                vehicleInquiryRecords == null ? List.of() : vehicleInquiryRecords
         );
     }
 }

@@ -133,8 +133,57 @@ export namespace SalesProductApi {
     trafficType?: string;
     unitName?: string;
     unitPrice?: number;
+    vehicleInquiryRecords?: VehicleInquiryRecord[];
     vehiclePlate?: string;
+    vehicleQuoteSnapshot?: VehicleQuoteSnapshot;
     vehicleType?: string;
+  }
+
+  export interface VehicleQuoteSnapshot {
+    calculatedAmount?: number;
+    confirmedAmount?: number;
+    endDayNo?: number;
+    id?: number;
+    quoteRuleId?: number;
+    remark?: string;
+    routeSummary?: string;
+    ruleBaseKilometers?: number;
+    ruleBasePrice?: number;
+    ruleCity?: string;
+    ruleDistrict?: string;
+    ruleExtraKilometerPrice?: number;
+    ruleFloatRate?: number;
+    ruleMinimumPrice?: number;
+    ruleProvince?: string;
+    ruleVehicleType?: string;
+    scheduleEndDay?: string;
+    scheduleStartDay?: string;
+    startDayNo?: number;
+    syncedDistanceMeters?: number;
+    syncedDurationSeconds?: number;
+  }
+
+  export interface VehicleInquiryRecord {
+    attachmentId?: number;
+    attachmentUrl?: string;
+    availableVehicleCount?: number;
+    groupName?: string;
+    id?: number;
+    includesDriverLodging?: boolean;
+    includesDriverMeal?: boolean;
+    includesParking?: boolean;
+    includesToll?: boolean;
+    inquiryMethod?: 'enterprise_wechat' | 'other' | 'phone' | 'wechat_group';
+    inquiryPerson?: string;
+    inquiryTime?: string;
+    quotedAmount?: number;
+    remark?: string;
+    replyPerson?: string;
+    replyTime?: string;
+    selected?: boolean;
+    sortOrder?: number;
+    supplierId?: number;
+    supplierName?: string;
   }
 
   export interface ArrangementPriceLine {
@@ -235,6 +284,15 @@ export namespace SalesProductApi {
     tripType?: TripType;
     warmReminder?: string;
   }
+
+  export type VehicleUsageHistoryType = 'driver_info' | 'vehicle_plate';
+
+  export interface VehicleUsageHistory {
+    content: string;
+    historyType: VehicleUsageHistoryType;
+    id: number;
+    usageCount: number;
+  }
 }
 
 export function getSalesProductPage(params: SalesProductApi.QueryParams) {
@@ -285,4 +343,25 @@ export function calculateRoadbookRoute(data: SalesProductApi.AmapRouteCalculateP
 
 export function getRoadbookStaticMapUrl(data: SalesProductApi.AmapStaticMapParams) {
   return requestClient.post<string>('/sales/product/roadbook/amap/static-map', data);
+}
+
+export function getVehicleUsageHistorySuggestions(params: {
+  historyType: SalesProductApi.VehicleUsageHistoryType;
+  keyword?: string;
+  limit?: number;
+}) {
+  return requestClient.get<SalesProductApi.VehicleUsageHistory[]>(
+    '/dispatch/vehicle-usage-histories',
+    { params },
+  );
+}
+
+export function recordVehicleUsageHistory(data: {
+  content?: string;
+  historyType: SalesProductApi.VehicleUsageHistoryType;
+}) {
+  return requestClient.post<void>(
+    '/dispatch/vehicle-usage-histories/record-use',
+    data,
+  );
 }

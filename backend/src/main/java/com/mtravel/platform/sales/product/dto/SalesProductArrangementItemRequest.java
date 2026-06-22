@@ -53,6 +53,8 @@ import java.util.List;
  * @param peopleCount 人数
  * @param noGuideReport 是否无需导游报账
  * @param priceLines 价格明细
+ * @param vehicleQuoteSnapshot 用车报价测算快照，仅用车安排使用
+ * @param vehicleInquiryRecords 用车询价记录，仅用车安排使用
  */
 public record SalesProductArrangementItemRequest(
         @NotBlank(message = "团队安排类型不能为空")
@@ -102,5 +104,7 @@ public record SalesProductArrangementItemRequest(
         @DecimalMin(value = "0", message = "消费金额不能小于0") BigDecimal consumptionAmount,
         @DecimalMin(value = "0", message = "人数不能小于0") BigDecimal peopleCount,
         Boolean noGuideReport,
-        List<SalesProductArrangementPriceLineRequest> priceLines
+        List<SalesProductArrangementPriceLineRequest> priceLines,
+        SalesProductVehicleQuoteSnapshotRequest vehicleQuoteSnapshot,
+        List<SalesProductVehicleInquiryRequest> vehicleInquiryRecords
 ) {}

@@ -336,8 +336,19 @@ ALTER TABLE sales_product_arrangement_items ADD CONSTRAINT chk_sales_product_arr
   AND consumption_amount >= 0
   AND people_count >= 0
 );
-ALTER TABLE sales_product_arrangement_items DROP CONSTRAINT IF EXISTS uk_sales_product_arrangement_tenant_id_id;
-ALTER TABLE sales_product_arrangement_items ADD CONSTRAINT uk_sales_product_arrangement_tenant_id_id UNIQUE (tenant_id, id);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'sales_product_arrangement_items'::regclass
+      AND conname = 'uk_sales_product_arrangement_tenant_id_id'
+  ) THEN
+    ALTER TABLE sales_product_arrangement_items
+      ADD CONSTRAINT uk_sales_product_arrangement_tenant_id_id UNIQUE (tenant_id, id);
+  END IF;
+END;
+$$;
 
 CREATE TABLE IF NOT EXISTS sales_product_arrangement_price_lines (
   id BIGSERIAL PRIMARY KEY,
@@ -394,6 +405,200 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE INDEX IF NOT EXISTS idx_sales_product_arrangement_price_item
   ON sales_product_arrangement_price_lines (tenant_id, is_deleted, product_id, arrangement_item_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS vehicle_quote_rules (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  vehicle_type varchar(40) NOT NULL,
+  province varchar(80),
+  city varchar(80),
+  district varchar(80),
+  base_price numeric(12,2) NOT NULL DEFAULT 0,
+  base_kilometers numeric(10,2) NOT NULL DEFAULT 0,
+  extra_kilometer_price numeric(12,2) NOT NULL DEFAULT 0,
+  minimum_price numeric(12,2) NOT NULL DEFAULT 0,
+  float_rate numeric(8,4) NOT NULL DEFAULT 1,
+  status varchar(20) NOT NULL DEFAULT 'active',
+  created_by varchar(80),
+  remark text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  is_deleted boolean NOT NULL DEFAULT false,
+  deleted_at timestamptz,
+  deleted_by varchar(64),
+  CONSTRAINT chk_vehicle_quote_rules_amounts CHECK (
+    base_price >= 0
+    AND base_kilometers >= 0
+    AND extra_kilometer_price >= 0
+    AND minimum_price >= 0
+    AND float_rate > 0
+  ),
+  CONSTRAINT chk_vehicle_quote_rules_status CHECK (status IN ('active', 'disabled'))
+);
+
+DROP TRIGGER IF EXISTS trg_vehicle_quote_rules_updated_at ON vehicle_quote_rules;
+CREATE TRIGGER trg_vehicle_quote_rules_updated_at
+BEFORE UPDATE ON vehicle_quote_rules
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_vehicle_quote_rules_scope_active
+  ON vehicle_quote_rules (tenant_id, vehicle_type)
+  WHERE is_deleted = false;
+
+CREATE INDEX IF NOT EXISTS idx_vehicle_quote_rules_query
+  ON vehicle_quote_rules (tenant_id, is_deleted, status, vehicle_type, province, city, district);
+
+CREATE TABLE IF NOT EXISTS sales_product_vehicle_quote_snapshots (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  product_id bigint NOT NULL,
+  arrangement_item_id bigint NOT NULL,
+  schedule_start_day varchar(40),
+  schedule_end_day varchar(40),
+  start_day_no integer,
+  end_day_no integer,
+  synced_distance_meters integer NOT NULL DEFAULT 0,
+  synced_duration_seconds integer NOT NULL DEFAULT 0,
+  route_summary varchar(1000),
+  quote_rule_id bigint,
+  rule_vehicle_type varchar(40),
+  rule_province varchar(80),
+  rule_city varchar(80),
+  rule_district varchar(80),
+  rule_base_price numeric(12,2) NOT NULL DEFAULT 0,
+  rule_base_kilometers numeric(10,2) NOT NULL DEFAULT 0,
+  rule_extra_kilometer_price numeric(12,2) NOT NULL DEFAULT 0,
+  rule_minimum_price numeric(12,2) NOT NULL DEFAULT 0,
+  rule_float_rate numeric(8,4) NOT NULL DEFAULT 1,
+  calculated_amount numeric(12,2) NOT NULL DEFAULT 0,
+  confirmed_amount numeric(12,2) NOT NULL DEFAULT 0,
+  created_by varchar(80),
+  remark text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  is_deleted boolean NOT NULL DEFAULT false,
+  deleted_at timestamptz,
+  deleted_by varchar(64),
+  CONSTRAINT fk_sales_product_vehicle_quote_product
+    FOREIGN KEY (tenant_id, product_id) REFERENCES sales_products (tenant_id, id),
+  CONSTRAINT fk_sales_product_vehicle_quote_item
+    FOREIGN KEY (tenant_id, arrangement_item_id) REFERENCES sales_product_arrangement_items (tenant_id, id),
+  CONSTRAINT chk_sales_product_vehicle_quote_days CHECK (
+    (start_day_no IS NULL OR start_day_no >= 1)
+    AND (end_day_no IS NULL OR end_day_no >= 1)
+  ),
+  CONSTRAINT chk_sales_product_vehicle_quote_distance CHECK (
+    synced_distance_meters >= 0
+    AND synced_duration_seconds >= 0
+  ),
+  CONSTRAINT chk_sales_product_vehicle_quote_amounts CHECK (
+    rule_base_price >= 0
+    AND rule_base_kilometers >= 0
+    AND rule_extra_kilometer_price >= 0
+    AND rule_minimum_price >= 0
+    AND rule_float_rate > 0
+    AND calculated_amount >= 0
+    AND confirmed_amount >= 0
+  )
+);
+
+DROP TRIGGER IF EXISTS trg_sales_product_vehicle_quote_snapshots_updated_at ON sales_product_vehicle_quote_snapshots;
+CREATE TRIGGER trg_sales_product_vehicle_quote_snapshots_updated_at
+BEFORE UPDATE ON sales_product_vehicle_quote_snapshots
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sales_product_vehicle_quote_item_active
+  ON sales_product_vehicle_quote_snapshots (tenant_id, arrangement_item_id)
+  WHERE is_deleted = false;
+
+CREATE INDEX IF NOT EXISTS idx_sales_product_vehicle_quote_product
+  ON sales_product_vehicle_quote_snapshots (tenant_id, is_deleted, product_id, arrangement_item_id);
+
+CREATE TABLE IF NOT EXISTS sales_product_vehicle_inquiries (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  product_id bigint NOT NULL,
+  arrangement_item_id bigint NOT NULL,
+  sort_order integer NOT NULL DEFAULT 1,
+  inquiry_method varchar(30) NOT NULL DEFAULT 'wechat_group',
+  inquiry_person varchar(100),
+  inquiry_time timestamptz,
+  group_name varchar(160),
+  supplier_id bigint,
+  supplier_name varchar(200),
+  quoted_amount numeric(12,2) NOT NULL DEFAULT 0,
+  includes_toll boolean NOT NULL DEFAULT false,
+  includes_parking boolean NOT NULL DEFAULT false,
+  includes_driver_meal boolean NOT NULL DEFAULT false,
+  includes_driver_lodging boolean NOT NULL DEFAULT false,
+  available_vehicle_count integer NOT NULL DEFAULT 0,
+  reply_person varchar(100),
+  reply_time timestamptz,
+  attachment_id bigint,
+  attachment_url varchar(500),
+  selected boolean NOT NULL DEFAULT false,
+  created_by varchar(80),
+  remark text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  is_deleted boolean NOT NULL DEFAULT false,
+  deleted_at timestamptz,
+  deleted_by varchar(64),
+  CONSTRAINT fk_sales_product_vehicle_inquiry_product
+    FOREIGN KEY (tenant_id, product_id) REFERENCES sales_products (tenant_id, id),
+  CONSTRAINT fk_sales_product_vehicle_inquiry_item
+    FOREIGN KEY (tenant_id, arrangement_item_id) REFERENCES sales_product_arrangement_items (tenant_id, id),
+  CONSTRAINT chk_sales_product_vehicle_inquiry_method CHECK (
+    inquiry_method IN ('wechat_group', 'enterprise_wechat', 'phone', 'other')
+  ),
+  CONSTRAINT chk_sales_product_vehicle_inquiry_amount CHECK (
+    sort_order >= 1
+    AND quoted_amount >= 0
+    AND available_vehicle_count >= 0
+  )
+);
+
+DROP TRIGGER IF EXISTS trg_sales_product_vehicle_inquiries_updated_at ON sales_product_vehicle_inquiries;
+CREATE TRIGGER trg_sales_product_vehicle_inquiries_updated_at
+BEFORE UPDATE ON sales_product_vehicle_inquiries
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_sales_product_vehicle_inquiry_item
+  ON sales_product_vehicle_inquiries (tenant_id, is_deleted, product_id, arrangement_item_id, sort_order);
+
+CREATE INDEX IF NOT EXISTS idx_sales_product_vehicle_inquiry_selected
+  ON sales_product_vehicle_inquiries (tenant_id, is_deleted, product_id, selected);
+
+CREATE TABLE IF NOT EXISTS vehicle_usage_histories (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  history_type varchar(30) NOT NULL,
+  content varchar(160) NOT NULL,
+  normalized_content varchar(160) NOT NULL,
+  usage_count integer NOT NULL DEFAULT 1,
+  last_used_at timestamptz NOT NULL DEFAULT now(),
+  created_by varchar(80),
+  remark text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  is_deleted boolean NOT NULL DEFAULT false,
+  deleted_at timestamptz,
+  deleted_by varchar(64),
+  CONSTRAINT chk_vehicle_usage_histories_type CHECK (history_type IN ('driver_info', 'vehicle_plate')),
+  CONSTRAINT chk_vehicle_usage_histories_usage_count CHECK (usage_count >= 0)
+);
+
+DROP TRIGGER IF EXISTS trg_vehicle_usage_histories_updated_at ON vehicle_usage_histories;
+CREATE TRIGGER trg_vehicle_usage_histories_updated_at
+BEFORE UPDATE ON vehicle_usage_histories
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_vehicle_usage_histories_content_active
+  ON vehicle_usage_histories (tenant_id, history_type, normalized_content)
+  WHERE is_deleted = false;
+
+CREATE INDEX IF NOT EXISTS idx_vehicle_usage_histories_suggest
+  ON vehicle_usage_histories (tenant_id, is_deleted, history_type, usage_count DESC, last_used_at DESC);
 
 COMMENT ON TABLE sales_products IS '销售产品模板主表。用于维护线路产品的基础资料，后续团期和团队从产品模板生成。';
 COMMENT ON COLUMN sales_products.id IS '销售产品主键ID，系统内部使用。';
@@ -570,10 +775,118 @@ COMMENT ON COLUMN sales_product_arrangement_price_lines.is_deleted IS '是否已
 COMMENT ON COLUMN sales_product_arrangement_price_lines.deleted_at IS '删除时间。';
 COMMENT ON COLUMN sales_product_arrangement_price_lines.deleted_by IS '删除人账号或名称。';
 
+COMMENT ON TABLE vehicle_quote_rules IS '座位数报价规则表。用于按车辆座位数和路书公里测算用车参考价。';
+COMMENT ON COLUMN vehicle_quote_rules.id IS '座位数报价规则主键ID。';
+COMMENT ON COLUMN vehicle_quote_rules.tenant_id IS '租户ID。';
+COMMENT ON COLUMN vehicle_quote_rules.vehicle_type IS '车辆座位数，例如7座、39座。';
+COMMENT ON COLUMN vehicle_quote_rules.province IS '预留省份字段，当前座位数报价规则暂不按地区区分。';
+COMMENT ON COLUMN vehicle_quote_rules.city IS '预留城市字段，当前座位数报价规则暂不按地区区分。';
+COMMENT ON COLUMN vehicle_quote_rules.district IS '预留区县字段，当前座位数报价规则暂不按地区区分。';
+COMMENT ON COLUMN vehicle_quote_rules.base_price IS '基础价，覆盖基础公里以内的参考费用。';
+COMMENT ON COLUMN vehicle_quote_rules.base_kilometers IS '基础公里数。';
+COMMENT ON COLUMN vehicle_quote_rules.extra_kilometer_price IS '超出基础公里后的每公里参考价。';
+COMMENT ON COLUMN vehicle_quote_rules.minimum_price IS '最低参考价。';
+COMMENT ON COLUMN vehicle_quote_rules.float_rate IS '浮动系数，例如1.10表示上浮10%。';
+COMMENT ON COLUMN vehicle_quote_rules.status IS '规则状态。active启用，disabled停用。';
+COMMENT ON COLUMN vehicle_quote_rules.created_by IS '创建人账号或名称。';
+COMMENT ON COLUMN vehicle_quote_rules.remark IS '备注。';
+COMMENT ON COLUMN vehicle_quote_rules.created_at IS '创建时间。';
+COMMENT ON COLUMN vehicle_quote_rules.updated_at IS '更新时间。';
+COMMENT ON COLUMN vehicle_quote_rules.is_deleted IS '是否已删除。';
+COMMENT ON COLUMN vehicle_quote_rules.deleted_at IS '删除时间。';
+COMMENT ON COLUMN vehicle_quote_rules.deleted_by IS '删除人账号或名称。';
+COMMENT ON INDEX uk_vehicle_quote_rules_scope_active IS '座位数报价规则唯一索引，当前约束同一租户同座位数未删除规则。';
+COMMENT ON INDEX idx_vehicle_quote_rules_query IS '座位数报价规则查询索引，用于按座位数和状态筛选。';
+
+COMMENT ON TABLE sales_product_vehicle_quote_snapshots IS '销售产品用车报价测算快照表。用于保存产品团队安排用车时的路书公里、命中规则和测算金额。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.id IS '用车报价测算快照主键ID。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.tenant_id IS '租户ID。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.product_id IS '所属销售产品ID。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.arrangement_item_id IS '所属团队安排项目ID。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.schedule_start_day IS '用车开始日期或行程天文本。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.schedule_end_day IS '用车结束日期或行程天文本。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.start_day_no IS '同步路书的开始天数。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.end_day_no IS '同步路书的结束天数。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.synced_distance_meters IS '同步的路书总距离，单位米。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.synced_duration_seconds IS '同步的预计车程，单位秒。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.route_summary IS '同步的路书摘要。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.quote_rule_id IS '测算时命中的座位数报价规则ID。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.rule_vehicle_type IS '测算时规则中的座位数快照。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.rule_province IS '测算时规则中的预留省份快照，当前通常为空。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.rule_city IS '测算时规则中的预留城市快照，当前通常为空。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.rule_district IS '测算时规则中的预留区县快照，当前通常为空。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.rule_base_price IS '测算时规则基础价快照。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.rule_base_kilometers IS '测算时规则基础公里数快照。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.rule_extra_kilometer_price IS '测算时规则超公里单价快照。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.rule_minimum_price IS '测算时规则最低价快照。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.rule_float_rate IS '测算时规则浮动系数快照。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.calculated_amount IS '系统测算参考价。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.confirmed_amount IS '用户确认采用的参考金额。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.created_by IS '创建人账号或名称。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.remark IS '备注。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.created_at IS '创建时间。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.updated_at IS '更新时间。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.is_deleted IS '是否已删除。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.deleted_at IS '删除时间。';
+COMMENT ON COLUMN sales_product_vehicle_quote_snapshots.deleted_by IS '删除人账号或名称。';
+COMMENT ON INDEX uk_sales_product_vehicle_quote_item_active IS '用车报价快照唯一索引，仅约束同一安排项一条未删除快照。';
+COMMENT ON INDEX idx_sales_product_vehicle_quote_product IS '用车报价快照查询索引，用于产品详情按安排项回显。';
+
+COMMENT ON TABLE sales_product_vehicle_inquiries IS '销售产品用车询价记录表。用于记录业务人员通过微信群、电话等方式向车队询价后的多家报价。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.id IS '用车询价记录主键ID。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.tenant_id IS '租户ID。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.product_id IS '所属销售产品ID。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.arrangement_item_id IS '所属团队安排项目ID。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.sort_order IS '排序号，数字越小越靠前。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.inquiry_method IS '询价方式。wechat_group微信群，enterprise_wechat企业微信，phone电话，other其它。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.inquiry_person IS '询价人。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.inquiry_time IS '询价时间。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.group_name IS '微信群或沟通群名称。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.supplier_id IS '报价供应商ID。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.supplier_name IS '报价供应商名称快照。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.quoted_amount IS '供应商报价金额。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.includes_toll IS '报价是否包含过路费。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.includes_parking IS '报价是否包含停车费。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.includes_driver_meal IS '报价是否包含司机餐费。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.includes_driver_lodging IS '报价是否包含司机住宿。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.available_vehicle_count IS '供应商回复可用车辆数量。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.reply_person IS '供应商回复人。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.reply_time IS '供应商回复时间。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.attachment_id IS '询价截图或附件ID。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.attachment_url IS '询价截图或附件访问地址。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.selected IS '是否选定该报价。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.created_by IS '创建人账号或名称。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.remark IS '备注。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.created_at IS '创建时间。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.updated_at IS '更新时间。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.is_deleted IS '是否已删除。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.deleted_at IS '删除时间。';
+COMMENT ON COLUMN sales_product_vehicle_inquiries.deleted_by IS '删除人账号或名称。';
+COMMENT ON INDEX idx_sales_product_vehicle_inquiry_item IS '用车询价记录查询索引，用于产品详情按安排项回显报价列表。';
+COMMENT ON INDEX idx_sales_product_vehicle_inquiry_selected IS '用车询价选定报价查询索引。';
+
 COMMENT ON INDEX uk_sales_products_tenant_name_active IS '产品名称唯一索引，仅约束同一租户下未删除产品。';
 COMMENT ON INDEX uk_sales_product_itinerary_day_active IS '每日行程唯一索引，仅约束同一产品下未删除行程天数。';
 COMMENT ON INDEX uk_sales_product_descriptions_product_active IS '产品说明唯一索引，仅约束同一产品下未删除说明。';
 COMMENT ON INDEX uk_sales_product_roadbook_point_order_active IS '路书地点顺序唯一索引，仅约束同一产品同一天未删除地点顺序。';
 COMMENT ON INDEX idx_sales_product_arrangement_price_item IS '团队安排价格明细查询索引，用于按产品和安排项回显价格信息。';
+
+COMMENT ON TABLE vehicle_usage_histories IS '用车历史候选表。用于沉淀用车安排中手动输入的司机信息和车牌号。';
+COMMENT ON COLUMN vehicle_usage_histories.id IS '用车历史候选主键ID。';
+COMMENT ON COLUMN vehicle_usage_histories.tenant_id IS '租户ID。';
+COMMENT ON COLUMN vehicle_usage_histories.history_type IS '历史候选类型。driver_info表示司机信息，vehicle_plate表示车牌号。';
+COMMENT ON COLUMN vehicle_usage_histories.content IS '页面展示的候选内容。';
+COMMENT ON COLUMN vehicle_usage_histories.normalized_content IS '归一化后的候选内容，用于去重。';
+COMMENT ON COLUMN vehicle_usage_histories.usage_count IS '使用次数，用于下拉排序。';
+COMMENT ON COLUMN vehicle_usage_histories.last_used_at IS '最近使用时间，用于同次数候选排序。';
+COMMENT ON COLUMN vehicle_usage_histories.created_by IS '创建人账号或名称。';
+COMMENT ON COLUMN vehicle_usage_histories.remark IS '备注。';
+COMMENT ON COLUMN vehicle_usage_histories.created_at IS '创建时间。';
+COMMENT ON COLUMN vehicle_usage_histories.updated_at IS '更新时间。';
+COMMENT ON COLUMN vehicle_usage_histories.is_deleted IS '是否已删除。';
+COMMENT ON COLUMN vehicle_usage_histories.deleted_at IS '删除时间。';
+COMMENT ON COLUMN vehicle_usage_histories.deleted_by IS '删除人账号或名称。';
+COMMENT ON INDEX uk_vehicle_usage_histories_content_active IS '用车历史候选唯一索引，仅约束同一租户同类型未删除候选。';
+COMMENT ON INDEX idx_vehicle_usage_histories_suggest IS '用车历史候选推荐索引，用于按类型、使用次数和最近使用时间查询。';
 
 COMMIT;

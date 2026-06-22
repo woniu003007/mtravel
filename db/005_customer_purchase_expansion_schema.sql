@@ -34,8 +34,15 @@ CREATE TABLE IF NOT EXISTS common_attachments (
   deleted_by varchar(64),
   created_by varchar(80),
   CONSTRAINT chk_common_attachments_status CHECK (status IN ('active', 'disabled')),
-  CONSTRAINT chk_common_attachments_file_size CHECK (file_size >= 0)
+  CONSTRAINT chk_common_attachments_file_size CHECK (file_size >= 0),
+  CONSTRAINT uk_common_attachments_tenant_id_id UNIQUE (tenant_id, id)
 );
+
+ALTER TABLE common_attachments
+  DROP CONSTRAINT IF EXISTS uk_common_attachments_tenant_id_id;
+
+ALTER TABLE common_attachments
+  ADD CONSTRAINT uk_common_attachments_tenant_id_id UNIQUE (tenant_id, id);
 
 CREATE TABLE IF NOT EXISTS customer_credit_accounts (
   id BIGSERIAL PRIMARY KEY,
@@ -280,6 +287,80 @@ CREATE TABLE IF NOT EXISTS supplier_resource_prices (
     REFERENCES resource_projects (tenant_id, id)
 );
 
+CREATE TABLE IF NOT EXISTS purchase_relation_ticket_templates (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  relation_id bigint NOT NULL,
+  template_name varchar(200) NOT NULL,
+  attachment_id bigint NOT NULL,
+  template_file_url text,
+  original_filename varchar(255),
+  sheet_name varchar(120),
+  header_row integer NOT NULL DEFAULT 1,
+  data_start_row integer NOT NULL DEFAULT 2,
+  status varchar(20) NOT NULL DEFAULT 'active',
+  created_by varchar(80),
+  remark text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  is_deleted boolean NOT NULL DEFAULT false,
+  deleted_at timestamptz,
+  deleted_by varchar(64),
+  CONSTRAINT chk_purchase_relation_ticket_templates_rows CHECK (
+    header_row >= 1 AND data_start_row > header_row
+  ),
+  CONSTRAINT chk_purchase_relation_ticket_templates_status CHECK (status IN ('active', 'disabled')),
+  CONSTRAINT uk_purchase_relation_ticket_templates_tenant_id_id UNIQUE (tenant_id, id),
+  CONSTRAINT fk_purchase_relation_ticket_templates_relation FOREIGN KEY (tenant_id, relation_id)
+    REFERENCES purchase_relations (tenant_id, id),
+  CONSTRAINT fk_purchase_relation_ticket_templates_attachment FOREIGN KEY (tenant_id, attachment_id)
+    REFERENCES common_attachments (tenant_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS purchase_relation_ticket_template_fields (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  template_id bigint NOT NULL,
+  template_header varchar(200) NOT NULL,
+  column_index integer NOT NULL,
+  system_field varchar(50),
+  required boolean NOT NULL DEFAULT false,
+  sort_order integer NOT NULL DEFAULT 0,
+  created_by varchar(80),
+  remark text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  is_deleted boolean NOT NULL DEFAULT false,
+  deleted_at timestamptz,
+  deleted_by varchar(64),
+  CONSTRAINT chk_purchase_relation_ticket_template_fields_column CHECK (column_index >= 1),
+  CONSTRAINT chk_purchase_relation_ticket_template_fields_sort CHECK (sort_order >= 0),
+  CONSTRAINT chk_purchase_relation_ticket_template_fields_system_field CHECK (
+    system_field IS NULL OR system_field IN ('tourist_name', 'certificate_type', 'certificate_no', 'mobile', 'gender', 'birthday', 'remark')
+  ),
+  CONSTRAINT fk_purchase_relation_ticket_template_fields_template FOREIGN KEY (tenant_id, template_id)
+    REFERENCES purchase_relation_ticket_templates (tenant_id, id)
+);
+
+ALTER TABLE purchase_relation_ticket_template_fields
+  ADD COLUMN IF NOT EXISTS fill_mode varchar(30) NOT NULL DEFAULT 'tourist_field',
+  ADD COLUMN IF NOT EXISTS fixed_value varchar(300);
+
+ALTER TABLE purchase_relation_ticket_template_fields
+  ALTER COLUMN system_field DROP NOT NULL;
+
+ALTER TABLE purchase_relation_ticket_template_fields
+  DROP CONSTRAINT IF EXISTS chk_purchase_relation_ticket_template_fields_system_field,
+  DROP CONSTRAINT IF EXISTS chk_purchase_relation_ticket_template_fields_fill_mode;
+
+ALTER TABLE purchase_relation_ticket_template_fields
+  ADD CONSTRAINT chk_purchase_relation_ticket_template_fields_system_field CHECK (
+    system_field IS NULL OR system_field IN ('tourist_name', 'certificate_type', 'certificate_no', 'mobile', 'gender', 'birthday', 'remark')
+  ),
+  ADD CONSTRAINT chk_purchase_relation_ticket_template_fields_fill_mode CHECK (
+    fill_mode IN ('tourist_field', 'sequence', 'constant', 'keep_original')
+  );
+
 CREATE TABLE IF NOT EXISTS supplier_contracts (
   id BIGSERIAL PRIMARY KEY,
   tenant_id bigint NOT NULL REFERENCES tenants(id),
@@ -490,6 +571,16 @@ CREATE TRIGGER trg_supplier_resource_prices_updated_at
 BEFORE UPDATE ON supplier_resource_prices
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_purchase_relation_ticket_templates_updated_at ON purchase_relation_ticket_templates;
+CREATE TRIGGER trg_purchase_relation_ticket_templates_updated_at
+BEFORE UPDATE ON purchase_relation_ticket_templates
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_purchase_relation_ticket_template_fields_updated_at ON purchase_relation_ticket_template_fields;
+CREATE TRIGGER trg_purchase_relation_ticket_template_fields_updated_at
+BEFORE UPDATE ON purchase_relation_ticket_template_fields
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 DROP TRIGGER IF EXISTS trg_supplier_contracts_updated_at ON supplier_contracts;
 CREATE TRIGGER trg_supplier_contracts_updated_at
 BEFORE UPDATE ON supplier_contracts
@@ -586,6 +677,22 @@ CREATE INDEX IF NOT EXISTS idx_supplier_resource_prices_tenant_deleted_status
   ON supplier_resource_prices (tenant_id, is_deleted, status);
 CREATE UNIQUE INDEX IF NOT EXISTS uk_supplier_resource_prices_tenant_relation_project_active
   ON supplier_resource_prices (tenant_id, relation_id, resource_project_id)
+  WHERE is_deleted = false;
+
+CREATE INDEX IF NOT EXISTS idx_purchase_relation_ticket_templates_tenant_deleted_relation
+  ON purchase_relation_ticket_templates (tenant_id, is_deleted, relation_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_relation_ticket_templates_tenant_deleted_status
+  ON purchase_relation_ticket_templates (tenant_id, is_deleted, status);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_purchase_relation_ticket_templates_tenant_relation_active
+  ON purchase_relation_ticket_templates (tenant_id, relation_id)
+  WHERE is_deleted = false;
+
+CREATE INDEX IF NOT EXISTS idx_purchase_relation_ticket_template_fields_tenant_deleted_template
+  ON purchase_relation_ticket_template_fields (tenant_id, is_deleted, template_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_relation_ticket_template_fields_tenant_deleted_system
+  ON purchase_relation_ticket_template_fields (tenant_id, is_deleted, system_field);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_purchase_relation_ticket_template_fields_tenant_template_column_active
+  ON purchase_relation_ticket_template_fields (tenant_id, template_id, column_index)
   WHERE is_deleted = false;
 
 CREATE INDEX IF NOT EXISTS idx_supplier_contracts_tenant_deleted_supplier
@@ -810,6 +917,45 @@ COMMENT ON COLUMN supplier_resource_prices.is_deleted IS '是否已删除。fals
 COMMENT ON COLUMN supplier_resource_prices.deleted_at IS '删除时间。未删除时为空。';
 COMMENT ON COLUMN supplier_resource_prices.deleted_by IS '删除人账号或名称。未删除时为空。';
 
+COMMENT ON TABLE purchase_relation_ticket_templates IS '采购关系游客名单模板表。用于维护某个景区资源和供应商渠道对应的游客名单Excel模板。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.id IS '游客名单模板主键ID，系统内部使用。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.tenant_id IS '租户ID，标识该模板属于哪一家地接公司。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.relation_id IS '采购关系ID，标识该模板属于哪个资源和供应商绑定关系。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.template_name IS '模板名称，便于业务人员识别不同票务渠道模板。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.attachment_id IS '模板附件ID，关联公共附件表。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.template_file_url IS '模板文件访问地址快照。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.original_filename IS '用户上传时的模板文件名快照。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.sheet_name IS 'Excel工作表名称。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.header_row IS '表头行号，按Excel行号从1开始。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.data_start_row IS '游客数据开始行号，按Excel行号从1开始，必须大于表头行。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.status IS '模板状态。active表示启用，disabled表示停用。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.created_by IS '创建人账号或名称。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.remark IS '模板备注。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.created_at IS '创建时间。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.updated_at IS '更新时间，由触发器自动维护。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.is_deleted IS '是否已删除。false表示正常，true表示已软删除。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.deleted_at IS '删除时间。未删除时为空。';
+COMMENT ON COLUMN purchase_relation_ticket_templates.deleted_by IS '删除人账号或名称。未删除时为空。';
+
+COMMENT ON TABLE purchase_relation_ticket_template_fields IS '采购关系游客名单模板字段映射表。用于维护Excel模板列与系统游客字段的对应关系。';
+COMMENT ON COLUMN purchase_relation_ticket_template_fields.id IS '字段映射主键ID，系统内部使用。';
+COMMENT ON COLUMN purchase_relation_ticket_template_fields.tenant_id IS '租户ID，标识该字段映射属于哪一家地接公司。';
+COMMENT ON COLUMN purchase_relation_ticket_template_fields.template_id IS '游客名单模板ID。';
+COMMENT ON COLUMN purchase_relation_ticket_template_fields.template_header IS 'Excel模板表头名称。';
+COMMENT ON COLUMN purchase_relation_ticket_template_fields.column_index IS 'Excel列序号，从1开始。';
+COMMENT ON COLUMN purchase_relation_ticket_template_fields.system_field IS '系统游客字段编码。游客字段填充时使用，例如tourist_name、certificate_no。';
+COMMENT ON COLUMN purchase_relation_ticket_template_fields.fill_mode IS '填充方式。tourist_field表示游客字段，sequence表示自动序号，constant表示固定值，keep_original表示保留模板原内容。';
+COMMENT ON COLUMN purchase_relation_ticket_template_fields.fixed_value IS '固定值填充内容，仅填充方式为constant时使用。';
+COMMENT ON COLUMN purchase_relation_ticket_template_fields.required IS '是否必填。true表示生成或校验游客名单时该字段不能为空。';
+COMMENT ON COLUMN purchase_relation_ticket_template_fields.sort_order IS '排序号，数字越小越靠前。';
+COMMENT ON COLUMN purchase_relation_ticket_template_fields.created_by IS '创建人账号或名称。';
+COMMENT ON COLUMN purchase_relation_ticket_template_fields.remark IS '字段映射备注。';
+COMMENT ON COLUMN purchase_relation_ticket_template_fields.created_at IS '创建时间。';
+COMMENT ON COLUMN purchase_relation_ticket_template_fields.updated_at IS '更新时间，由触发器自动维护。';
+COMMENT ON COLUMN purchase_relation_ticket_template_fields.is_deleted IS '是否已删除。false表示正常，true表示已软删除。';
+COMMENT ON COLUMN purchase_relation_ticket_template_fields.deleted_at IS '删除时间。未删除时为空。';
+COMMENT ON COLUMN purchase_relation_ticket_template_fields.deleted_by IS '删除人账号或名称。未删除时为空。';
+
 COMMENT ON TABLE supplier_contracts IS '供应商合同表。用于维护采购合同台账，记录合同期限、采购价格说明、结算条款、合同附件和到期提醒。';
 COMMENT ON COLUMN supplier_contracts.id IS '供应商合同主键ID，系统内部使用。';
 COMMENT ON COLUMN supplier_contracts.tenant_id IS '租户ID，标识该供应商合同属于哪一家地接公司。';
@@ -927,6 +1073,8 @@ COMMENT ON INDEX uk_purchase_resources_tenant_type_name_city_active IS '采购�
 COMMENT ON INDEX uk_resource_projects_tenant_type_name_active IS '资源费用项目唯一索引，仅约束同资源类型下未删除项目名称。';
 COMMENT ON INDEX uk_purchase_relations_tenant_resource_supplier_group_active IS '采购关系唯一索引，仅约束同资源、同供应商、同成团数量下的未删除记录。';
 COMMENT ON INDEX uk_supplier_resource_prices_tenant_relation_project_active IS '供应商资源价格唯一索引，仅约束同采购关系、同费用项目下的未删除价格记录。';
+COMMENT ON INDEX uk_purchase_relation_ticket_templates_tenant_relation_active IS '采购关系游客名单模板唯一索引，仅约束同采购关系下的未删除模板配置。';
+COMMENT ON INDEX uk_purchase_relation_ticket_template_fields_tenant_template_column_active IS '游客名单模板字段列唯一索引，仅约束同模板下的未删除列映射。';
 COMMENT ON INDEX uk_supplier_contracts_tenant_contract_no_active IS '供应商合同编号唯一索引，仅约束未删除记录。';
 COMMENT ON INDEX uk_hotel_resources_tenant_name_room_active IS '酒店名称和房型唯一索引，仅约束未删除记录。';
 COMMENT ON INDEX uk_scenic_resources_tenant_name_ticket_active IS '景区名称和票种唯一索引，仅约束未删除记录。';

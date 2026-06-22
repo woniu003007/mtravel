@@ -14,12 +14,18 @@ import com.mtravel.platform.sales.product.dto.SalesProductRoadbookPointRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductRoadbookPointResponse;
 import com.mtravel.platform.sales.product.dto.SalesProductResponse;
 import com.mtravel.platform.sales.product.dto.SalesProductSaveRequest;
+import com.mtravel.platform.sales.product.dto.SalesProductVehicleInquiryRequest;
+import com.mtravel.platform.sales.product.dto.SalesProductVehicleInquiryResponse;
+import com.mtravel.platform.sales.product.dto.SalesProductVehicleQuoteSnapshotRequest;
+import com.mtravel.platform.sales.product.dto.SalesProductVehicleQuoteSnapshotResponse;
 import com.mtravel.platform.sales.product.entity.SalesProductArrangementItemEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductArrangementPriceLineEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductDescriptionEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductItineraryDayEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductRoadbookPointEntity;
+import com.mtravel.platform.sales.product.entity.SalesProductVehicleInquiryEntity;
+import com.mtravel.platform.sales.product.entity.SalesProductVehicleQuoteSnapshotEntity;
 import com.mtravel.platform.sales.product.enums.SalesProductArrangementType;
 import com.mtravel.platform.sales.product.enums.SalesProductDomesticType;
 import com.mtravel.platform.sales.product.enums.SalesProductSettlementType;
@@ -31,6 +37,8 @@ import com.mtravel.platform.sales.product.mapper.SalesProductDescriptionMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductItineraryDayMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductRoadbookPointMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductVehicleInquiryMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductVehicleQuoteSnapshotMapper;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.HashSet;
@@ -57,6 +65,8 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
     private final SalesProductArrangementItemMapper arrangementMapper;
     private final SalesProductArrangementPriceLineMapper priceLineMapper;
     private final SalesProductRoadbookPointMapper roadbookMapper;
+    private final SalesProductVehicleQuoteSnapshotMapper vehicleQuoteSnapshotMapper;
+    private final SalesProductVehicleInquiryMapper vehicleInquiryMapper;
 
     public SalesProductService(
             SalesProductMapper productMapper,
@@ -64,7 +74,9 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
             SalesProductDescriptionMapper descriptionMapper,
             SalesProductArrangementItemMapper arrangementMapper,
             SalesProductArrangementPriceLineMapper priceLineMapper,
-            SalesProductRoadbookPointMapper roadbookMapper
+            SalesProductRoadbookPointMapper roadbookMapper,
+            SalesProductVehicleQuoteSnapshotMapper vehicleQuoteSnapshotMapper,
+            SalesProductVehicleInquiryMapper vehicleInquiryMapper
     ) {
         super(productMapper);
         this.productMapper = productMapper;
@@ -73,6 +85,8 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
         this.arrangementMapper = arrangementMapper;
         this.priceLineMapper = priceLineMapper;
         this.roadbookMapper = roadbookMapper;
+        this.vehicleQuoteSnapshotMapper = vehicleQuoteSnapshotMapper;
+        this.vehicleInquiryMapper = vehicleInquiryMapper;
     }
 
     /**
@@ -363,6 +377,91 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
             entity.setIsDeleted(false);
             arrangementMapper.insert(entity);
             saveArrangementPriceLines(productId, entity.getId(), item.priceLines(), tenantId, operator);
+            saveVehicleQuoteSnapshot(productId, entity.getId(), item.vehicleQuoteSnapshot(), tenantId, operator);
+            saveVehicleInquiryRecords(productId, entity.getId(), item.vehicleInquiryRecords(), tenantId, operator);
+        }
+    }
+
+    /** 保存用车报价测算快照。非用车安排也允许为空，避免通用安排保存被迫携带用车字段。 */
+    private void saveVehicleQuoteSnapshot(
+            Long productId,
+            Long arrangementItemId,
+            SalesProductVehicleQuoteSnapshotRequest item,
+            Long tenantId,
+            String operator
+    ) {
+        if (item == null) {
+            return;
+        }
+        SalesProductVehicleQuoteSnapshotEntity entity = new SalesProductVehicleQuoteSnapshotEntity();
+        entity.setTenantId(tenantId);
+        entity.setProductId(productId);
+        entity.setArrangementItemId(arrangementItemId);
+        entity.setScheduleStartDay(clean(item.scheduleStartDay()));
+        entity.setScheduleEndDay(clean(item.scheduleEndDay()));
+        entity.setStartDayNo(item.startDayNo());
+        entity.setEndDayNo(item.endDayNo());
+        entity.setSyncedDistanceMeters(number(item.syncedDistanceMeters()));
+        entity.setSyncedDurationSeconds(number(item.syncedDurationSeconds()));
+        entity.setRouteSummary(clean(item.routeSummary()));
+        entity.setQuoteRuleId(item.quoteRuleId());
+        entity.setRuleVehicleType(clean(item.ruleVehicleType()));
+        entity.setRuleProvince(clean(item.ruleProvince()));
+        entity.setRuleCity(clean(item.ruleCity()));
+        entity.setRuleDistrict(clean(item.ruleDistrict()));
+        entity.setRuleBasePrice(decimal(item.ruleBasePrice()));
+        entity.setRuleBaseKilometers(decimal(item.ruleBaseKilometers()));
+        entity.setRuleExtraKilometerPrice(decimal(item.ruleExtraKilometerPrice()));
+        entity.setRuleMinimumPrice(decimal(item.ruleMinimumPrice()));
+        entity.setRuleFloatRate(item.ruleFloatRate() == null ? BigDecimal.ONE : item.ruleFloatRate());
+        entity.setCalculatedAmount(decimal(item.calculatedAmount()));
+        entity.setConfirmedAmount(decimal(item.confirmedAmount()));
+        entity.setRemark(clean(item.remark()));
+        entity.setCreatedBy(operator);
+        entity.setIsDeleted(false);
+        vehicleQuoteSnapshotMapper.insert(entity);
+    }
+
+    /** 保存用车询价记录。每次产品保存都会重建当前页面提交的询价列表。 */
+    private void saveVehicleInquiryRecords(
+            Long productId,
+            Long arrangementItemId,
+            List<SalesProductVehicleInquiryRequest> records,
+            Long tenantId,
+            String operator
+    ) {
+        if (records == null) {
+            return;
+        }
+        int index = 1;
+        for (SalesProductVehicleInquiryRequest item : records) {
+            SalesProductVehicleInquiryEntity entity = new SalesProductVehicleInquiryEntity();
+            entity.setTenantId(tenantId);
+            entity.setProductId(productId);
+            entity.setArrangementItemId(arrangementItemId);
+            entity.setSortOrder(item.sortOrder() == null ? index : item.sortOrder());
+            entity.setInquiryMethod(StringUtils.hasText(item.inquiryMethod()) ? clean(item.inquiryMethod()) : "wechat_group");
+            entity.setInquiryPerson(clean(item.inquiryPerson()));
+            entity.setInquiryTime(item.inquiryTime());
+            entity.setGroupName(clean(item.groupName()));
+            entity.setSupplierId(item.supplierId());
+            entity.setSupplierName(clean(item.supplierName()));
+            entity.setQuotedAmount(decimal(item.quotedAmount()));
+            entity.setIncludesToll(Boolean.TRUE.equals(item.includesToll()));
+            entity.setIncludesParking(Boolean.TRUE.equals(item.includesParking()));
+            entity.setIncludesDriverMeal(Boolean.TRUE.equals(item.includesDriverMeal()));
+            entity.setIncludesDriverLodging(Boolean.TRUE.equals(item.includesDriverLodging()));
+            entity.setAvailableVehicleCount(number(item.availableVehicleCount()));
+            entity.setReplyPerson(clean(item.replyPerson()));
+            entity.setReplyTime(item.replyTime());
+            entity.setAttachmentId(item.attachmentId());
+            entity.setAttachmentUrl(clean(item.attachmentUrl()));
+            entity.setSelected(Boolean.TRUE.equals(item.selected()));
+            entity.setRemark(clean(item.remark()));
+            entity.setCreatedBy(operator);
+            entity.setIsDeleted(false);
+            vehicleInquiryMapper.insert(entity);
+            index++;
         }
     }
 
@@ -438,6 +537,18 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
         roadbook.setDeletedAt(now);
         roadbook.setDeletedBy(operator);
         roadbookMapper.update(roadbook, childUpdate(tenantId, productId));
+
+        SalesProductVehicleQuoteSnapshotEntity vehicleQuote = new SalesProductVehicleQuoteSnapshotEntity();
+        vehicleQuote.setIsDeleted(true);
+        vehicleQuote.setDeletedAt(now);
+        vehicleQuote.setDeletedBy(operator);
+        vehicleQuoteSnapshotMapper.update(vehicleQuote, childUpdate(tenantId, productId));
+
+        SalesProductVehicleInquiryEntity vehicleInquiry = new SalesProductVehicleInquiryEntity();
+        vehicleInquiry.setIsDeleted(true);
+        vehicleInquiry.setDeletedAt(now);
+        vehicleInquiry.setDeletedBy(operator);
+        vehicleInquiryMapper.update(vehicleInquiry, childUpdate(tenantId, productId));
     }
 
     /** 构造子表更新条件，所有子表修改都必须带租户和产品边界。 */
@@ -525,6 +636,32 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
                         SalesProductArrangementPriceLineEntity::getArrangementItemId,
                         Collectors.mapping(SalesProductArrangementPriceLineResponse::fromEntity, Collectors.toList())
                 ));
+        Map<Long, SalesProductVehicleQuoteSnapshotResponse> vehicleQuoteByItem = vehicleQuoteSnapshotMapper.selectList(
+                        new QueryWrapper<SalesProductVehicleQuoteSnapshotEntity>()
+                                .eq("tenant_id", tenantId)
+                                .eq("product_id", productId)
+                                .eq("is_deleted", false)
+                                .orderByAsc("arrangement_item_id")
+                                .orderByDesc("id"))
+                .stream()
+                .collect(Collectors.toMap(
+                        SalesProductVehicleQuoteSnapshotEntity::getArrangementItemId,
+                        SalesProductVehicleQuoteSnapshotResponse::fromEntity,
+                        (first, ignored) -> first
+                ));
+        Map<Long, List<SalesProductVehicleInquiryResponse>> vehicleInquiriesByItem = vehicleInquiryMapper.selectList(
+                        new QueryWrapper<SalesProductVehicleInquiryEntity>()
+                                .eq("tenant_id", tenantId)
+                                .eq("product_id", productId)
+                                .eq("is_deleted", false)
+                                .orderByAsc("arrangement_item_id")
+                                .orderByAsc("sort_order")
+                                .orderByAsc("id"))
+                .stream()
+                .collect(Collectors.groupingBy(
+                        SalesProductVehicleInquiryEntity::getArrangementItemId,
+                        Collectors.mapping(SalesProductVehicleInquiryResponse::fromEntity, Collectors.toList())
+                ));
         List<SalesProductArrangementItemResponse> arrangementItems = arrangementMapper.selectList(
                 new QueryWrapper<SalesProductArrangementItemEntity>()
                         .eq("tenant_id", tenantId)
@@ -535,7 +672,9 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
                 .stream()
                 .map(item -> SalesProductArrangementItemResponse.fromEntity(
                         item,
-                        priceLinesByItem.getOrDefault(item.getId(), List.of())
+                        priceLinesByItem.getOrDefault(item.getId(), List.of()),
+                        vehicleQuoteByItem.get(item.getId()),
+                        vehicleInquiriesByItem.getOrDefault(item.getId(), List.of())
                 ))
                 .toList();
         return SalesProductResponse.fromDetail(product, description, itineraryDays, arrangementItems);

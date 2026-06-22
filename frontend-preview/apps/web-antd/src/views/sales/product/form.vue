@@ -60,6 +60,7 @@ const route = useRoute();
 const router = useRouter();
 const regionOptions = buildRegionOptions();
 const ROADBOOK_SEARCH_DEBOUNCE_MS = 700;
+const TEAM_PROFILE_MARKER = '[[TEAM_PROFILE_JSON]]';
 
 const statusOptions = [
   { label: '启用', value: 'active' },
@@ -89,6 +90,19 @@ function normalizeEditTab(key: string) {
   return editTabs.some((item) => item.key === key) ? key : 'basic';
 }
 
+function plainProductRemark(rawRemark?: string) {
+  const text = String(rawRemark || '');
+  const markerIndex = text.indexOf(TEAM_PROFILE_MARKER);
+  return (markerIndex >= 0 ? text.slice(0, markerIndex) : text).trim() || undefined;
+}
+
+function mergeProductRemarkWithTeamProfile(plainRemark?: string, originalRemark?: string) {
+  const source = String(originalRemark || '');
+  const markerIndex = source.indexOf(TEAM_PROFILE_MARKER);
+  const profileBlock = markerIndex >= 0 ? source.slice(markerIndex).trim() : '';
+  return [String(plainRemark || '').trim(), profileBlock].filter(Boolean).join('\n') || undefined;
+}
+
 const loading = ref(false);
 const dictionaryLoading = ref(false);
 const relatedHotelLoading = ref(false);
@@ -97,6 +111,7 @@ const saving = ref(false);
 const formRegionPath = ref<RegionPath>([]);
 const activeEditTab = ref(normalizeEditTab(String(route.query.tab || 'basic')));
 const formState = reactive<ProductFormState>(createDefaultProductForm());
+const originalRemarkWithTeamProfile = ref<string>();
 const businessTypes = ref<DictItem[]>([]);
 const receptionStandards = ref<DictItem[]>([]);
 const productThemes = ref<DictItem[]>([]);
@@ -131,6 +146,11 @@ const productId = computed(() => {
   const value = route.params.id;
   const id = Array.isArray(value) ? value[0] : value;
   return id ? Number(id) : undefined;
+});
+const requestedRoadbookDayIndex = computed(() => {
+  const value = Array.isArray(route.query.roadbookDay) ? route.query.roadbookDay[0] : route.query.roadbookDay;
+  const dayNo = Number(value || 0);
+  return dayNo > 0 ? dayNo - 1 : undefined;
 });
 
 const isEdit = computed(() => Boolean(productId.value));
@@ -235,6 +255,10 @@ function roadbookDurationText(day: SalesProductApi.ItineraryDay) {
 const activeRoadbookDay = computed(() => (
   activeRoadbookDayIndex.value === undefined ? undefined : formState.itineraryDays?.[activeRoadbookDayIndex.value]
 ));
+const roadbookDaySwitchOptions = computed(() => (formState.itineraryDays || []).map((day, index) => ({
+  label: `第 ${day.dayNo} 天${day.dayTitle ? `｜${day.dayTitle}` : ''}`,
+  value: index,
+})));
 
 function ensureRoadbookPoints(day: SalesProductApi.ItineraryDay) {
   if (!day.roadbookPoints) {
@@ -251,6 +275,30 @@ function openRoadbookDrawer(index: number) {
   roadbookDrawerOpen.value = true;
   nextTick(() => {
     initRoadbookMap();
+  });
+}
+
+/** 按团队安排页传入的 roadbookDay 自动打开对应天的全屏路书地图。 */
+async function openRequestedRoadbookDrawer() {
+  const index = requestedRoadbookDayIndex.value;
+  if (index === undefined) return;
+  activeEditTab.value = 'itinerary';
+  await nextTick();
+  const maxIndex = Math.max(0, (formState.itineraryDays?.length || 1) - 1);
+  openRoadbookDrawer(Math.min(Math.max(index, 0), maxIndex));
+}
+
+function switchRoadbookDay(index?: number) {
+  if (index === undefined) return;
+  activeRoadbookDayIndex.value = Number(index);
+  roadbookKeyword.value = '';
+  roadbookTipOptions.value = [];
+  const day = formState.itineraryDays?.[Number(index)];
+  if (day) {
+    ensureRoadbookPoints(day);
+  }
+  nextTick(() => {
+    renderRoadbookMapPoints();
   });
 }
 
@@ -592,6 +640,7 @@ async function loadDictionaries() {
 
 function fillForm(detail: SalesProductApi.Item) {
   formRegionPath.value = buildRegionPath(detail.province, detail.city, detail.district);
+  originalRemarkWithTeamProfile.value = detail.remark;
   Object.assign(formState, {
     arrangementItems: detail.arrangementItems || [],
     attentionItems: detail.attentionItems,
@@ -613,7 +662,7 @@ function fillForm(detail: SalesProductApi.Item) {
     productTheme: detail.productTheme,
     province: detail.province,
     receptionStandard: detail.receptionStandard,
-    remark: detail.remark,
+    remark: plainProductRemark(detail.remark),
     shoppingArrangement: detail.shoppingArrangement,
     singleRoomDifference: detail.singleRoomDifference ?? 0,
     status: detail.status || 'active',
@@ -695,8 +744,10 @@ async function saveProduct() {
   saving.value = true;
   try {
     const payload = buildSalesProductPayload(formState, formRegionPath.value);
+    payload.remark = mergeProductRemarkWithTeamProfile(formState.remark, originalRemarkWithTeamProfile.value);
     if (productId.value) {
       await updateSalesProduct(productId.value, payload);
+      originalRemarkWithTeamProfile.value = payload.remark;
       message.success('产品已更新');
     } else {
       await createSalesProduct(payload);
@@ -718,6 +769,7 @@ onMounted(async () => {
     activeEditTab.value = 'basic';
   }
   await Promise.all([loadDictionaries(), loadDetail(), loadRelatedHotelOptions()]);
+  await openRequestedRoadbookDrawer();
 });
 </script>
 
@@ -1140,6 +1192,12 @@ onMounted(async () => {
             </div>
           </div>
           <div class="roadbook-toolbar-actions">
+            <Select
+              v-model:value="activeRoadbookDayIndex"
+              class="roadbook-day-switch"
+              :options="roadbookDaySwitchOptions"
+              @change="(value) => switchRoadbookDay(Number(value))"
+            />
             <Tag color="blue">{{ activeRoadbookDay.roadbookPoints?.length || 0 }} 个地点</Tag>
             <Button type="primary" :loading="roadbookCalculating" @click="calculateActiveRoadbookRoute">
               计算路线
@@ -1608,6 +1666,10 @@ onMounted(async () => {
   flex-shrink: 0;
   gap: 10px;
   align-items: center;
+}
+
+.roadbook-day-switch {
+  min-width: 180px;
 }
 
 .roadbook-workspace-main {

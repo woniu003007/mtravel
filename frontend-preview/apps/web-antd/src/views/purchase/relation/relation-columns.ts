@@ -12,5 +12,5 @@ export const purchaseRelationColumns = [
   { dataIndex: 'contactPhone', key: 'contactPhone', title: '电话', width: 150 },
   { dataIndex: 'createdBy', key: 'createdBy', title: '创建人', width: 110 },
   { dataIndex: 'createdAt', key: 'createdAt', title: '创建时间', width: 170 },
-  { fixed: 'right' as const, key: 'action', title: '操作', width: 280 },
+  { fixed: 'right' as const, key: 'action', title: '操作', width: 340 },
 ];

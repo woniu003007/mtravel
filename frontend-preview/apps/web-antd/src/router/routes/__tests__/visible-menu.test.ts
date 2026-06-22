@@ -1,0 +1,109 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { describe, expect, it } from 'vitest';
+
+const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
+const routeModuleDir = resolve(appRoot, 'src/router/routes/modules');
+const undevelopedPrefixes = [
+  '/finance',
+  '/statistics',
+  '/system',
+  '/sales/order',
+  '/sales/team',
+  '/sales/schedule',
+  '/sales/group-booking',
+  '/sales/combine-order',
+  '/sales/shared-car-cost',
+  '/sales/expense-change',
+  '/sales/e-contract',
+  '/sales/ticket-booking',
+  '/sales/tourist',
+  '/sales/name-check',
+  '/sales/ai-service',
+  '/sales/smart-quote',
+  '/sales/knowledge-base',
+  '/dispatch/team-arrange',
+  '/dispatch/team-audit',
+  '/dispatch/guide-schedule',
+  '/dispatch/transfer-info',
+  '/dispatch/guide-expense',
+  '/dispatch/car-inquiry',
+  '/enterprise/contract-template',
+  '/enterprise/station',
+];
+
+function readRouteModule(fileName: string) {
+  return readFileSync(resolve(routeModuleDir, fileName), 'utf8');
+}
+
+describe('visible business menu routes', () => {
+  it('does not expose undeveloped prototype pages as visible menus', () => {
+    const businessRouteFiles = readdirSync(routeModuleDir)
+      .filter((fileName) => fileName.endsWith('.ts'))
+      .filter((fileName) => !fileName.endsWith('.test.ts'))
+      .filter((fileName) => !['dashboard.ts', 'demos.ts', 'vben.ts'].includes(fileName));
+
+    for (const fileName of businessRouteFiles) {
+      const source = readRouteModule(fileName);
+
+      // 可见菜单只能指向真实业务页面；PrototypePage 是原型占位页，不能继续出现在侧边栏。
+      expect(source, `${fileName} still references PrototypePage`).not.toContain(
+        'PrototypePage',
+      );
+    }
+  });
+
+  it('keeps only the currently developed sidebar menu entries', () => {
+    const allBusinessRoutes = readdirSync(routeModuleDir)
+      .filter((fileName) => fileName.endsWith('.ts'))
+      .filter((fileName) => !fileName.endsWith('.test.ts'))
+      .map(readRouteModule)
+      .join('\n');
+
+    expect(allBusinessRoutes).toContain("title: '客户单位'");
+    expect(allBusinessRoutes).toContain("title: '产品管理'");
+    expect(allBusinessRoutes).toContain("title: '自控房源与房态库存'");
+    expect(allBusinessRoutes).toContain("title: '导游管理'");
+    expect(allBusinessRoutes).toContain("title: '产品字典'");
+
+    expect(allBusinessRoutes).not.toContain("title: '团期管理'");
+    expect(allBusinessRoutes).not.toContain("title: '财务管理'");
+    expect(allBusinessRoutes).not.toContain("title: '数据统计'");
+    expect(allBusinessRoutes).not.toContain("title: '系统设置'");
+    expect(allBusinessRoutes).not.toContain("title: '合同模板管理'");
+    expect(allBusinessRoutes).not.toContain("title: '接送站管理'");
+  });
+
+  it('does not link dashboard shortcuts to undeveloped pages', () => {
+    const workspaceSource = readFileSync(
+      resolve(appRoot, 'src/views/dashboard/workspace/index.vue'),
+      'utf8',
+    );
+    const prototypeDataSource = readFileSync(
+      resolve(appRoot, 'src/views/_business/prototype-data.ts'),
+      'utf8',
+    );
+    const prototypeModuleChunk = prototypeDataSource.match(
+      /export const prototypeModules[\s\S]*?\n\];/,
+    )?.[0] ?? '';
+    const workbenchAlertChunk = prototypeDataSource.match(
+      /export const workbenchAlerts[\s\S]*?\n\];/,
+    )?.[0] ?? '';
+
+    for (const prefix of undevelopedPrefixes) {
+      expect(workspaceSource, `workspace still links ${prefix}`).not.toContain(
+        `navTo('${prefix}`,
+      );
+      expect(
+        prototypeModuleChunk,
+        `prototypeModules still links ${prefix}`,
+      ).not.toContain(`path: '${prefix}`);
+      expect(
+        workbenchAlertChunk,
+        `workbenchAlerts still links ${prefix}`,
+      ).not.toContain(`path: '${prefix}`);
+    }
+  });
+});

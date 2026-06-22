@@ -8,18 +8,24 @@ import com.mtravel.platform.sales.product.dto.SalesProductItineraryDayRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductRoadbookPointRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductResponse;
 import com.mtravel.platform.sales.product.dto.SalesProductSaveRequest;
+import com.mtravel.platform.sales.product.dto.SalesProductVehicleInquiryRequest;
+import com.mtravel.platform.sales.product.dto.SalesProductVehicleQuoteSnapshotRequest;
 import com.mtravel.platform.sales.product.entity.SalesProductArrangementItemEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductArrangementPriceLineEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductDescriptionEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductItineraryDayEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductRoadbookPointEntity;
+import com.mtravel.platform.sales.product.entity.SalesProductVehicleInquiryEntity;
+import com.mtravel.platform.sales.product.entity.SalesProductVehicleQuoteSnapshotEntity;
 import com.mtravel.platform.sales.product.mapper.SalesProductArrangementItemMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductArrangementPriceLineMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductDescriptionMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductItineraryDayMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductRoadbookPointMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductVehicleInquiryMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductVehicleQuoteSnapshotMapper;
 import java.math.BigDecimal;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -49,13 +55,26 @@ class SalesProductServiceTest {
         SalesProductArrangementItemMapper arrangementMapper = mock(SalesProductArrangementItemMapper.class);
         SalesProductArrangementPriceLineMapper priceLineMapper = mock(SalesProductArrangementPriceLineMapper.class);
         SalesProductRoadbookPointMapper roadbookMapper = mock(SalesProductRoadbookPointMapper.class);
-        SalesProductService service = service(productMapper, itineraryMapper, descriptionMapper, arrangementMapper, priceLineMapper, roadbookMapper);
+        SalesProductVehicleQuoteSnapshotMapper vehicleQuoteMapper = mock(SalesProductVehicleQuoteSnapshotMapper.class);
+        SalesProductVehicleInquiryMapper vehicleInquiryMapper = mock(SalesProductVehicleInquiryMapper.class);
+        SalesProductService service = service(
+                productMapper,
+                itineraryMapper,
+                descriptionMapper,
+                arrangementMapper,
+                priceLineMapper,
+                roadbookMapper,
+                vehicleQuoteMapper,
+                vehicleInquiryMapper
+        );
         ArgumentCaptor<SalesProductEntity> productCaptor = ArgumentCaptor.forClass(SalesProductEntity.class);
         ArgumentCaptor<SalesProductItineraryDayEntity> itineraryCaptor = ArgumentCaptor.forClass(SalesProductItineraryDayEntity.class);
         ArgumentCaptor<SalesProductDescriptionEntity> descriptionCaptor = ArgumentCaptor.forClass(SalesProductDescriptionEntity.class);
         ArgumentCaptor<SalesProductArrangementItemEntity> arrangementCaptor = ArgumentCaptor.forClass(SalesProductArrangementItemEntity.class);
         ArgumentCaptor<SalesProductArrangementPriceLineEntity> priceLineCaptor = ArgumentCaptor.forClass(SalesProductArrangementPriceLineEntity.class);
         ArgumentCaptor<SalesProductRoadbookPointEntity> roadbookCaptor = ArgumentCaptor.forClass(SalesProductRoadbookPointEntity.class);
+        ArgumentCaptor<SalesProductVehicleQuoteSnapshotEntity> vehicleQuoteCaptor = ArgumentCaptor.forClass(SalesProductVehicleQuoteSnapshotEntity.class);
+        ArgumentCaptor<SalesProductVehicleInquiryEntity> vehicleInquiryCaptor = ArgumentCaptor.forClass(SalesProductVehicleInquiryEntity.class);
         when(productMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
         when(productMapper.insert(any(SalesProductEntity.class))).thenAnswer((Answer<Integer>) invocation -> {
             SalesProductEntity entity = invocation.getArgument(0);
@@ -76,6 +95,8 @@ class SalesProductServiceTest {
         when(descriptionMapper.selectOne(any(Wrapper.class))).thenReturn(null);
         when(arrangementMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
         when(priceLineMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(vehicleQuoteMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(vehicleInquiryMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
         when(arrangementMapper.insert(any(SalesProductArrangementItemEntity.class))).thenAnswer((Answer<Integer>) invocation -> {
             SalesProductArrangementItemEntity entity = invocation.getArgument(0);
             entity.setId(9901L);
@@ -112,6 +133,14 @@ class SalesProductServiceTest {
         assertThat(priceLineCaptor.getValue().getArrangementItemId()).isEqualTo(9901L);
         assertThat(priceLineCaptor.getValue().getProjectName()).isEqualTo("标间");
         assertThat(priceLineCaptor.getValue().getAmount()).isEqualByComparingTo("220.00");
+        verify(vehicleQuoteMapper).insert(vehicleQuoteCaptor.capture());
+        assertThat(vehicleQuoteCaptor.getValue().getArrangementItemId()).isEqualTo(9901L);
+        assertThat(vehicleQuoteCaptor.getValue().getSyncedDistanceMeters()).isEqualTo(123_000);
+        assertThat(vehicleQuoteCaptor.getValue().getCalculatedAmount()).isEqualByComparingTo("1450.00");
+        verify(vehicleInquiryMapper).insert(vehicleInquiryCaptor.capture());
+        assertThat(vehicleInquiryCaptor.getValue().getSupplierName()).isEqualTo("苏州车队");
+        assertThat(vehicleInquiryCaptor.getValue().getQuotedAmount()).isEqualByComparingTo("1380.00");
+        assertThat(vehicleInquiryCaptor.getValue().getSelected()).isTrue();
     }
 
     @Test
@@ -123,7 +152,9 @@ class SalesProductServiceTest {
                 mock(SalesProductDescriptionMapper.class),
                 mock(SalesProductArrangementItemMapper.class),
                 mock(SalesProductArrangementPriceLineMapper.class),
-                mock(SalesProductRoadbookPointMapper.class)
+                mock(SalesProductRoadbookPointMapper.class),
+                mock(SalesProductVehicleQuoteSnapshotMapper.class),
+                mock(SalesProductVehicleInquiryMapper.class)
         );
         when(productMapper.selectCount(any(Wrapper.class))).thenReturn(1L);
 
@@ -138,9 +169,20 @@ class SalesProductServiceTest {
             SalesProductDescriptionMapper descriptionMapper,
             SalesProductArrangementItemMapper arrangementMapper,
             SalesProductArrangementPriceLineMapper priceLineMapper,
-            SalesProductRoadbookPointMapper roadbookMapper
+            SalesProductRoadbookPointMapper roadbookMapper,
+            SalesProductVehicleQuoteSnapshotMapper vehicleQuoteMapper,
+            SalesProductVehicleInquiryMapper vehicleInquiryMapper
     ) {
-        return new SalesProductService(productMapper, itineraryMapper, descriptionMapper, arrangementMapper, priceLineMapper, roadbookMapper);
+        return new SalesProductService(
+                productMapper,
+                itineraryMapper,
+                descriptionMapper,
+                arrangementMapper,
+                priceLineMapper,
+                roadbookMapper,
+                vehicleQuoteMapper,
+                vehicleInquiryMapper
+        );
     }
 
     private SalesProductSaveRequest request() {
@@ -256,6 +298,49 @@ class SalesProductServiceTest {
                                 BigDecimal.ZERO,
                                 1,
                                 "按确认占房执行"
+                        )),
+                        new SalesProductVehicleQuoteSnapshotRequest(
+                                "第1天",
+                                "第2天",
+                                1,
+                                2,
+                                123_000,
+                                7_200,
+                                "苏州站 -> 拙政园 -> 酒店",
+                                9L,
+                                "39座大巴",
+                                "江苏省",
+                                "苏州市",
+                                null,
+                                new BigDecimal("1000.00"),
+                                new BigDecimal("100.00"),
+                                new BigDecimal("5.00"),
+                                new BigDecimal("900.00"),
+                                BigDecimal.ONE,
+                                new BigDecimal("1450.00"),
+                                new BigDecimal("1380.00"),
+                                "按路书测算"
+                        ),
+                        List.of(new SalesProductVehicleInquiryRequest(
+                                1,
+                                "wechat_group",
+                                "张车调",
+                                null,
+                                "苏州车队询价群",
+                                2001L,
+                                "苏州车队",
+                                new BigDecimal("1380.00"),
+                                true,
+                                true,
+                                false,
+                                false,
+                                2,
+                                "王经理",
+                                null,
+                                null,
+                                null,
+                                true,
+                                "可接"
                         ))
                 )),
                 "测试产品"

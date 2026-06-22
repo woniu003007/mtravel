@@ -7,6 +7,7 @@ import com.mtravel.platform.common.attachment.dto.AttachmentResponse;
 import com.mtravel.platform.common.attachment.entity.CommonAttachmentEntity;
 import com.mtravel.platform.common.attachment.mapper.CommonAttachmentMapper;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
@@ -121,6 +122,39 @@ public class CommonAttachmentService {
                 .eq("tenant_id", tenantId)
                 .eq("is_deleted", false)
                 .eq("id", attachmentId));
+    }
+
+    /**
+     * 查询当前租户下的附件元数据。
+     *
+     * <p>业务模块读取上传文件时必须通过本方法带上租户边界，避免用 attachment_id 读取到其它租户文件。</p>
+     */
+    public CommonAttachmentEntity getEntity(Long attachmentId, Long tenantId) {
+        CommonAttachmentEntity entity = mapper.selectOne(baseQuery(tenantId)
+                .eq("id", attachmentId)
+                .eq("status", "active"));
+        if (entity == null) {
+            throw new BizException("附件不存在或已停用");
+        }
+        return entity;
+    }
+
+    /**
+     * 打开附件本地文件输入流。
+     *
+     * <p>首版附件存在本地磁盘。读取前再次校验路径仍在 uploadRoot 下，防止异常路径穿越。</p>
+     */
+    public InputStream openStream(Long attachmentId, Long tenantId) {
+        CommonAttachmentEntity entity = getEntity(attachmentId, tenantId);
+        Path path = Path.of(entity.getStoragePath()).toAbsolutePath().normalize();
+        if (!path.startsWith(uploadRoot)) {
+            throw new BizException("附件路径不合法");
+        }
+        try {
+            return Files.newInputStream(path);
+        } catch (IOException ex) {
+            throw new BizException("附件文件读取失败");
+        }
     }
 
     private QueryWrapper<CommonAttachmentEntity> baseQuery(Long tenantId) {

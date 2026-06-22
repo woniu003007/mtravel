@@ -54,10 +54,7 @@ export const prototypeModules: PrototypeModule[] = [
   { icon: 'lucide:shopping-bag', key: 'purchase', order: 2, path: '/purchase', title: '采购管理' },
   { icon: 'lucide:shopping-cart', key: 'sales', order: 3, path: '/sales', title: '销售管理' },
   { icon: 'lucide:clipboard-check', key: 'dispatch', order: 4, path: '/dispatch', title: '计调操作' },
-  { icon: 'lucide:wallet', key: 'finance', order: 5, path: '/finance', title: '财务管理' },
-  { icon: 'lucide:bar-chart-2', key: 'statistics', order: 6, path: '/statistics', title: '数据统计' },
   { icon: 'lucide:building-2', key: 'enterprise', order: 7, path: '/enterprise', title: '企业资料' },
-  { icon: 'lucide:settings', key: 'system', order: 8, path: '/system', title: '系统设置' },
 ];
 
 const p0Rows: Record<string, PrototypeRecord[]> = {
@@ -316,27 +313,25 @@ export function getPrototypePage(pageKey: string): PrototypePageConfig {
 export const coreDemoLinks = [
   { path: '/workspace', title: '业务工作台' },
   { path: '/customer/credit', title: '客户授信' },
-  { path: '/sales/team', title: '团队管理' },
-  { path: '/sales/order', title: '订单确认' },
-  { path: '/dispatch/team-arrange', title: '计调安排' },
-  { path: '/finance/team-audit', title: '财务审核' },
-  { path: '/finance/receivable', title: '实时应收' },
-  { path: '/statistics/reception', title: '收客统计' },
+  { path: '/sales/product', title: '产品管理' },
+  { path: '/dispatch/room-status', title: '房态库存' },
+  { path: '/purchase/resource', title: '资源总览' },
+  { path: '/enterprise/guide', title: '导游管理' },
 ];
 
 export const workbenchAlerts = [
-  { count: 7, label: '待确认订单', path: '/sales/order', status: 'P0' },
-  { count: 5, label: '待排团团队', path: '/dispatch/team-arrange', status: 'P0' },
-  { count: 3, label: '计调异常', path: '/dispatch/car-inquiry', status: 'P0' },
-  { count: 4, label: '应收预警', path: '/finance/receivable', status: 'P0' },
-  { count: 6, label: '备用金审批', path: '/finance/guide-advance', status: 'P0' },
+  { count: 7, label: '客户授信预警', path: '/customer/credit', status: 'P0' },
+  { count: 5, label: '产品资料待完善', path: '/sales/product', status: 'P0' },
+  { count: 3, label: '房态库存异常', path: '/dispatch/room-status', status: 'P0' },
+  { count: 4, label: '采购关系待维护', path: '/purchase/relation', status: 'P1' },
+  { count: 6, label: '导游资料待补齐', path: '/enterprise/guide', status: 'P1' },
   { count: 12, label: '合同到期提醒', path: '/customer/contract', status: 'P1' },
 ];
 
 export const deliveryScope = [
   { module: '客户管理', p0: 5, p1: 1, p2: 0, focus: '客户主体、授信、合同校验' },
-  { module: '销售管理', p0: 7, p1: 5, p2: 3, focus: '产品-团期-团队-订单闭环' },
-  { module: '计调操作', p0: 5, p1: 2, p2: 0, focus: '团队安排、房态、车调、报账' },
-  { module: '财务管理', p0: 6, p1: 9, p2: 2, focus: '审核、应收、备用金、结算' },
-  { module: '统计与基础', p0: 5, p1: 22, p2: 0, focus: '统计口径、权限、参数、日志' },
+  { module: '采购管理', p0: 0, p1: 4, p2: 0, focus: '资源、供应商、采购关系、合同' },
+  { module: '销售管理', p0: 1, p1: 0, p2: 0, focus: '产品资料、行程、团队安排模板' },
+  { module: '计调操作', p0: 0, p1: 1, p2: 0, focus: '自控房源、房态、锁房、释放' },
+  { module: '企业资料', p0: 3, p1: 5, p2: 0, focus: '公司、部门、角色、员工、导游、费用字典' },
 ];

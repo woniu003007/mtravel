@@ -13,15 +13,21 @@ import {
   Modal,
   Select,
   Space,
+  Switch,
   Table,
   Tag,
   Textarea,
+  Upload,
   message,
 } from 'ant-design-vue';
 import { computed, onMounted, reactive, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 
 import BusinessSearchForm from '#/components/business/BusinessSearchForm.vue';
+import {
+  type AttachmentApi,
+  uploadAttachment,
+} from '#/api/common/attachment';
 import {
   type EnterpriseExpenseItemApi,
   getExpenseItemAll,
@@ -41,6 +47,15 @@ import {
   updateSupplierResourcePrice,
 } from '#/api/purchase/relation-price';
 import {
+  deleteRelationTicketTemplate,
+  getRelationTicketTemplateDetail,
+  getRelationTicketTemplateFillModes,
+  getRelationTicketTemplateHeaders,
+  getRelationTicketTemplateSystemFields,
+  type RelationTicketTemplateApi,
+  saveRelationTicketTemplate,
+} from '#/api/purchase/relation-ticket-template';
+import {
   getPurchaseResourcePage,
   type PurchaseResourceApi,
 } from '#/api/purchase/resource';
@@ -53,8 +68,10 @@ import { purchaseRelationColumns } from './relation-columns';
 type RelationRow = PurchaseRelationApi.Item;
 type ResourceRow = PurchaseResourceApi.Item;
 type PriceRow = SupplierResourcePriceApi.Item;
+type TemplateFieldRow = RelationTicketTemplateApi.Field;
 
 const router = useRouter();
+const route = useRoute();
 
 const resourceTypeOptions = [
   { label: '景区', value: 'scenic' },
@@ -86,6 +103,14 @@ const priceColumns = [
   { key: 'action', title: '操作', width: 130 },
 ];
 
+const templateColumns = [
+  { dataIndex: 'columnIndex', key: 'columnIndex', title: '列号', width: 80 },
+  { dataIndex: 'templateHeader', key: 'templateHeader', title: '模板表头', width: 200 },
+  { dataIndex: 'fillMode', key: 'fillMode', title: '填充方式', width: 150 },
+  { dataIndex: 'systemField', key: 'systemField', title: '系统字段/固定值', width: 260 },
+  { dataIndex: 'required', key: 'required', title: '必填', width: 90 },
+];
+
 const data = ref<RelationRow[]>([]);
 const resources = ref<ResourceRow[]>([]);
 const supplierOptions = ref<{ label: string; value: number }[]>([]);
@@ -99,9 +124,16 @@ const currentRelation = ref<RelationRow>();
 const loading = ref(false);
 const modalOpen = ref(false);
 const priceDrawerOpen = ref(false);
+const templateDrawerOpen = ref(false);
 const priceLoading = ref(false);
+const templateLoading = ref(false);
+const templateSaving = ref(false);
+const templateHeaderLoading = ref(false);
 const editingId = ref<number>();
 const editingPriceId = ref<number>();
+const systemFieldOptions = ref<{ label: string; value: string }[]>([]);
+const fillModeOptions = ref<{ label: string; value: string }[]>([]);
+const routeTemplateDrawerOpened = ref(false);
 
 const query = reactive<PurchaseRelationApi.QueryParams>({
   page: 1,
@@ -123,12 +155,33 @@ const priceForm = reactive<SupplierResourcePriceApi.SaveParams>({
   teamPrice: 0,
 });
 
+const templateForm = reactive<RelationTicketTemplateApi.SaveParams>({
+  attachmentId: undefined as unknown as number,
+  dataStartRow: 2,
+  fields: [],
+  headerRow: 1,
+  relationId: undefined as unknown as number,
+  status: 'active',
+  templateName: '',
+});
+
 const pagination = reactive<TablePaginationConfig>({
   current: 1,
   pageSize: 10,
   showSizeChanger: true,
   total: 0,
 });
+
+function applyRouteQuery() {
+  const resourceType = route.query.resourceType;
+  if (typeof resourceType === 'string') {
+    query.resourceType = resourceType as PurchaseRelationApi.ResourceType;
+  }
+  if (route.query.templateRelationId) {
+    query.pageSize = 200;
+    pagination.pageSize = 200;
+  }
+}
 
 function typeLabel(value?: string) {
   return resourceTypeOptions.find((item) => item.value === value)?.label || value || '-';
@@ -154,9 +207,21 @@ async function loadData() {
     pagination.current = query.page;
     pagination.pageSize = query.pageSize;
     pagination.total = result.total;
+    await openTemplateDrawerFromRoute();
   } finally {
     loading.value = false;
   }
+}
+
+/** 从团队安排景区弹窗跳转过来时，自动打开对应采购关系的游客名单模板配置。 */
+async function openTemplateDrawerFromRoute() {
+  if (routeTemplateDrawerOpened.value) return;
+  const relationId = Number(route.query.templateRelationId || 0);
+  if (!relationId) return;
+  const row = data.value.find((item) => item.id === relationId);
+  if (!row) return;
+  routeTemplateDrawerOpened.value = true;
+  await openTemplateDrawer(row);
 }
 
 async function loadResources() {
@@ -305,6 +370,20 @@ async function loadPrices() {
   }
 }
 
+async function loadSystemFields() {
+  if (systemFieldOptions.value.length > 0 && fillModeOptions.value.length > 0) return;
+  const result = await getRelationTicketTemplateSystemFields();
+  const modes = await getRelationTicketTemplateFillModes();
+  systemFieldOptions.value = result.map((item) => ({
+    label: item.label,
+    value: item.value,
+  }));
+  fillModeOptions.value = modes.map((item) => ({
+    label: item.label,
+    value: item.value,
+  }));
+}
+
 function resetPriceForm(clearRelation = true) {
   editingPriceId.value = undefined;
   if (clearRelation) {
@@ -391,7 +470,155 @@ function goContract(record: Record<string, any>) {
   });
 }
 
-onMounted(loadData);
+function resetTemplateForm(relation?: RelationRow) {
+  templateForm.relationId = relation?.id ?? (undefined as unknown as number);
+  templateForm.templateName = relation ? `${relation.resourceName}游客名单模板` : '';
+  templateForm.attachmentId = undefined as unknown as number;
+  templateForm.templateFileUrl = undefined;
+  templateForm.originalFilename = undefined;
+  templateForm.sheetName = undefined;
+  templateForm.headerRow = 1;
+  templateForm.dataStartRow = 2;
+  templateForm.status = 'active';
+  templateForm.remark = undefined;
+  templateForm.fields = [];
+}
+
+async function openTemplateDrawer(record: Record<string, any>) {
+  const row = record as RelationRow;
+  currentRelation.value = row;
+  resetTemplateForm(row);
+  templateDrawerOpen.value = true;
+  templateLoading.value = true;
+  try {
+    await loadSystemFields();
+    const detail = await getRelationTicketTemplateDetail(row.id);
+    if (detail) {
+      templateForm.relationId = detail.relationId;
+      templateForm.templateName = detail.templateName;
+      templateForm.attachmentId = detail.attachmentId;
+      templateForm.templateFileUrl = detail.templateFileUrl;
+      templateForm.originalFilename = detail.originalFilename;
+      templateForm.sheetName = detail.sheetName;
+      templateForm.headerRow = detail.headerRow;
+      templateForm.dataStartRow = detail.dataStartRow;
+      templateForm.status = detail.status;
+      templateForm.remark = detail.remark;
+      templateForm.fields = detail.fields || [];
+    }
+  } finally {
+    templateLoading.value = false;
+  }
+}
+
+async function handleTemplateUpload(file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('businessModule', '采购管理');
+  formData.append('businessType', '游客名单模板');
+  if (currentRelation.value?.id) {
+    formData.append('businessId', String(currentRelation.value.id));
+  }
+  const attachment = await uploadAttachment(formData) as AttachmentApi.Attachment;
+  templateForm.attachmentId = attachment.id;
+  templateForm.templateFileUrl = attachment.fileUrl;
+  templateForm.originalFilename = attachment.originalFilename;
+  if (!templateForm.templateName) {
+    templateForm.templateName = attachment.originalFilename.replace(/\.(xlsx|xls)$/i, '');
+  }
+  await loadTemplateHeaders();
+  return false;
+}
+
+async function loadTemplateHeaders() {
+  if (!templateForm.attachmentId) {
+    message.warning('请先上传 Excel 模板');
+    return;
+  }
+  templateHeaderLoading.value = true;
+  try {
+    const result = await getRelationTicketTemplateHeaders({
+      attachmentId: templateForm.attachmentId,
+      headerRow: templateForm.headerRow,
+    });
+    templateForm.sheetName = result.sheetName;
+    templateForm.fields = result.headers.map((item, index) => ({
+      columnIndex: item.columnIndex,
+      fillMode: item.fillMode || (item.systemField ? 'tourist_field' : 'keep_original'),
+      fixedValue: item.fixedValue,
+      required: item.required,
+      sortOrder: index,
+      systemField: item.systemField || '',
+      systemFieldLabel: item.systemFieldLabel,
+      templateHeader: item.templateHeader,
+    }));
+    message.success('模板表头已读取');
+  } finally {
+    templateHeaderLoading.value = false;
+  }
+}
+
+async function saveTemplate() {
+  if (!currentRelation.value) return;
+  if (!templateForm.templateName?.trim()) {
+    message.warning('请输入模板名称');
+    return;
+  }
+  if (!templateForm.attachmentId) {
+    message.warning('请上传 Excel 模板');
+    return;
+  }
+  if (templateForm.dataStartRow <= templateForm.headerRow) {
+    message.warning('数据开始行必须大于表头行');
+    return;
+  }
+  const fields = templateForm.fields.filter((item) => item.templateHeader && item.fillMode);
+  if (fields.length === 0) {
+    message.warning('请至少配置一项字段映射');
+    return;
+  }
+  templateSaving.value = true;
+  try {
+    await saveRelationTicketTemplate({
+      attachmentId: templateForm.attachmentId,
+      dataStartRow: templateForm.dataStartRow,
+      fields,
+      headerRow: templateForm.headerRow,
+      originalFilename: templateForm.originalFilename,
+      relationId: currentRelation.value.id,
+      remark: clean(templateForm.remark),
+      sheetName: templateForm.sheetName,
+      status: templateForm.status,
+      templateFileUrl: templateForm.templateFileUrl,
+      templateName: templateForm.templateName.trim(),
+    });
+    message.success('游客名单模板已保存');
+    templateDrawerOpen.value = false;
+  } finally {
+    templateSaving.value = false;
+  }
+}
+
+function confirmDeleteTemplate() {
+  if (!currentRelation.value) return;
+  Modal.confirm({
+    title: `删除「${currentRelation.value.resourceName}」的游客名单模板？`,
+    content: '删除后不会物理移除记录，只会标记为已删除。',
+    okText: '删除',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      await deleteRelationTicketTemplate(currentRelation.value!.id);
+      message.success('游客名单模板已删除');
+      resetTemplateForm(currentRelation.value);
+    },
+  });
+}
+
+onMounted(() => {
+  applyRouteQuery();
+  loadData();
+});
 </script>
 
 <template>
@@ -449,6 +676,7 @@ onMounted(loadData);
             <Space size="small" wrap>
               <Button type="link" size="small" @click="openPriceDrawer(record)">价格管理</Button>
               <Button type="link" size="small" @click="goContract(record)">合同管理</Button>
+              <Button type="link" size="small" @click="openTemplateDrawer(record)">模板配置</Button>
               <Button type="link" size="small" @click="openEditModal(record)">修改</Button>
               <Button danger type="link" size="small" @click="confirmDelete(record)">删除</Button>
             </Space>
@@ -565,6 +793,125 @@ onMounted(loadData);
         </template>
       </Table>
     </Drawer>
+
+    <Drawer
+      v-model:open="templateDrawerOpen"
+      width="980"
+      :title="`游客名单模板配置 - ${currentRelation?.resourceName || ''} / ${currentRelation?.supplierName || ''}`"
+    >
+      <div v-if="templateLoading" class="template-loading">正在读取模板配置...</div>
+      <template v-else>
+        <Card size="small" class="mb-4">
+          <Form :model="templateForm" layout="vertical">
+            <div class="template-grid">
+              <Form.Item label="模板名称" required>
+                <Input v-model:value="templateForm.templateName" placeholder="例如：团单快捷购票游客证件信息模板" />
+              </Form.Item>
+              <Form.Item label="模板文件" required>
+                <Upload
+                  accept=".xlsx,.xls"
+                  :before-upload="handleTemplateUpload"
+                  :max-count="1"
+                  :show-upload-list="false"
+                >
+                  <Button>上传 Excel 模板</Button>
+                </Upload>
+                <div v-if="templateForm.originalFilename" class="template-file-name">
+                  {{ templateForm.originalFilename }}
+                </div>
+              </Form.Item>
+              <Form.Item label="状态">
+                <Select v-model:value="templateForm.status" :options="priceStatusOptions" />
+              </Form.Item>
+              <Form.Item label="表头行">
+                <InputNumber v-model:value="templateForm.headerRow" class="w-full" :min="1" :precision="0" />
+              </Form.Item>
+              <Form.Item label="数据开始行">
+                <InputNumber v-model:value="templateForm.dataStartRow" class="w-full" :min="2" :precision="0" />
+              </Form.Item>
+              <Form.Item label="工作表">
+                <Input v-model:value="templateForm.sheetName" placeholder="读取表头后自动带出" />
+              </Form.Item>
+            </div>
+            <Space wrap>
+              <Button
+                :loading="templateHeaderLoading"
+                :disabled="!templateForm.attachmentId"
+                @click="loadTemplateHeaders"
+              >
+                读取表头
+              </Button>
+              <Button type="primary" :loading="templateSaving" @click="saveTemplate">保存模板</Button>
+              <Button danger @click="confirmDeleteTemplate">删除模板</Button>
+            </Space>
+          </Form>
+        </Card>
+
+        <Card size="small" title="字段映射">
+          <Table
+            :columns="templateColumns"
+            :data-source="templateForm.fields"
+            :pagination="false"
+            row-key="columnIndex"
+            size="small"
+          >
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'fillMode'">
+                <Select
+                  v-model:value="(record as TemplateFieldRow).fillMode"
+                  class="w-full"
+                  :options="fillModeOptions"
+                  placeholder="请选择"
+                  @change="() => {
+                    if ((record as TemplateFieldRow).fillMode !== 'tourist_field') {
+                      (record as TemplateFieldRow).systemField = undefined;
+                    }
+                    if ((record as TemplateFieldRow).fillMode !== 'constant') {
+                      (record as TemplateFieldRow).fixedValue = undefined;
+                    }
+                  }"
+                />
+              </template>
+              <template v-else-if="column.key === 'systemField'">
+                <Select
+                  v-if="(record as TemplateFieldRow).fillMode === 'tourist_field'"
+                  v-model:value="(record as TemplateFieldRow).systemField"
+                  allow-clear
+                  class="w-full"
+                  :options="systemFieldOptions"
+                  placeholder="请选择系统字段"
+                />
+                <Input
+                  v-else-if="(record as TemplateFieldRow).fillMode === 'constant'"
+                  v-model:value="(record as TemplateFieldRow).fixedValue"
+                  placeholder="例如：成人、身份证、IC"
+                />
+                <Tag v-else-if="(record as TemplateFieldRow).fillMode === 'sequence'" color="blue">
+                  导出时自动生成 1、2、3
+                </Tag>
+                <Tag v-else color="default">
+                  保留模板原内容
+                </Tag>
+              </template>
+              <template v-else-if="column.key === 'required'">
+                <Switch
+                  v-model:checked="(record as TemplateFieldRow).required"
+                  checked-children="是"
+                  un-checked-children="否"
+                />
+              </template>
+            </template>
+          </Table>
+          <div class="template-help">
+            填充方式支持游客字段、自动序号、固定值和不填充。牛首山这类模板可把序号设为自动序号，把备注设为不填充以保留原说明。
+          </div>
+        </Card>
+
+        <Card size="small" class="mt-4" title="备注">
+          <Textarea v-model:value="templateForm.remark" :auto-size="{ minRows: 3, maxRows: 5 }" />
+        </Card>
+      </template>
+    </Drawer>
   </Page>
 </template>
 
@@ -580,9 +927,28 @@ onMounted(loadData);
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.template-grid {
+  display: grid;
+  grid-template-columns: 2fr 1.6fr 1fr;
+  gap: 0 16px;
+}
+
+.template-file-name,
+.template-help {
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.template-loading {
+  padding: 24px;
+  color: #64748b;
+}
+
 @media (max-width: 900px) {
   .modal-grid,
-  .price-grid {
+  .price-grid,
+  .template-grid {
     grid-template-columns: 1fr;
   }
 }

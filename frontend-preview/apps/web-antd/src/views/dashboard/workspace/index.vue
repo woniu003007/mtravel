@@ -35,28 +35,28 @@ const storySteps = [
     title: '客户发来团队需求',
   },
   {
-    description: '销售确认订单、人数、价格和确认件，系统同步生成应收和授信占用。',
-    path: '/sales/order',
+    description: '维护产品资料、行程、产品说明和团队安排模板，先把可售产品基础打牢。',
+    path: '/sales/product',
     role: '销售',
-    title: '销售报价并确认订单',
+    title: '销售维护产品资料',
   },
   {
-    description: '计调集中安排导游、车辆、酒店、景区、餐饮和外委地接，异常直接暴露。',
-    path: '/dispatch/team-arrange',
+    description: '维护自控房源、房型、房间和每日房态，为后续排房联动做准备。',
+    path: '/dispatch/room-status',
     role: '计调',
-    title: '计调安排团队资源',
+    title: '计调维护房态库存',
   },
   {
-    description: '财务审核收入、成本、毛利、备用金和凭证，审核通过后进入收付款。',
-    path: '/finance/team-audit',
-    role: '财务',
-    title: '财务审核成本账款',
+    description: '维护外部资源、供应商、采购关系和合同，给产品和计调提供可选资源。',
+    path: '/purchase/resource',
+    role: '采购',
+    title: '采购维护资源关系',
   },
   {
-    description: '老板查看团队利润、收客人数、欠款客户和异常团队，统一经营口径。',
-    path: '/statistics/reception',
-    role: '老板',
-    title: '老板查看经营结果',
+    description: '维护公司、部门、角色、员工、导游和费用项目，支撑权限和业务基础资料。',
+    path: '/enterprise/employee',
+    role: '管理员',
+    title: '企业资料维护',
   },
 ];
 
@@ -64,38 +64,47 @@ const roleCards = [
   {
     color: '#2563eb',
     icon: 'lucide:briefcase-business',
-    pages: ['客户授信', '订单管理', '费用变更', '电子合同'],
-    pain: '客户需求多、确认件散、费用变更容易漏同步。',
-    path: '/sales/order',
+    pages: ['客户单位', '客户分类', '客户授信', '合同管理'],
+    pain: '客户主体、合同和额度如果不清楚，后面下单风险会放大。',
+    path: '/customer/unit',
     role: '销售',
-    value: '录单后自动关联客户、团队、应收和授信。',
+    value: '先把客户、合同和额度资料维护清楚。',
   },
   {
     color: '#16a34a',
     icon: 'lucide:route',
-    pages: ['团队安排总控', '导游排班', '房态库存', '车调询价'],
-    pain: '导游、车、房、票、餐分散安排，冲突靠人工发现。',
-    path: '/dispatch/team-arrange',
-    role: '计调',
-    value: '一个团缺什么、冲突在哪、成本多少，一页看清。',
+    pages: ['产品管理', '行程内容', '团队安排', '路书地图'],
+    pain: '产品资料和行程不标准，后续团队生成和报价都容易重复录。',
+    path: '/sales/product',
+    role: '销售产品',
+    value: '先把产品、行程和团队安排模板做成可复用基础。',
   },
   {
     color: '#dc2626',
-    icon: 'lucide:wallet-cards',
-    pages: ['财务审核', '实时应收', '应付管理', '备用金闭环'],
-    pain: '团队结束后才算账，应收、应付和凭证来源不清。',
-    path: '/finance/team-audit',
-    role: '财务',
-    value: '订单确认即有应收，资源安排即有成本，报账可追溯。',
+    icon: 'lucide:hotel',
+    pages: ['自控房源', '房型', '房间', '房态库存'],
+    pain: '自营房源如果没有每日库存，后面排房就无法自动联动。',
+    path: '/dispatch/room-status',
+    role: '计调',
+    value: '维护自控房源和房态，为后续排房做基础。',
   },
   {
     color: '#7c3aed',
-    icon: 'lucide:chart-no-axes-combined',
-    pages: ['业务工作台', '利润统计', '账款统计', '收客统计'],
-    pain: '老板要靠问人和看表格，不能实时看到风险和利润。',
-    path: '/statistics/reception',
-    role: '老板',
-    value: '看订单、排团、账款、利润和异常的统一结果。',
+    icon: 'lucide:building-2',
+    pages: ['部门', '角色', '员工', '导游'],
+    pain: '组织和人员资料不完整，权限、负责人和导游归属都不好管。',
+    path: '/enterprise/employee',
+    role: '管理员',
+    value: '先把组织、权限、员工和导游资料建完整。',
+  },
+  {
+    color: '#0891b2',
+    icon: 'lucide:shopping-bag',
+    pages: ['资源总览', '供应商', '采购关系', '合同管理'],
+    pain: '外部酒店、景区、餐厅、车队等资源要先有基础资料和价格关系。',
+    path: '/purchase/resource',
+    role: '采购',
+    value: '维护外部资源和采购关系，给后续安排调用。',
   },
 ];
 
@@ -113,23 +122,23 @@ const demoRows = [
   },
   {
     confirm: '确认件、合同、附件哪些必填？',
-    customerWords: '销售确认订单后，应收、人数、团队和授信都会同步，不再靠人工补账。',
-    scene: '订单确认',
+    customerWords: '先把产品资料、行程内容和团队安排模板维护好，后面建团不用重复录。',
+    scene: '产品管理',
   },
   {
-    confirm: '哪些资源没排完不能提交审核？',
-    customerWords: '计调在一个页面看导游、车、房、票、餐、地接，哪里缺、哪里冲突一眼看到。',
-    scene: '团队安排',
+    confirm: '自控房源是否按酒店、房型、日期维护？',
+    customerWords: '自营房源可以先做每日房态，后续排房时才能锁房、占房、释放。',
+    scene: '房态库存',
   },
   {
-    confirm: '成本超预算谁审批？备用金怎么核销？',
-    customerWords: '财务提前看到团队收入、成本、毛利和凭证，问题及时退回。',
-    scene: '财务审核',
+    confirm: '资源、供应商、采购关系字段是否够用？',
+    customerWords: '采购先维护外部资源和供应商价格关系，计调后面才能选择可用资源。',
+    scene: '采购资源',
   },
   {
-    confirm: '有效人数、利润、账龄口径怎么定？',
-    customerWords: '老板看经营结果，不用再从多个表里拼数据。',
-    scene: '经营统计',
+    confirm: '部门、角色、员工、导游归属是否清楚？',
+    customerWords: '企业资料先建好，后面权限、负责人、导游绩效归属才有基础。',
+    scene: '企业资料',
   },
 ];
 
@@ -165,14 +174,14 @@ function navTo(path: string) {
             讲清楚客户、销售、计调、财务和老板分别怎么用系统。
           </p>
           <Space wrap>
-            <Button type="primary" @click="navTo('/sales/order')">
-              从销售下单开始演示
+            <Button type="primary" @click="navTo('/sales/product')">
+              从产品管理开始演示
             </Button>
-            <Button @click="navTo('/dispatch/team-arrange')">
-              看计调怎么排团
+            <Button @click="navTo('/dispatch/room-status')">
+              看房态库存
             </Button>
-            <Button @click="navTo('/finance/receivable')">
-              看财务怎么管应收
+            <Button @click="navTo('/purchase/resource')">
+              看资源采购
             </Button>
           </Space>
         </div>

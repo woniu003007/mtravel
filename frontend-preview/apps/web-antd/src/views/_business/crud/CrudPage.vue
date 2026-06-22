@@ -27,6 +27,7 @@ import {
   splitRegionPath,
   type RegionPath,
 } from '#/utils/region';
+import { useRoute, useRouter } from 'vue-router';
 
 export interface CrudFieldOption {
   label: string;
@@ -75,6 +76,8 @@ const props = defineProps<{
   config: CrudPageConfig<Record<string, any>>;
 }>();
 
+const route = useRoute();
+const router = useRouter();
 const data = ref<Record<string, any>[]>([]);
 const loading = ref(false);
 const modalOpen = ref(false);
@@ -119,7 +122,34 @@ async function init() {
     await props.config.loadOptions();
   }
   resetForm();
+  applyRoutePreset();
   await loadData();
+  if (route.query.create === '1') {
+    openCreateModal();
+    clearCreateRouteFlag();
+  }
+}
+
+function applyRoutePreset() {
+  for (const field of [...props.config.queryFields, ...props.config.fields]) {
+    const routeValue = route.query[field.key];
+    const value = Array.isArray(routeValue) ? routeValue[0] : routeValue;
+    if (!value) {
+      continue;
+    }
+    if (props.config.queryFields.some((queryField) => queryField.key === field.key)) {
+      query[field.key] = value;
+    }
+    if (props.config.fields.some((formField) => formField.key === field.key)) {
+      formState[field.key] = value;
+    }
+  }
+}
+
+function clearCreateRouteFlag() {
+  const nextQuery = { ...route.query };
+  delete nextQuery.create;
+  router.replace({ path: route.path, query: nextQuery });
 }
 
 function resetQuery() {
@@ -154,6 +184,7 @@ function defaultValue(field: CrudField) {
 function openCreateModal() {
   editingId.value = undefined;
   resetForm();
+  applyRoutePreset();
   modalOpen.value = true;
 }
 

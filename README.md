@@ -12,16 +12,17 @@
 
 ## 本地启动
 
-后端：
+后端推荐使用根目录脚本启动：
 
 ```bash
-cd backend
-mvn spring-boot:run
+./start-backend.sh
 ```
 
 前端：
 
 ```bash
-cd frontend-preview
-pnpm -F @vben/web-antd run dev -- --host 0.0.0.0 --port 5666
+./scripts/dev-frontend-restart.sh
 ```
+
+首次启动前，先复制 `.env.example` 为 `.env.local` 并填写本机数据库、Redis 密码。
+详细说明见 `文档/本地启动说明.md`。
