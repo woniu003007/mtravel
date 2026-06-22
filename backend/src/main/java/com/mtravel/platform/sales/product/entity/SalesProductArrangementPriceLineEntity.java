@@ -70,6 +70,10 @@ public class SalesProductArrangementPriceLineEntity extends TenantSoftDeleteEnti
     @TableField("company_rebate_amount")
     private BigDecimal companyRebateAmount;
 
+    /** 公司返佣比例。 */
+    @TableField("company_rebate_rate")
+    private BigDecimal companyRebateRate;
+
     /** 人头费金额。 */
     @TableField("head_fee_amount")
     private BigDecimal headFeeAmount;
@@ -110,6 +114,8 @@ public class SalesProductArrangementPriceLineEntity extends TenantSoftDeleteEnti
     public void setGuideCommissionRate(BigDecimal guideCommissionRate) { this.guideCommissionRate = guideCommissionRate; }
     public BigDecimal getCompanyRebateAmount() { return companyRebateAmount; }
     public void setCompanyRebateAmount(BigDecimal companyRebateAmount) { this.companyRebateAmount = companyRebateAmount; }
+    public BigDecimal getCompanyRebateRate() { return companyRebateRate; }
+    public void setCompanyRebateRate(BigDecimal companyRebateRate) { this.companyRebateRate = companyRebateRate; }
     public BigDecimal getHeadFeeAmount() { return headFeeAmount; }
     public void setHeadFeeAmount(BigDecimal headFeeAmount) { this.headFeeAmount = headFeeAmount; }
     public BigDecimal getConsumptionAmount() { return consumptionAmount; }

@@ -3,6 +3,7 @@ package com.mtravel.platform.sales.product.service;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.mtravel.platform.common.BizException;
 import com.mtravel.platform.sales.product.dto.SalesProductArrangementItemRequest;
+import com.mtravel.platform.sales.product.dto.SalesProductArrangementUpsertRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductArrangementPriceLineRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductItineraryDayRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductRoadbookPointRequest;
@@ -36,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -161,6 +163,105 @@ class SalesProductServiceTest {
         assertThatThrownBy(() -> service.create(request(), 1L, "admin"))
                 .isInstanceOf(BizException.class)
                 .hasMessage("产品名称已存在");
+    }
+
+    @Test
+    void updateArrangementsShouldOnlyReplaceArrangementChildren() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductItineraryDayMapper itineraryMapper = mock(SalesProductItineraryDayMapper.class);
+        SalesProductDescriptionMapper descriptionMapper = mock(SalesProductDescriptionMapper.class);
+        SalesProductArrangementItemMapper arrangementMapper = mock(SalesProductArrangementItemMapper.class);
+        SalesProductArrangementPriceLineMapper priceLineMapper = mock(SalesProductArrangementPriceLineMapper.class);
+        SalesProductRoadbookPointMapper roadbookMapper = mock(SalesProductRoadbookPointMapper.class);
+        SalesProductVehicleQuoteSnapshotMapper vehicleQuoteMapper = mock(SalesProductVehicleQuoteSnapshotMapper.class);
+        SalesProductVehicleInquiryMapper vehicleInquiryMapper = mock(SalesProductVehicleInquiryMapper.class);
+        SalesProductService service = service(
+                productMapper,
+                itineraryMapper,
+                descriptionMapper,
+                arrangementMapper,
+                priceLineMapper,
+                roadbookMapper,
+                vehicleQuoteMapper,
+                vehicleInquiryMapper
+        );
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(existingProduct(88L));
+        when(arrangementMapper.insert(any(SalesProductArrangementItemEntity.class))).thenAnswer((Answer<Integer>) invocation -> {
+            SalesProductArrangementItemEntity entity = invocation.getArgument(0);
+            entity.setId(9901L);
+            return 1;
+        });
+        service.updateArrangements(88L, request().arrangementItems(), 1L, "admin");
+
+        verify(productMapper, never()).update(any(SalesProductEntity.class), any(Wrapper.class));
+        verify(descriptionMapper, never()).selectOne(any(Wrapper.class));
+        verify(itineraryMapper, never()).selectList(any(Wrapper.class));
+        verify(roadbookMapper, never()).selectList(any(Wrapper.class));
+        verify(arrangementMapper, never()).selectList(any(Wrapper.class));
+        verify(priceLineMapper, never()).selectList(any(Wrapper.class));
+        verify(vehicleQuoteMapper, never()).selectList(any(Wrapper.class));
+        verify(vehicleInquiryMapper, never()).selectList(any(Wrapper.class));
+        verify(descriptionMapper, never()).insert(any(SalesProductDescriptionEntity.class));
+        verify(itineraryMapper, never()).insert(any(SalesProductItineraryDayEntity.class));
+        verify(roadbookMapper, never()).insert(any(SalesProductRoadbookPointEntity.class));
+        verify(arrangementMapper).insert(any(SalesProductArrangementItemEntity.class));
+        verify(priceLineMapper).insert(any(SalesProductArrangementPriceLineEntity.class));
+    }
+
+    @Test
+    void upsertArrangementShouldOnlyReplaceCurrentArrangementItem() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductItineraryDayMapper itineraryMapper = mock(SalesProductItineraryDayMapper.class);
+        SalesProductDescriptionMapper descriptionMapper = mock(SalesProductDescriptionMapper.class);
+        SalesProductArrangementItemMapper arrangementMapper = mock(SalesProductArrangementItemMapper.class);
+        SalesProductArrangementPriceLineMapper priceLineMapper = mock(SalesProductArrangementPriceLineMapper.class);
+        SalesProductRoadbookPointMapper roadbookMapper = mock(SalesProductRoadbookPointMapper.class);
+        SalesProductVehicleQuoteSnapshotMapper vehicleQuoteMapper = mock(SalesProductVehicleQuoteSnapshotMapper.class);
+        SalesProductVehicleInquiryMapper vehicleInquiryMapper = mock(SalesProductVehicleInquiryMapper.class);
+        SalesProductService service = service(
+                productMapper,
+                itineraryMapper,
+                descriptionMapper,
+                arrangementMapper,
+                priceLineMapper,
+                roadbookMapper,
+                vehicleQuoteMapper,
+                vehicleInquiryMapper
+        );
+        SalesProductArrangementItemEntity existing = new SalesProductArrangementItemEntity();
+        existing.setId(9901L);
+        existing.setTenantId(1L);
+        existing.setProductId(88L);
+        existing.setIsDeleted(false);
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(existingProduct(88L));
+        when(arrangementMapper.selectOne(any(Wrapper.class))).thenReturn(existing);
+        when(arrangementMapper.insert(any(SalesProductArrangementItemEntity.class))).thenAnswer((Answer<Integer>) invocation -> {
+            SalesProductArrangementItemEntity entity = invocation.getArgument(0);
+            entity.setId(9902L);
+            return 1;
+        });
+
+        Long savedId = service.upsertArrangement(
+                88L,
+                new SalesProductArrangementUpsertRequest(9901L, request().arrangementItems().get(0)),
+                1L,
+                "admin"
+        );
+
+        assertThat(savedId).isEqualTo(9902L);
+        verify(descriptionMapper, never()).selectOne(any(Wrapper.class));
+        verify(itineraryMapper, never()).selectList(any(Wrapper.class));
+        verify(roadbookMapper, never()).selectList(any(Wrapper.class));
+        verify(productMapper, never()).update(any(SalesProductEntity.class), any(Wrapper.class));
+        verify(descriptionMapper, never()).insert(any(SalesProductDescriptionEntity.class));
+        verify(itineraryMapper, never()).insert(any(SalesProductItineraryDayEntity.class));
+        verify(roadbookMapper, never()).insert(any(SalesProductRoadbookPointEntity.class));
+        verify(arrangementMapper).selectOne(any(Wrapper.class));
+        verify(arrangementMapper).update(any(SalesProductArrangementItemEntity.class), any(Wrapper.class));
+        verify(priceLineMapper).update(any(SalesProductArrangementPriceLineEntity.class), any(Wrapper.class));
+        verify(vehicleQuoteMapper).update(any(SalesProductVehicleQuoteSnapshotEntity.class), any(Wrapper.class));
+        verify(vehicleInquiryMapper).update(any(SalesProductVehicleInquiryEntity.class), any(Wrapper.class));
+        verify(arrangementMapper).insert(any(SalesProductArrangementItemEntity.class));
     }
 
     private SalesProductService service(
@@ -296,6 +397,7 @@ class SalesProductServiceTest {
                                 BigDecimal.ZERO,
                                 BigDecimal.ZERO,
                                 BigDecimal.ZERO,
+                                BigDecimal.ZERO,
                                 1,
                                 "按确认占房执行"
                         )),
@@ -345,5 +447,16 @@ class SalesProductServiceTest {
                 )),
                 "测试产品"
         );
+    }
+
+    private SalesProductEntity existingProduct(Long id) {
+        SalesProductEntity entity = new SalesProductEntity();
+        entity.setId(id);
+        entity.setTenantId(1L);
+        entity.setProductName("苏州园林二日游");
+        entity.setTravelDays(2);
+        entity.setStatus("active");
+        entity.setIsDeleted(false);
+        return entity;
     }
 }

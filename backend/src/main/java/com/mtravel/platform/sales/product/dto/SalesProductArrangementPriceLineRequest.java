@@ -22,6 +22,7 @@ import java.math.BigDecimal;
  * @param guideCommissionAmount 导游提成金额
  * @param guideCommissionRate 导游提成比例
  * @param companyRebateAmount 公司返佣金额
+ * @param companyRebateRate 公司返佣比例
  * @param headFeeAmount 人头费金额
  * @param consumptionAmount 消费金额
  * @param sortOrder 排序号
@@ -40,6 +41,7 @@ public record SalesProductArrangementPriceLineRequest(
         @DecimalMin(value = "0", message = "导游提成金额不能小于0") BigDecimal guideCommissionAmount,
         @DecimalMin(value = "0", message = "导游提成比例不能小于0") BigDecimal guideCommissionRate,
         @DecimalMin(value = "0", message = "公司返佣不能小于0") BigDecimal companyRebateAmount,
+        @DecimalMin(value = "0", message = "公司返佣比例不能小于0") BigDecimal companyRebateRate,
         @DecimalMin(value = "0", message = "人头费不能小于0") BigDecimal headFeeAmount,
         @DecimalMin(value = "0", message = "消费金额不能小于0") BigDecimal consumptionAmount,
         Integer sortOrder,

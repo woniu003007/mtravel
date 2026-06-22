@@ -33,9 +33,12 @@ import {
 import { getEnterpriseDepartmentAll } from '#/api/enterprise/department';
 import { getEnterpriseEmployeeAll } from '#/api/enterprise/employee';
 import {
+  deleteSalesProductArrangement,
   getVehicleUsageHistorySuggestions,
   getSalesProductDetail,
   recordVehicleUsageHistory,
+  saveSalesProductArrangement,
+  updateSalesProductArrangements,
   updateSalesProduct,
 } from '#/api/sales/product';
 import {
@@ -43,7 +46,6 @@ import {
   getVehicleQuoteRuleAll,
 } from '#/api/dispatch/vehicle-quote';
 import { getExpenseItemAll } from '#/api/enterprise/expense-item';
-import { getGroundAgentPage } from '#/api/purchase/ground-agent';
 import { getPurchaseRelationPage } from '#/api/purchase/relation';
 import {
   getRelationTicketTemplateDetail,
@@ -82,7 +84,7 @@ type ArrangementShortcut =
 
 type ArrangementStage = {
   label: string;
-  state: 'done' | 'pending' | 'template';
+  state: 'current' | 'pending';
 };
 
 type TeamBadgeItem = {
@@ -121,6 +123,18 @@ type ScenicResourceRelationOption = {
   resourceName: string;
   supplierId: number;
   supplierName?: string;
+};
+
+type ResourceRelationOption = ScenicResourceRelationOption;
+
+type EditorOptionsCacheEntry = {
+  employeeOptions: SelectOptionWithId[];
+  projectOptions: SelectOptionWithId[];
+  resourceOptions: SelectOptionWithId[];
+  resourceRelationOptions: ResourceRelationOption[];
+  scenicResourceRelationOptions: ScenicResourceRelationOption[];
+  supplierOptions: SelectOptionWithId[];
+  vehicleQuoteRuleOptions: SelectOption[];
 };
 
 type TeamProfile = {
@@ -179,6 +193,7 @@ type ArrangementEditorForm = {
   arrivalPlace?: string;
   cashAmount: number;
   companyRebateAmount: number;
+  companyRebateRate: number;
   confirmed: boolean;
   confirmationNo?: string;
   consumptionAmount: number;
@@ -189,6 +204,7 @@ type ArrangementEditorForm = {
   driverName?: string;
   fundIncluded?: string;
   guideCommissionAmount: number;
+  guideCommissionRate: number;
   guideName?: string;
   headFeeAmount: number;
   mealType?: string;
@@ -301,11 +317,11 @@ const arrangementOverviewColumns = [
 ] as Array<{ label: string; value: SalesProductApi.ArrangementType }>;
 
 const arrangementStages: ArrangementStage[] = [
-  { label: '收客', state: 'done' },
-  { label: '排团', state: 'template' },
-  { label: '发团', state: 'pending' },
-  { label: '结算', state: 'pending' },
-  { label: '完成', state: 'pending' },
+  { label: '产品模板', state: 'current' },
+  { label: '安排配置', state: 'pending' },
+  { label: '生成团队', state: 'pending' },
+  { label: '团队执行', state: 'pending' },
+  { label: '财务结算', state: 'pending' },
 ];
 
 const trafficTypeOptions: SelectOption[] = [
@@ -324,16 +340,17 @@ const breakfastOptions: SelectOption[] = ['桌早', '自助早', '打包早', '�
 const fundOptions: SelectOption[] = ['不含', '含']
   .map((item) => ({ label: item, value: item }));
 
-const scheduleDayOptions: SelectOption[] = [
-  { label: '=出发日期=', value: '=出发日期=' },
-  { label: '第1天', value: '第1天' },
-  { label: '第2天', value: '第2天' },
-  { label: '第3天', value: '第3天' },
-];
-
 const trafficOrderOptions: SelectOption[] = [
   { label: '=不关联订单=', value: '=不关联订单=' },
 ];
+const standardMealProjectOptions: SelectOptionWithId[] = ['标准餐', '豪华餐', '餐券', '其它']
+  .map((item) => ({ label: item, value: item }));
+const otherProjectOptions: SelectOptionWithId[] = ['礼品', '特产', '预收款', '保险', '购物返佣', '购物人头', '停车费', '房租', '水电', '其它']
+  .map((item) => ({ label: item, value: item }));
+const groundAgentProjectOptions: SelectOptionWithId[] = ['成人', '儿童', '车费', '综费', '接送费', '代收团款', '定金对公', '团费', '成本', '其它']
+  .map((item) => ({ label: item, value: item }));
+const shoppingCategoryOptions: SelectOptionWithId[] = ['乳胶', '茶叶', '翡翠', '厨具', '黄金饰品', '茶多酚', '土特产', '丝绸', '珍珠', '唐卡', '藏药', '其它']
+  .map((item) => ({ label: item, value: item }));
 const regionOptions = buildRegionOptions();
 const defaultPriceQuantity = 0;
 const TEAM_PROFILE_MARKER = '[[TEAM_PROFILE_JSON]]';
@@ -408,7 +425,7 @@ const arrangementEditorConfigs: Record<SalesProductApi.ArrangementType, Arrangem
     showEndDate: true,
     showOrderInfo: true,
     startLabel: '开始',
-    title: '添加/修改拼团信息',
+    title: '添加/修改地接信息',
   },
   hotel: {
     daysLabel: '共几晚',
@@ -437,7 +454,7 @@ const arrangementEditorConfigs: Record<SalesProductApi.ArrangementType, Arrangem
     showMealTime: true,
     showOrderInfo: true,
     startLabel: '日期',
-    title: '添加/修改餐厅信息',
+    title: '添加/修改用餐信息',
   },
   optional: {
     noGuideReport: true,
@@ -472,7 +489,7 @@ const arrangementEditorConfigs: Record<SalesProductApi.ArrangementType, Arrangem
     title: '添加/修改景区信息',
   },
   shopping: {
-    noGuideReport: false,
+    noGuideReport: true,
     peopleLabel: '进店人数',
     resourceLabel: '购物店',
     resourceMode: 'select',
@@ -560,6 +577,7 @@ const departmentOptions = ref<SelectOption[]>([]);
 const supplierOptions = ref<SelectOptionWithId[]>([]);
 const projectOptions = ref<SelectOptionWithId[]>([]);
 const resourceOptions = ref<SelectOptionWithId[]>([]);
+const resourceRelationOptions = ref<ResourceRelationOption[]>([]);
 const scenicResourceRelationOptions = ref<ScenicResourceRelationOption[]>([]);
 const scenicTicketTemplate = ref<RelationTicketTemplateApi.Template | null>();
 const scenicTicketTemplateLoading = ref(false);
@@ -573,6 +591,7 @@ const lastVehicleQuoteResult = ref<{
   distanceMeters: number;
   ruleName: string;
 }>();
+const editorOptionsCache = new Map<SalesProductApi.ArrangementType, EditorOptionsCacheEntry>();
 
 const productId = computed(() => {
   const value = route.params.id;
@@ -596,13 +615,32 @@ const editorTotalAmount = computed(() => (
     sum + Number(line.unitPrice || 0) * Number(line.quantity || 0)
   ), 0)
 ));
+const activeEditorTotalAmount = computed(() => {
+  if (activeEditorType.value === 'optional') {
+    return Number(arrangementForm.costAmount || 0);
+  }
+  if (activeEditorType.value === 'shopping') {
+    return Number(arrangementForm.consumptionAmount || 0);
+  }
+  return editorTotalAmount.value;
+});
 const editorCreditAmount = computed(() => Math.max(
-  editorTotalAmount.value - Number(arrangementForm.cashAmount || 0) - Number(arrangementForm.prepaidAmount || 0),
+  activeEditorTotalAmount.value - Number(arrangementForm.cashAmount || 0) - Number(arrangementForm.prepaidAmount || 0),
   0,
 ));
 const activeSection = computed(() => arrangementSections.find((item) => item.value === activeEditorType.value));
 const activeEditorConfig = computed(() => arrangementEditorConfigs[activeEditorType.value]);
 const activeEditorTitle = computed(() => activeEditorConfig.value.title);
+const scheduleDayOptions = computed<SelectOption[]>(() => {
+  const travelDays = Math.max(1, Number(formState.travelDays || 1));
+  return [
+    { label: '=出发日期=', value: '=出发日期=' },
+    ...Array.from({ length: travelDays }, (_, index) => {
+      const day = index + 1;
+      return { label: `第${day}天`, value: `第${day}天` };
+    }),
+  ];
+});
 const selectedScenicResourceRelation = computed(() => (
   scenicResourceRelationOptions.value.find((item) => (
     item.resourceName === arrangementForm.resourceName
@@ -764,7 +802,7 @@ async function saveTeamProfileEditor() {
   }
   formState.businessType = teamProfile.businessType || formState.businessType;
   formState.remark = encodeTeamProfileRemark(formState.remark);
-  const saved = await persistArrangementChanges(`${editor.title}已保存`);
+  const saved = await persistArrangementChanges(`${editor.title}已保存`, { saveMode: 'full' });
   if (saved) {
     quickProfileEditorOpen.value = false;
   }
@@ -798,6 +836,7 @@ function createDefaultArrangementEditorForm(type: SalesProductApi.ArrangementTyp
     arrivalPlace: '',
     cashAmount: 0,
     companyRebateAmount: 0,
+    companyRebateRate: 0,
     confirmed: type === 'hotel',
     consumptionAmount: 0,
     costAmount: 0,
@@ -806,6 +845,7 @@ function createDefaultArrangementEditorForm(type: SalesProductApi.ArrangementTyp
     departurePlace: '',
     fundIncluded: '不含',
     guideCommissionAmount: 0,
+    guideCommissionRate: 0,
     headFeeAmount: 0,
     mealType: type === 'meal' ? '中餐' : undefined,
     noGuideReport: false,
@@ -846,6 +886,7 @@ function hydrateArrangementFormFromItem(item: SalesProductApi.ArrangementItem) {
     arrivalPlace: item.arrivalPlace,
     cashAmount: Number(item.cashAmount || 0),
     companyRebateAmount: Number(item.companyRebateAmount || 0),
+    companyRebateRate: Number(item.priceLines?.[0]?.companyRebateRate || 0),
     confirmed: Boolean(item.confirmed),
     confirmationNo: item.confirmationNo,
     consumptionAmount: Number(item.consumptionAmount || 0),
@@ -856,6 +897,7 @@ function hydrateArrangementFormFromItem(item: SalesProductApi.ArrangementItem) {
     driverName: item.driverName,
     fundIncluded: item.fundIncluded,
     guideCommissionAmount: Number(item.guideCommissionAmount || 0),
+    guideCommissionRate: Number(item.priceLines?.[0]?.guideCommissionRate || 0),
     headFeeAmount: Number(item.headFeeAmount || 0),
     mealType: item.mealType,
     noGuideReport: Boolean(item.noGuideReport),
@@ -865,7 +907,6 @@ function hydrateArrangementFormFromItem(item: SalesProductApi.ArrangementItem) {
     priceLines: item.priceLines?.length
       ? item.priceLines.map((line, index) => ({
         amount: Number(line.amount || 0),
-        costPrice: Number(line.costPrice || 0),
         projectId: line.projectId,
         projectName: line.projectName || item.projectName || defaultProjectName(item.arrangementType),
         quantity: Number(line.quantity || 0),
@@ -873,6 +914,15 @@ function hydrateArrangementFormFromItem(item: SalesProductApi.ArrangementItem) {
         salePrice: Number(line.salePrice || 0),
         sortOrder: line.sortOrder || index + 1,
         unitPrice: Number(line.unitPrice || 0),
+        cashAmount: Number(line.cashAmount || 0),
+        companyRebateAmount: Number(line.companyRebateAmount || 0),
+        companyRebateRate: Number(line.companyRebateRate || 0),
+        consumptionAmount: Number(line.consumptionAmount || 0),
+        costPrice: Number(line.costPrice || 0),
+        creditAmount: Number(line.creditAmount || 0),
+        guideCommissionAmount: Number(line.guideCommissionAmount || 0),
+        guideCommissionRate: Number(line.guideCommissionRate || 0),
+        headFeeAmount: Number(line.headFeeAmount || 0),
       }))
       : [createDefaultArrangementPriceLine(item.projectName || defaultProjectName(item.arrangementType))],
     projectName: item.projectName,
@@ -905,6 +955,12 @@ function hydrateArrangementFormFromItem(item: SalesProductApi.ArrangementItem) {
   }
   if (item.arrangementType === 'vehicle') {
     syncVehicleDaysCount();
+  }
+  if (item.arrangementType === 'hotel') {
+    syncHotelNightsCount();
+  }
+  if (item.arrangementType === 'ground_agent') {
+    syncGroundAgentDaysCount();
   }
   normalizeArrangementPriceLines();
 }
@@ -948,12 +1004,21 @@ function syncPrimaryPriceFields() {
 
 function applySelectedPriceProject(index: number, value?: unknown) {
   const selectedValue = normalizeSelectValue(value);
-  const project = projectOptions.value.find((item) => item.value === selectedValue);
+  const project = priceProjectOptionsForType(activeEditorType.value).find((item) => item.value === selectedValue);
   const line = arrangementForm.priceLines[index];
   if (!line) return;
   line.projectId = project?.id;
   line.projectName = selectedValue;
   syncPrimaryPriceFields();
+}
+
+/** 部分老系统弹窗的费用项目是固定选项，不依赖后台费用项目字典。 */
+function priceProjectOptionsForType(type: SalesProductApi.ArrangementType) {
+  if (type === 'meal') return standardMealProjectOptions;
+  if (type === 'other') return otherProjectOptions;
+  if (type === 'ground_agent') return groundAgentProjectOptions;
+  if (type === 'shopping') return shoppingCategoryOptions;
+  return projectOptions.value;
 }
 
 function defaultProjectName(type: SalesProductApi.ArrangementType) {
@@ -976,6 +1041,20 @@ function parseScheduleDayNo(value?: string) {
   if (!value) return undefined;
   const matched = value.match(/第\s*(\d+)\s*天/);
   return matched?.[1] ? Number(matched[1]) : undefined;
+}
+
+/** 按开始/结束天数计算跨几天，老系统口径包含首尾日期，例如第1天到第3天等于3天。 */
+function scheduleInclusiveDaysCount(startValue?: string, endValue?: string) {
+  const start = parseScheduleDayNo(startValue) || 1;
+  const end = Math.max(start, parseScheduleDayNo(endValue) || start);
+  return Math.max(1, end - start + 1);
+}
+
+/** 住宿晚数按退房日减入住日计算，例如第1天入住、第3天退房等于2晚。 */
+function scheduleExclusiveNightsCount(startValue?: string, endValue?: string) {
+  const start = parseScheduleDayNo(startValue) || 1;
+  const end = Math.max(start, parseScheduleDayNo(endValue) || start + 1);
+  return Math.max(0, end - start);
 }
 
 function routeDurationText(seconds?: number) {
@@ -1005,6 +1084,23 @@ function syncVehicleDaysCount() {
   const { end, start } = selectedVehicleDayRange();
   const days = end - start + 1;
   arrangementForm.daysCount = Math.max(1, days);
+}
+
+/** 住宿“共几晚”由入住/退房自动推算，避免手工填错。 */
+function syncHotelNightsCount() {
+  arrangementForm.daysCount = scheduleExclusiveNightsCount(
+    arrangementForm.scheduleStartDay,
+    arrangementForm.scheduleEndDay,
+  );
+}
+
+/** 地接拼团日期的“共几天”由开始/结束自动推算，避免第1天到第3天仍保存为1天。 */
+function syncGroundAgentDaysCount() {
+  const days = scheduleInclusiveDaysCount(
+    arrangementForm.scheduleStartDay,
+    arrangementForm.scheduleEndDay,
+  );
+  arrangementForm.daysCount = days;
 }
 
 function syncVehicleRoadbookDistance() {
@@ -1178,6 +1274,106 @@ function addArrangementPriceLine() {
   normalizeArrangementPriceLines();
 }
 
+function addOptionalSummaryLine() {
+  if (showMultiOrderAveragePriceNotice.value) return;
+  const line = createDefaultArrangementPriceLine('成人');
+  line.quantity = Number(arrangementForm.peopleCount || 0);
+  line.salePrice = 0;
+  line.costPrice = 0;
+  line.cashAmount = 0;
+  line.guideCommissionAmount = 0;
+  arrangementForm.priceLines.push(line);
+  normalizeArrangementPriceLines();
+  syncOptionalLineToForm();
+}
+
+function addShoppingConsumptionLine() {
+  const line = createDefaultArrangementPriceLine('乳胶');
+  line.consumptionAmount = 0;
+  line.companyRebateRate = Number(arrangementForm.companyRebateRate || 0);
+  line.companyRebateAmount = 0;
+  line.guideCommissionRate = Number(arrangementForm.guideCommissionRate || 0);
+  line.guideCommissionAmount = 0;
+  line.cashAmount = 0;
+  arrangementForm.priceLines.push(line);
+  normalizeArrangementPriceLines();
+  syncShoppingLineToForm();
+}
+
+function optionalLineCreditAmount(line: SalesProductApi.ArrangementPriceLine) {
+  return Math.max(Number(line.costPrice || 0) - Number(line.cashAmount || 0), 0);
+}
+
+function applyShoppingPriceProject(index: number, value?: unknown) {
+  applySelectedPriceProject(index, value);
+  syncShoppingLineToForm();
+}
+
+function removeOptionalSummaryLine(index: number) {
+  removeArrangementPriceLine(index);
+  syncOptionalLineToForm();
+}
+
+function removeShoppingConsumptionLine(index: number) {
+  removeArrangementPriceLine(index);
+  syncShoppingLineToForm();
+}
+
+/** 自费弹窗支持多条费用合计，汇总字段用于表格列和保存总额。 */
+function syncOptionalLineToForm() {
+  normalizeArrangementPriceLines();
+  let peopleCount = 0;
+  let saleAmount = 0;
+  let costAmount = 0;
+  let cashAmount = 0;
+  let guideCommissionAmount = 0;
+  arrangementForm.priceLines.forEach((line) => {
+    const quantity = Number(line.quantity || 0);
+    const salePrice = Number(line.salePrice || 0);
+    const costPrice = Number(line.costPrice || 0);
+    peopleCount += quantity;
+    saleAmount += salePrice;
+    costAmount += costPrice;
+    cashAmount += Number(line.cashAmount || 0);
+    guideCommissionAmount += Number(line.guideCommissionAmount || 0);
+  });
+  arrangementForm.peopleCount = peopleCount;
+  arrangementForm.saleAmount = saleAmount;
+  arrangementForm.costAmount = costAmount;
+  arrangementForm.cashAmount = cashAmount;
+  arrangementForm.guideCommissionAmount = guideCommissionAmount;
+  syncPrimaryPriceFields();
+}
+
+/** 购物消费详情按多品类录入，汇总到进店人数、消费额、返佣和提成。 */
+function syncShoppingLineToForm() {
+  normalizeArrangementPriceLines();
+  let consumptionAmount = 0;
+  let cashAmount = 0;
+  let companyRebateAmount = 0;
+  let guideCommissionAmount = 0;
+  arrangementForm.priceLines.forEach((line) => {
+    const lineConsumption = Number(line.consumptionAmount || 0);
+    const lineCompanyRebateRate = Number(line.companyRebateRate || 0);
+    const lineGuideCommissionRate = Number(line.guideCommissionRate || 0);
+    if (!Number(line.companyRebateAmount || 0) && lineConsumption && lineCompanyRebateRate) {
+      line.companyRebateAmount = Number((lineConsumption * lineCompanyRebateRate / 100).toFixed(2));
+    }
+    if (!Number(line.guideCommissionAmount || 0) && lineConsumption && lineGuideCommissionRate) {
+      line.guideCommissionAmount = Number((lineConsumption * lineGuideCommissionRate / 100).toFixed(2));
+    }
+    consumptionAmount += lineConsumption;
+    cashAmount += Number(line.cashAmount || 0);
+    companyRebateAmount += Number(line.companyRebateAmount || 0);
+    guideCommissionAmount += Number(line.guideCommissionAmount || 0);
+  });
+  arrangementForm.consumptionAmount = consumptionAmount;
+  arrangementForm.cashAmount = cashAmount;
+  arrangementForm.companyRebateAmount = companyRebateAmount;
+  arrangementForm.guideCommissionAmount = guideCommissionAmount;
+  syncPrimaryPriceFields();
+}
+
 /** 至少保留一条价格组成；删除后重新整理排序和旧字段同步。 */
 function removeArrangementPriceLine(index: number) {
   if (arrangementForm.priceLines.length <= 1) {
@@ -1186,6 +1382,49 @@ function removeArrangementPriceLine(index: number) {
   }
   arrangementForm.priceLines.splice(index, 1);
   normalizeArrangementPriceLines();
+}
+
+async function deleteArrangementItem(item: SalesProductApi.ArrangementItem) {
+  const items = formState.arrangementItems || [];
+  const index = items.indexOf(item);
+  if (index < 0) return;
+  const previousItems = [...items];
+  const nextItems = [...items];
+  nextItems.splice(index, 1);
+  formState.arrangementItems = nextItems;
+  if (!item.id) {
+    message.success('安排信息已删除');
+    return;
+  }
+  if (!productId.value) {
+    formState.arrangementItems = previousItems;
+    message.warning('缺少产品ID');
+    return;
+  }
+  saving.value = true;
+  try {
+    await deleteSalesProductArrangement(productId.value, item.id);
+    message.success('安排信息已删除');
+  } catch (error) {
+    formState.arrangementItems = previousItems;
+    throw error;
+  } finally {
+    saving.value = false;
+  }
+}
+
+/** 删除团队安排会直接改产品模板，必须二次确认，避免列表行误点造成数据丢失。 */
+function confirmDeleteArrangementItem(item: SalesProductApi.ArrangementItem) {
+  Modal.confirm({
+    cancelText: '取消',
+    content: `删除后会立即保存到产品团队安排，当前记录为：${item.resourceName || item.itemName || item.arrangementContent || '未命名安排'}。`,
+    okButtonProps: { danger: true },
+    okText: '确认删除',
+    title: '确认删除这条安排？',
+    async onOk() {
+      await deleteArrangementItem(item);
+    },
+  });
 }
 
 function openSupplierCreatePage() {
@@ -1205,6 +1444,17 @@ function openHotelCreatePage() {
     query: {
       create: '1',
       resourceType: 'hotel',
+    },
+  });
+  window.open(routeInfo.href, '_blank', 'noopener,noreferrer');
+}
+
+function openResourceCreatePage() {
+  const routeInfo = router.resolve({
+    path: '/purchase/resource',
+    query: {
+      create: '1',
+      resourceType: expenseResourceTypeMap[activeEditorType.value],
     },
   });
   window.open(routeInfo.href, '_blank', 'noopener,noreferrer');
@@ -1230,6 +1480,18 @@ async function openArrangementEditor(
   }
   if (type === 'vehicle') {
     syncVehicleDaysCount();
+  }
+  if (type === 'hotel') {
+    syncHotelNightsCount();
+  }
+  if (type === 'ground_agent') {
+    syncGroundAgentDaysCount();
+  }
+  if (type === 'optional') {
+    syncOptionalLineToForm();
+  }
+  if (type === 'shopping') {
+    syncShoppingLineToForm();
   }
   arrangementModalOpen.value = true;
   await loadEditorOptions(type);
@@ -1262,16 +1524,42 @@ function scrollToArrangementAnchor(anchor: string) {
   document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-async function loadEditorOptions(type: SalesProductApi.ArrangementType) {
+/** 将缓存的下拉数据回填到弹窗，数组做浅拷贝，避免后续联动过滤直接污染缓存。 */
+function applyEditorOptionsCache(type: SalesProductApi.ArrangementType, cacheEntry: EditorOptionsCacheEntry) {
+  supplierOptions.value = [...cacheEntry.supplierOptions];
+  projectOptions.value = [...cacheEntry.projectOptions];
+  employeeOptions.value = [...cacheEntry.employeeOptions];
+  resourceOptions.value = [...cacheEntry.resourceOptions];
+  resourceRelationOptions.value = [...cacheEntry.resourceRelationOptions];
+  scenicResourceRelationOptions.value = [...cacheEntry.scenicResourceRelationOptions];
+  vehicleQuoteRuleOptions.value = [...cacheEntry.vehicleQuoteRuleOptions];
+  if (type === 'scenic' || type === 'optional' || type === 'meal' || type === 'shopping') {
+    loadResourceSupplierOptions(arrangementForm.resourceName);
+  } else {
+    scenicTicketTemplate.value = null;
+  }
+}
+
+/** 只有住宿、用车等需要选择责任人的弹窗才加载员工，避免用餐/景区弹窗产生无关慢请求。 */
+function editorNeedsEmployeeOptions(type: SalesProductApi.ArrangementType) {
+  return Boolean(arrangementEditorConfigs[type]?.showResponsible);
+}
+
+async function loadEditorOptions(type: SalesProductApi.ArrangementType, force = false) {
+  const cachedOptions = editorOptionsCache.get(type);
+  if (cachedOptions && !force) {
+    applyEditorOptionsCache(type, cachedOptions);
+    return;
+  }
   optionsLoading.value = true;
   try {
     const supplierCategory = supplierCategoryMap[type];
     const [suppliers, projects, employees, resources, quoteRules] = await Promise.all([
-      type === 'scenic' || type === 'optional'
+      type === 'scenic' || type === 'optional' || type === 'meal' || type === 'shopping'
         ? Promise.resolve([])
         : getSupplierAll(supplierCategory),
       getExpenseItemAll(expenseResourceTypeMap[type] as never),
-      getEnterpriseEmployeeAll(false),
+      editorNeedsEmployeeOptions(type) ? getEnterpriseEmployeeAll(false) : Promise.resolve([]),
       loadResourceOptions(type),
       type === 'vehicle' ? loadVehicleQuoteRuleOptions() : Promise.resolve([]),
     ]);
@@ -1288,17 +1576,28 @@ async function loadEditorOptions(type: SalesProductApi.ArrangementType) {
     employeeOptions.value = employees.map((item) => ({
       id: item.id,
       label: item.employeeName,
-      value: item.employeeName,
-    }));
+        value: item.employeeName,
+      }));
     resourceOptions.value = resources;
-    if (type === 'scenic' || type === 'optional') {
-      loadScenicSupplierOptions(arrangementForm.resourceName);
+    if (type === 'scenic' || type === 'optional' || type === 'meal' || type === 'shopping') {
+      loadResourceSupplierOptions(arrangementForm.resourceName);
     } else {
+      resourceRelationOptions.value = [];
+      scenicResourceRelationOptions.value = [];
       scenicTicketTemplate.value = null;
     }
     if (type === 'vehicle') {
       vehicleQuoteRuleOptions.value = quoteRules;
     }
+    editorOptionsCache.set(type, {
+      employeeOptions: [...employeeOptions.value],
+      projectOptions: [...projectOptions.value],
+      resourceOptions: [...resourceOptions.value],
+      resourceRelationOptions: [...resourceRelationOptions.value],
+      scenicResourceRelationOptions: [...scenicResourceRelationOptions.value],
+      supplierOptions: [...supplierOptions.value],
+      vehicleQuoteRuleOptions: [...vehicleQuoteRuleOptions.value],
+    });
   } finally {
     optionsLoading.value = false;
   }
@@ -1319,6 +1618,8 @@ async function loadVehicleQuoteRuleOptions(): Promise<SelectOption[]> {
 }
 
 async function loadResourceOptions(type: SalesProductApi.ArrangementType): Promise<SelectOptionWithId[]> {
+  resourceRelationOptions.value = [];
+  scenicResourceRelationOptions.value = [];
   if (type === 'hotel') {
     const result = await getPurchaseResourcePage({
       page: 1,
@@ -1347,7 +1648,41 @@ async function loadResourceOptions(type: SalesProductApi.ArrangementType): Promi
         status: 'active',
       }),
     ]);
-    scenicResourceRelationOptions.value = relations.items.map((item) => ({
+    resourceRelationOptions.value = relations.items.map((item) => ({
+      relationId: item.id,
+      resourceId: item.resourceId,
+      resourceName: item.resourceName,
+      supplierId: item.supplierId,
+      supplierName: item.supplierName,
+    }));
+    scenicResourceRelationOptions.value = resourceRelationOptions.value;
+    return resources.items.map((item) => ({
+      id: item.id,
+      label: [
+        item.resourceName,
+        item.city,
+        item.district,
+        item.boundSupplierCount ? `${item.boundSupplierCount}家供应商` : '',
+      ].filter(Boolean).join(' / '),
+      value: item.resourceName,
+    }));
+  }
+  if (type === 'meal') {
+    const [resources, relations] = await Promise.all([
+      getPurchaseResourcePage({
+        page: 1,
+        pageSize: 200,
+        resourceType: 'restaurant',
+        status: 'active',
+      }),
+      getPurchaseRelationPage({
+        page: 1,
+        pageSize: 200,
+        resourceType: 'restaurant',
+        status: 'active',
+      }),
+    ]);
+    resourceRelationOptions.value = relations.items.map((item) => ({
       relationId: item.id,
       resourceId: item.resourceId,
       resourceName: item.resourceName,
@@ -1365,25 +1700,37 @@ async function loadResourceOptions(type: SalesProductApi.ArrangementType): Promi
       value: item.resourceName,
     }));
   }
-  if (type === 'meal' || type === 'shopping') {
-    const result = await getPurchaseResourcePage({
-      page: 1,
-      pageSize: 200,
-      resourceType: type === 'meal' ? 'restaurant' : 'shopping',
-      status: 'active',
-    });
-    return result.items.map((item) => ({
-      id: item.id,
-      label: item.resourceName,
-      value: item.resourceName,
+  if (type === 'shopping') {
+    const [resources, relations] = await Promise.all([
+      getPurchaseResourcePage({
+        page: 1,
+        pageSize: 200,
+        resourceType: 'shopping',
+        status: 'active',
+      }),
+      getPurchaseRelationPage({
+        page: 1,
+        pageSize: 200,
+        resourceType: 'shopping',
+        status: 'active',
+      }),
+    ]);
+    resourceRelationOptions.value = relations.items.map((item) => ({
+      relationId: item.id,
+      resourceId: item.resourceId,
+      resourceName: item.resourceName,
+      supplierId: item.supplierId,
+      supplierName: item.supplierName,
     }));
-  }
-  if (type === 'ground_agent') {
-    const result = await getGroundAgentPage({ page: 1, pageSize: 200, status: 'active' });
-    return result.items.map((item) => ({
+    return resources.items.map((item) => ({
       id: item.id,
-      label: item.groundAgentName,
-      value: item.groundAgentName,
+      label: [
+        item.resourceName,
+        item.city,
+        item.district,
+        item.boundSupplierCount ? `${item.boundSupplierCount}家供应商` : '',
+      ].filter(Boolean).join(' / '),
+      value: item.resourceName,
     }));
   }
   return [];
@@ -1426,9 +1773,9 @@ function normalizeSelectValue(value: unknown) {
   return typeof value === 'string' ? value : undefined;
 }
 
-function scenicResourceRelationSupplierOptions(selectedResourceName?: string) {
+function resourceRelationSupplierOptions(selectedResourceName?: string) {
   const selectedResource = resourceOptions.value.find((item) => item.value === selectedResourceName);
-  const filteredRelations = scenicResourceRelationOptions.value.filter((item) => (
+  const filteredRelations = resourceRelationOptions.value.filter((item) => (
     selectedResource?.id ? item.resourceId === selectedResource.id : item.resourceName === selectedResourceName
   ));
   const uniqueSupplierMap = new Map<number, SelectOptionWithId>();
@@ -1442,8 +1789,8 @@ function scenicResourceRelationSupplierOptions(selectedResourceName?: string) {
   return [...uniqueSupplierMap.values()];
 }
 
-/** 景区预约模板挂在采购关系上，所以景区弹窗的供应商必须跟随所选景区过滤。 */
-function loadScenicSupplierOptions(value?: unknown) {
+/** 有资源主档的团队安排必须按采购关系过滤供应商，避免资源和供应商错配。 */
+function loadResourceSupplierOptions(value?: unknown) {
   const selectedResourceName = normalizeSelectValue(value) || arrangementForm.resourceName;
   if (!selectedResourceName) {
     supplierOptions.value = [];
@@ -1453,21 +1800,30 @@ function loadScenicSupplierOptions(value?: unknown) {
     return;
   }
 
-  const nextSupplierOptions = scenicResourceRelationSupplierOptions(selectedResourceName);
+  const nextSupplierOptions = resourceRelationSupplierOptions(selectedResourceName);
   supplierOptions.value = nextSupplierOptions;
   const currentSupplier = nextSupplierOptions.find((item) => item.value === arrangementForm.supplierName);
   const defaultSupplier = currentSupplier || nextSupplierOptions[0];
   arrangementForm.supplierId = defaultSupplier?.id;
   arrangementForm.supplierName = defaultSupplier?.value;
-  void loadSelectedScenicTicketTemplate();
+  if (activeEditorType.value === 'scenic' || activeEditorType.value === 'optional') {
+    void loadSelectedScenicTicketTemplate();
+  } else {
+    scenicTicketTemplate.value = null;
+  }
 }
 
-/** 选择景区后立即刷新供应商下拉，保持老系统景区名称联动供应商的操作习惯。 */
+/** 选择资源后立即刷新供应商下拉，保持老系统资源名称联动供应商的操作习惯。 */
 function applySelectedResource(value?: unknown) {
   const selectedValue = normalizeSelectValue(value);
   arrangementForm.resourceName = selectedValue;
-  if (activeEditorType.value === 'scenic' || activeEditorType.value === 'optional') {
-    loadScenicSupplierOptions(selectedValue);
+  if (
+    activeEditorType.value === 'scenic'
+    || activeEditorType.value === 'optional'
+    || activeEditorType.value === 'meal'
+    || activeEditorType.value === 'shopping'
+  ) {
+    loadResourceSupplierOptions(selectedValue);
   }
 }
 
@@ -1516,8 +1872,11 @@ function formatTrafficRegionPath(path?: RegionPath) {
   return (path || []).filter(Boolean).join(' / ');
 }
 
-/** 保存产品团队安排参数，弹窗提交和底部保存共用，避免出现“弹窗看似保存但未入库”。 */
-async function persistArrangementChanges(successText: string) {
+/** 保存产品团队安排参数；核心明细保存后默认刷新详情，避免本地临时数据和数据库状态不一致。 */
+async function persistArrangementChanges(
+  successText: string,
+  options: { reloadAfterSave?: boolean; saveMode?: 'arrangements' | 'full' } = {},
+) {
   if (!productId.value) {
     message.warning('缺少产品ID');
     return false;
@@ -1529,10 +1888,50 @@ async function persistArrangementChanges(successText: string) {
       [formState.province, formState.city, formState.district].filter(Boolean) as string[],
     );
     payload.remark = encodeTeamProfileRemark(formState.remark);
-    await updateSalesProduct(productId.value, payload);
+    if (options.saveMode === 'full') {
+      await updateSalesProduct(productId.value, payload);
+    } else {
+      await updateSalesProductArrangements(productId.value, {
+        arrangementItems: payload.arrangementItems,
+      });
+    }
     message.success(successText);
-    await loadDetail();
+    if (options.reloadAfterSave ?? true) {
+      await loadDetail();
+    }
     return true;
+  } catch (error) {
+    if (options.reloadAfterSave ?? true) {
+      await loadDetail();
+    }
+    throw error;
+  } finally {
+    saving.value = false;
+  }
+}
+
+/**
+ * 保存当前弹窗中的单条团队安排。
+ *
+ * <p>新增和修改都只提交当前安排，避免一次车调修改重建整个产品的全部团队安排。</p>
+ */
+async function persistSingleArrangementChange(
+  arrangementItem: SalesProductApi.ArrangementItem,
+  successText: string,
+  arrangementId?: number,
+) {
+  if (!productId.value) {
+    message.warning('缺少产品ID');
+    return undefined;
+  }
+  saving.value = true;
+  try {
+    const saved = await saveSalesProductArrangement(productId.value, {
+      arrangementId,
+      item: arrangementItem,
+    });
+    message.success(successText);
+    return saved.id;
   } finally {
     saving.value = false;
   }
@@ -1546,6 +1945,12 @@ async function saveArrangementEditor() {
       message.warning('请先选择座位数规则');
       return;
     }
+  }
+  if (type === 'hotel') {
+    syncHotelNightsCount();
+  }
+  if (type === 'ground_agent') {
+    syncGroundAgentDaysCount();
   }
   if (type === 'traffic') {
     arrangementForm.departurePlace = formatTrafficRegionPath(departureRegionPath.value) || arrangementForm.departurePlace;
@@ -1571,25 +1976,26 @@ async function saveArrangementEditor() {
     const amount = unitPrice * quantity;
     return {
       amount,
-      cashAmount: index === 0 ? Number(arrangementForm.cashAmount || 0) : 0,
-      companyRebateAmount: Number(arrangementForm.companyRebateAmount || 0),
-      consumptionAmount: Number(arrangementForm.consumptionAmount || 0),
-      costPrice: Number(arrangementForm.costAmount || 0),
+      cashAmount: Number(line.cashAmount ?? ((index === 0 ? arrangementForm.cashAmount : 0) || 0)),
+      companyRebateAmount: Number(line.companyRebateAmount ?? (arrangementForm.companyRebateAmount || 0)),
+      companyRebateRate: Number(line.companyRebateRate ?? (arrangementForm.companyRebateRate || 0)),
+      consumptionAmount: Number(line.consumptionAmount ?? (arrangementForm.consumptionAmount || 0)),
+      costPrice: Number(line.costPrice ?? (arrangementForm.costAmount || 0)),
       creditAmount: index === 0 ? editorCreditAmount.value : 0,
-      guideCommissionAmount: Number(arrangementForm.guideCommissionAmount || 0),
-      guideCommissionRate: 0,
-      headFeeAmount: Number(arrangementForm.headFeeAmount || 0),
+      guideCommissionAmount: Number(line.guideCommissionAmount ?? (arrangementForm.guideCommissionAmount || 0)),
+      guideCommissionRate: Number(line.guideCommissionRate ?? (arrangementForm.guideCommissionRate || 0)),
+      headFeeAmount: Number(line.headFeeAmount ?? (arrangementForm.headFeeAmount || 0)),
       projectId: line.projectId,
       projectName: line.projectName || defaultProjectName(type),
       quantity,
       remark: line.remark,
-      salePrice: Number(arrangementForm.saleAmount || 0),
+      salePrice: Number(line.salePrice ?? (arrangementForm.saleAmount || 0)),
       sortOrder: index + 1,
       unitPrice,
     };
   });
   const firstPriceLine = priceLines[0] || createDefaultArrangementPriceLine(defaultProjectName(type));
-  const totalAmount = editorTotalAmount.value;
+  const totalAmount = activeEditorTotalAmount.value;
   const creditAmount = editorCreditAmount.value;
   const prepaidAmount = Number(arrangementForm.prepaidAmount || 0);
   const projectName = firstPriceLine.projectName || defaultProjectName(type);
@@ -1645,15 +2051,33 @@ async function saveArrangementEditor() {
     vehicleType: arrangementForm.vehicleType,
   };
 
-  const nextItems = [...(formState.arrangementItems || [])];
+  const previousItems = [...(formState.arrangementItems || [])];
+  const nextItems = [...previousItems];
+  const currentArrangementId = editingArrangementIndex.value >= 0
+    ? previousItems[editingArrangementIndex.value]?.id
+    : undefined;
   if (editingArrangementIndex.value >= 0) {
     nextItems[editingArrangementIndex.value] = arrangementItem;
   } else {
     nextItems.push(arrangementItem);
   }
   formState.arrangementItems = nextItems.filter((item) => item.itemName?.trim());
-  const saved = await persistArrangementChanges(editingArrangementIndex.value >= 0 ? '安排信息已修改' : '安排信息已保存');
-  if (saved) {
+  const savedArrangementId = await persistSingleArrangementChange(
+    arrangementItem,
+    editingArrangementIndex.value >= 0 ? '安排信息已修改' : '安排信息已保存',
+    currentArrangementId,
+  );
+  if (!savedArrangementId) {
+    formState.arrangementItems = previousItems;
+    return;
+  }
+  arrangementItem.id = savedArrangementId;
+  if (editingArrangementIndex.value >= 0) {
+    formState.arrangementItems[editingArrangementIndex.value] = arrangementItem;
+  } else {
+    formState.arrangementItems[formState.arrangementItems.length - 1] = arrangementItem;
+  }
+  if (savedArrangementId) {
     if (type === 'vehicle') {
       await Promise.all([
         recordVehicleHistoryUsage('driver_info', arrangementForm.driverName),
@@ -1763,7 +2187,7 @@ function goProductEdit() {
  * 产品保存参数，只替换 arrangementItems，不能只提交团队安排字段。
  */
 async function saveArrangement() {
-  await persistArrangementChanges('团队安排已保存');
+  await persistArrangementChanges('团队安排已保存', { reloadAfterSave: true });
 }
 
 onMounted(loadDetail);
@@ -1980,14 +2404,18 @@ onMounted(loadDetail);
                       v-for="column in section.columns"
                       :key="`${section.value}-${item.id || item.itemName}-${column}`"
                     >
-                      <Button
-                        v-if="column === '操作'"
-                        size="small"
-                        type="link"
-                        @click="openArrangementEditor(section.value, item)"
-                      >
-                        修改
-                      </Button>
+                      <template v-if="column === '操作'">
+                        <Button
+                          size="small"
+                          type="link"
+                          @click="openArrangementEditor(section.value, item)"
+                        >
+                          修改
+                        </Button>
+                        <Button danger size="small" type="link" @click="confirmDeleteArrangementItem(item)">
+                          删除
+                        </Button>
+                      </template>
                       <template v-else>
                         {{ arrangementCellText(item, column) }}
                       </template>
@@ -2117,13 +2545,13 @@ onMounted(loadDetail);
                     </div>
                     <div class="traffic-form-row three-columns">
                       <Form.Item label="入住" required>
-                        <Select v-model:value="arrangementForm.scheduleStartDay" :options="scheduleDayOptions" />
+                        <Select v-model:value="arrangementForm.scheduleStartDay" :options="scheduleDayOptions" @change="syncHotelNightsCount" />
                       </Form.Item>
                       <Form.Item label="退房">
-                        <Select v-model:value="arrangementForm.scheduleEndDay" :options="scheduleDayOptions" />
+                        <Select v-model:value="arrangementForm.scheduleEndDay" :options="scheduleDayOptions" @change="syncHotelNightsCount" />
                       </Form.Item>
                       <Form.Item label="共几晚">
-                        <InputNumber v-model:value="arrangementForm.daysCount" :min="0" :precision="0" />
+                        <InputNumber v-model:value="arrangementForm.daysCount" disabled :min="0" :precision="0" />
                       </Form.Item>
                     </div>
                   </div>
@@ -2546,6 +2974,787 @@ onMounted(loadDetail);
                 </div>
               </template>
 
+              <template v-else-if="activeEditorType === 'meal'">
+                <div class="meal-old-system-layout">
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:utensils" />
+                      <span>餐厅名称</span>
+                    </div>
+                    <div class="traffic-form-row two-columns">
+                      <Form.Item label="餐厅名称">
+                        <Select
+                          v-model:value="arrangementForm.resourceName"
+                          allow-clear
+                          show-search
+                          :options="resourceOptions"
+                          @change="applySelectedResource"
+                        />
+                      </Form.Item>
+                      <Form.Item label="添加">
+                        <Button @click="openSupplierCreatePage">添加供应商</Button>
+                      </Form.Item>
+                    </div>
+                  </div>
+
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:calendar-days" />
+                      <span>用餐日期</span>
+                    </div>
+                    <div class="traffic-form-row two-columns">
+                      <Form.Item label="用餐日期" required>
+                        <Select v-model:value="arrangementForm.scheduleStartDay" :options="scheduleDayOptions" />
+                      </Form.Item>
+                      <Form.Item label="时间">
+                        <Select v-model:value="arrangementForm.mealType" :options="mealTypeOptions" />
+                      </Form.Item>
+                    </div>
+                  </div>
+
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:users" />
+                      <span>供应商</span>
+                    </div>
+                    <div class="traffic-form-row two-columns">
+                      <Form.Item label="供应商" required>
+                        <Select
+                          v-model:value="arrangementForm.supplierName"
+                          allow-clear
+                          show-search
+                          :options="supplierOptions"
+                          @change="applySelectedSupplier"
+                        />
+                      </Form.Item>
+                      <Form.Item label="添加">
+                        <Button @click="openSupplierCreatePage">添加供应商</Button>
+                      </Form.Item>
+                    </div>
+                  </div>
+
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:receipt-text" />
+                      <span>价格信息</span>
+                    </div>
+                    <div class="traffic-price-list">
+                      <div
+                        v-for="(line, index) in arrangementForm.priceLines"
+                        :key="index"
+                        class="traffic-price-line"
+                      >
+                        <Select
+                          v-model:value="line.projectName"
+                          show-search
+                          :options="priceProjectOptionsForType(activeEditorType)"
+                          @change="(value) => applySelectedPriceProject(index, value)"
+                        />
+                        <InputNumber
+                          v-model:value="line.unitPrice"
+                          addon-before="¥"
+                          :min="0"
+                          :precision="2"
+                          @change="syncPrimaryPriceFields"
+                        />
+                        <div class="traffic-inline-number">
+                          <span>*数量:</span>
+                          <InputNumber
+                            v-model:value="line.quantity"
+                            :min="0"
+                            :precision="0"
+                            @change="syncPrimaryPriceFields"
+                          />
+                        </div>
+                        <div class="traffic-price-remark">
+                          <span>备注:</span>
+                          <Textarea
+                            v-model:value="line.remark"
+                            :auto-size="{ minRows: 1, maxRows: 2 }"
+                            placeholder="价格备注"
+                            @change="syncPrimaryPriceFields"
+                          />
+                        </div>
+                        <button
+                          class="traffic-remove-line-button"
+                          :class="{ disabled: arrangementForm.priceLines.length <= 1 }"
+                          :disabled="arrangementForm.priceLines.length <= 1"
+                          title="删除价格信息"
+                          type="button"
+                          @click="removeArrangementPriceLine(index)"
+                        >
+                          <IconifyIcon icon="lucide:minus" />
+                        </button>
+                        <button
+                          v-if="index === arrangementForm.priceLines.length - 1"
+                          class="traffic-add-line-button"
+                          :class="{ disabled: showMultiOrderAveragePriceNotice }"
+                          :disabled="showMultiOrderAveragePriceNotice"
+                          :title="showMultiOrderAveragePriceNotice ? '多订单均摊成本时只能保留一条价格信息' : '添加价格信息'"
+                          type="button"
+                          @click="addArrangementPriceLine"
+                        >
+                          <IconifyIcon icon="lucide:plus" />
+                        </button>
+                      </div>
+                    </div>
+                    <div v-if="showMultiOrderAveragePriceNotice" class="traffic-price-lock-tip">
+                      多订单均摊成本时，价格信息组成只能统一写成一条记录，点击 ⊕ 失效
+                    </div>
+                  </div>
+
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:wallet-cards" />
+                      <span>结算方式</span>
+                    </div>
+                    <div class="traffic-settlement-grid">
+                      <Form.Item label="合计">
+                        <InputNumber :value="editorTotalAmount" disabled addon-before="¥" :precision="2" />
+                      </Form.Item>
+                      <Form.Item label="现结">
+                        <InputNumber
+                          v-model:value="arrangementForm.cashAmount"
+                          addon-before="¥"
+                          :min="0"
+                          :max="editorTotalAmount"
+                          :precision="2"
+                        />
+                      </Form.Item>
+                      <Form.Item label="挂账">
+                        <InputNumber :value="editorCreditAmount" disabled addon-before="¥" :precision="2" />
+                      </Form.Item>
+                      <Form.Item label="预付款">
+                        <InputNumber
+                          v-model:value="arrangementForm.prepaidAmount"
+                          addon-before="¥"
+                          :min="0"
+                          :max="editorTotalAmount"
+                          :precision="2"
+                        />
+                      </Form.Item>
+                    </div>
+                  </div>
+
+                  <Form.Item label="订单信息">
+                    <Select v-model:value="arrangementForm.orderScope" :options="trafficOrderOptions" />
+                    <div class="traffic-field-tip">将此项成本归于关联订单</div>
+                  </Form.Item>
+
+                  <Form.Item label="备注信息">
+                    <Textarea
+                      v-model:value="arrangementForm.remark"
+                      :auto-size="{ minRows: 2, maxRows: 4 }"
+                      placeholder="备注信息"
+                    />
+                  </Form.Item>
+                </div>
+              </template>
+
+              <template v-else-if="activeEditorType === 'other'">
+                <div class="other-old-system-layout">
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:calendar-days" />
+                      <span>使用日期</span>
+                    </div>
+                    <div class="traffic-form-row one-column">
+                      <Form.Item label="使用日期" required>
+                        <Select v-model:value="arrangementForm.scheduleStartDay" :options="scheduleDayOptions" />
+                      </Form.Item>
+                    </div>
+                  </div>
+
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:users" />
+                      <span>供应商</span>
+                    </div>
+                    <div class="traffic-form-row two-columns">
+                      <Form.Item label="供应商" required>
+                        <Select
+                          v-model:value="arrangementForm.supplierName"
+                          allow-clear
+                          show-search
+                          :options="supplierOptions"
+                          @change="applySelectedSupplier"
+                        />
+                      </Form.Item>
+                      <Form.Item label="添加">
+                        <Button @click="openSupplierCreatePage">添加供应商</Button>
+                      </Form.Item>
+                    </div>
+                  </div>
+
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:receipt-text" />
+                      <span>价格信息</span>
+                    </div>
+                    <div class="traffic-price-list">
+                      <div
+                        v-for="(line, index) in arrangementForm.priceLines"
+                        :key="index"
+                        class="traffic-price-line"
+                      >
+                        <Select
+                          v-model:value="line.projectName"
+                          show-search
+                          :options="priceProjectOptionsForType(activeEditorType)"
+                          @change="(value) => applySelectedPriceProject(index, value)"
+                        />
+                        <InputNumber
+                          v-model:value="line.unitPrice"
+                          addon-before="¥"
+                          :min="0"
+                          :precision="2"
+                          @change="syncPrimaryPriceFields"
+                        />
+                        <div class="traffic-inline-number">
+                          <span>*数量:</span>
+                          <InputNumber
+                            v-model:value="line.quantity"
+                            :min="0"
+                            :precision="0"
+                            @change="syncPrimaryPriceFields"
+                          />
+                        </div>
+                        <div class="traffic-price-remark">
+                          <span>备注:</span>
+                          <Textarea
+                            v-model:value="line.remark"
+                            :auto-size="{ minRows: 1, maxRows: 2 }"
+                            placeholder="价格备注"
+                            @change="syncPrimaryPriceFields"
+                          />
+                        </div>
+                        <button
+                          class="traffic-remove-line-button"
+                          :class="{ disabled: arrangementForm.priceLines.length <= 1 }"
+                          :disabled="arrangementForm.priceLines.length <= 1"
+                          title="删除价格信息"
+                          type="button"
+                          @click="removeArrangementPriceLine(index)"
+                        >
+                          <IconifyIcon icon="lucide:minus" />
+                        </button>
+                        <button
+                          v-if="index === arrangementForm.priceLines.length - 1"
+                          class="traffic-add-line-button"
+                          :class="{ disabled: showMultiOrderAveragePriceNotice }"
+                          :disabled="showMultiOrderAveragePriceNotice"
+                          :title="showMultiOrderAveragePriceNotice ? '多订单均摊成本时只能保留一条价格信息' : '添加价格信息'"
+                          type="button"
+                          @click="addArrangementPriceLine"
+                        >
+                          <IconifyIcon icon="lucide:plus" />
+                        </button>
+                      </div>
+                    </div>
+                    <div v-if="showMultiOrderAveragePriceNotice" class="traffic-price-lock-tip">
+                      多订单均摊成本时，价格信息组成只能统一写成一条记录，点击 ⊕ 失效
+                    </div>
+                  </div>
+
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:wallet-cards" />
+                      <span>结算方式</span>
+                    </div>
+                    <div class="traffic-settlement-grid">
+                      <Form.Item label="合计">
+                        <InputNumber :value="editorTotalAmount" disabled addon-before="¥" :precision="2" />
+                      </Form.Item>
+                      <Form.Item label="现结">
+                        <InputNumber
+                          v-model:value="arrangementForm.cashAmount"
+                          addon-before="¥"
+                          :min="0"
+                          :max="editorTotalAmount"
+                          :precision="2"
+                        />
+                      </Form.Item>
+                      <Form.Item label="挂账">
+                        <InputNumber :value="editorCreditAmount" disabled addon-before="¥" :precision="2" />
+                      </Form.Item>
+                      <Form.Item label="预付款">
+                        <InputNumber
+                          v-model:value="arrangementForm.prepaidAmount"
+                          addon-before="¥"
+                          :min="0"
+                          :max="editorTotalAmount"
+                          :precision="2"
+                        />
+                      </Form.Item>
+                    </div>
+                  </div>
+
+                  <Form.Item label="订单信息">
+                    <Select v-model:value="arrangementForm.orderScope" :options="trafficOrderOptions" />
+                    <div class="traffic-field-tip">将此项成本归于关联订单</div>
+                  </Form.Item>
+
+                  <Form.Item label="备注信息">
+                    <Textarea
+                      v-model:value="arrangementForm.remark"
+                      :auto-size="{ minRows: 2, maxRows: 4 }"
+                      placeholder="备注信息"
+                    />
+                  </Form.Item>
+                </div>
+              </template>
+
+              <template v-else-if="activeEditorType === 'optional'">
+                <div class="optional-old-system-layout">
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:landmark" />
+                      <span>景区名称</span>
+                    </div>
+                    <div class="traffic-form-row two-columns">
+                      <Form.Item label="景区名称">
+                        <Select
+                          v-model:value="arrangementForm.resourceName"
+                          allow-clear
+                          show-search
+                          :options="resourceOptions"
+                          @change="applySelectedResource"
+                        />
+                      </Form.Item>
+                      <Form.Item label="游玩日期" required>
+                        <Select v-model:value="arrangementForm.scheduleStartDay" :options="scheduleDayOptions" />
+                      </Form.Item>
+                    </div>
+                  </div>
+
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:users" />
+                      <span>供应商</span>
+                    </div>
+                    <div class="traffic-form-row two-columns">
+                      <Form.Item label="供应商" required>
+                        <Select
+                          v-model:value="arrangementForm.supplierName"
+                          allow-clear
+                          show-search
+                          :options="supplierOptions"
+                          @change="applySelectedSupplier"
+                        />
+                      </Form.Item>
+                      <Form.Item label="添加">
+                        <Button @click="openSupplierCreatePage">添加供应商</Button>
+                      </Form.Item>
+                    </div>
+                    <div class="scenic-template-status">
+                      <div>
+                        <span>游客名单模板：</span>
+                        <Tag v-if="scenicTicketTemplateLoading" color="blue">读取中</Tag>
+                        <Tag v-else-if="scenicTicketTemplate" color="green">已配置</Tag>
+                        <Tag v-else color="orange">未配置</Tag>
+                        <strong v-if="scenicTicketTemplate">{{ scenicTicketTemplate.templateName }}</strong>
+                      </div>
+                      <Button size="small" @click="openScenicTemplateConfigPage">配置模板</Button>
+                    </div>
+                  </div>
+
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:receipt-text" />
+                      <span>价格信息</span>
+                    </div>
+                    <div class="traffic-form-row three-columns">
+                      <Form.Item label="销售价">
+                        <InputNumber v-model:value="arrangementForm.saleAmount" addon-before="¥" :min="0" :precision="2" />
+                      </Form.Item>
+                      <Form.Item label="成本价">
+                        <InputNumber v-model:value="arrangementForm.costAmount" addon-before="¥" :min="0" :precision="2" />
+                      </Form.Item>
+                      <div class="old-system-combined-field">
+                        <div class="old-system-combined-title">导游提成</div>
+                        <div class="old-system-combined-controls optional-commission-controls">
+                          <InputNumber v-model:value="arrangementForm.guideCommissionAmount" :min="0" :precision="2" />
+                          <span>元/人</span>
+                          <span>或</span>
+                          <InputNumber v-model:value="arrangementForm.guideCommissionRate" :min="0" :precision="2" />
+                          <span>%</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="optional-fee-summary">
+                      <div class="optional-fee-summary-title">费用合计</div>
+                      <div
+                        v-for="(line, index) in arrangementForm.priceLines"
+                        :key="`optional-${index}`"
+                        class="optional-fee-summary-line optional-fee-summary-row"
+                      >
+                        <label>人数：</label>
+                        <InputNumber v-model:value="line.quantity" :min="0" :precision="0" @change="syncOptionalLineToForm" />
+                        <label>收入：</label>
+                        <InputNumber v-model:value="line.salePrice" :min="0" :precision="2" @change="syncOptionalLineToForm" />
+                        <label>成本：</label>
+                        <InputNumber v-model:value="line.costPrice" :min="0" :precision="2" @change="syncOptionalLineToForm" />
+                        <label>现结：</label>
+                        <InputNumber
+                          v-model:value="line.cashAmount"
+                          :min="0"
+                          :precision="2"
+                          @change="syncOptionalLineToForm"
+                        />
+                        <label>挂账：</label>
+                        <InputNumber :value="optionalLineCreditAmount(line)" disabled :precision="2" />
+                        <label>提成：</label>
+                        <InputNumber v-model:value="line.guideCommissionAmount" :min="0" :precision="2" @change="syncOptionalLineToForm" />
+                        <button
+                          class="traffic-remove-line-button"
+                          :class="{ disabled: arrangementForm.priceLines.length <= 1 }"
+                          :disabled="arrangementForm.priceLines.length <= 1"
+                          title="删除费用合计"
+                          type="button"
+                          @click="removeOptionalSummaryLine(index)"
+                        >
+                          <IconifyIcon icon="lucide:minus" />
+                        </button>
+                        <button
+                          v-if="index === arrangementForm.priceLines.length - 1"
+                          class="optional-add-summary-button"
+                          title="添加费用合计"
+                          type="button"
+                          @click="addOptionalSummaryLine"
+                        >
+                          <IconifyIcon icon="lucide:plus" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Form.Item label="订单信息">
+                    <Select v-model:value="arrangementForm.orderScope" :options="trafficOrderOptions" />
+                    <div class="traffic-field-tip">将此项成本归于关联订单</div>
+                  </Form.Item>
+
+                  <Form.Item label="备注信息">
+                    <Textarea
+                      v-model:value="arrangementForm.remark"
+                      :auto-size="{ minRows: 2, maxRows: 4 }"
+                      placeholder="备注信息"
+                    />
+                  </Form.Item>
+                </div>
+              </template>
+
+              <template v-else-if="activeEditorType === 'shopping'">
+                <div class="shopping-old-system-layout">
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:store" />
+                      <span>购物店</span>
+                    </div>
+                    <div class="shopping-compact-grid shopping-shop-row">
+                      <Form.Item label="购物店">
+                        <Select
+                          v-model:value="arrangementForm.resourceName"
+                          allow-clear
+                          show-search
+                          :options="resourceOptions"
+                          @change="applySelectedResource"
+                        />
+                      </Form.Item>
+                      <Form.Item label="购物日期" required>
+                        <Select v-model:value="arrangementForm.scheduleStartDay" :options="scheduleDayOptions" />
+                      </Form.Item>
+                      <Form.Item label="添加">
+                        <Button @click="openResourceCreatePage">添加购物店</Button>
+                      </Form.Item>
+                    </div>
+                  </div>
+
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:users" />
+                      <span>供应商</span>
+                    </div>
+                    <div class="shopping-compact-grid shopping-supplier-row">
+                      <Form.Item label="供应商" required>
+                        <Select
+                          v-model:value="arrangementForm.supplierName"
+                          allow-clear
+                          show-search
+                          :options="supplierOptions"
+                          @change="applySelectedSupplier"
+                        />
+                      </Form.Item>
+                      <Form.Item label="添加">
+                        <Button @click="openSupplierCreatePage">添加供应商</Button>
+                      </Form.Item>
+                    </div>
+                  </div>
+
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:settings-2" />
+                      <span>费用设置</span>
+                    </div>
+                    <div class="shopping-fee-row">
+                      <Form.Item label="人数">
+                        <InputNumber v-model:value="arrangementForm.peopleCount" :min="0" :precision="0" />
+                      </Form.Item>
+                      <Form.Item label="人头费">
+                        <InputNumber v-model:value="arrangementForm.headFeeAmount" addon-before="¥" :min="0" :precision="2" />
+                      </Form.Item>
+                      <Form.Item label="公司返佣">
+                        <InputNumber v-model:value="arrangementForm.companyRebateAmount" addon-before="¥" :min="0" :precision="2" />
+                      </Form.Item>
+                      <Form.Item label="导游提成">
+                        <InputNumber v-model:value="arrangementForm.guideCommissionAmount" addon-before="¥" :min="0" :precision="2" />
+                      </Form.Item>
+                    </div>
+                  </div>
+
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:receipt-text" />
+                      <span>消费详情</span>
+                    </div>
+                    <div
+                      v-for="(line, index) in arrangementForm.priceLines"
+                      :key="`shopping-${index}`"
+                      class="shopping-consumption-line"
+                    >
+                      <div class="shopping-consumption-main-row">
+                        <Form.Item label="品类">
+                          <Select
+                            v-model:value="line.projectName"
+                            show-search
+                            :options="shoppingCategoryOptions"
+                            @change="(value) => applyShoppingPriceProject(index, value)"
+                          />
+                        </Form.Item>
+                        <Form.Item label="消费金额">
+                          <InputNumber v-model:value="line.consumptionAmount" addon-before="¥" :min="0" :precision="2" @change="syncShoppingLineToForm" />
+                        </Form.Item>
+                        <div class="shopping-formula-field">
+                          <div class="shopping-formula-label">公司返佣</div>
+                          <div class="shopping-formula-controls">
+                            <InputNumber v-model:value="line.companyRebateRate" :min="0" :precision="2" @change="syncShoppingLineToForm" />
+                            <span>% =</span>
+                            <InputNumber v-model:value="line.companyRebateAmount" addon-before="¥" :min="0" :precision="2" @change="syncShoppingLineToForm" />
+                          </div>
+                        </div>
+                        <div class="shopping-formula-field">
+                          <div class="shopping-formula-label">导游提成</div>
+                          <div class="shopping-formula-controls">
+                            <InputNumber v-model:value="line.guideCommissionRate" :min="0" :precision="2" @change="syncShoppingLineToForm" />
+                            <span>%销售额 =</span>
+                            <InputNumber v-model:value="line.guideCommissionAmount" addon-before="¥" :min="0" :precision="2" @change="syncShoppingLineToForm" />
+                          </div>
+                        </div>
+                      </div>
+                      <div class="shopping-consumption-extra-row">
+                        <Form.Item label="现结">
+                          <InputNumber
+                            v-model:value="line.cashAmount"
+                            addon-before="¥"
+                            :min="0"
+                            :precision="2"
+                            @change="syncShoppingLineToForm"
+                          />
+                        </Form.Item>
+                        <Form.Item label="备注">
+                          <Input v-model:value="line.remark" placeholder="消费备注" @change="syncShoppingLineToForm" />
+                        </Form.Item>
+                        <button
+                          class="traffic-remove-line-button"
+                          :class="{ disabled: arrangementForm.priceLines.length <= 1 }"
+                          :disabled="arrangementForm.priceLines.length <= 1"
+                          title="删除消费详情"
+                          type="button"
+                          @click="removeShoppingConsumptionLine(index)"
+                        >
+                          <IconifyIcon icon="lucide:minus" />
+                        </button>
+                        <button
+                          v-if="index === arrangementForm.priceLines.length - 1"
+                          class="shopping-add-detail-button"
+                          title="添加消费详情"
+                          type="button"
+                          @click="addShoppingConsumptionLine"
+                        >
+                          <IconifyIcon icon="lucide:plus" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Form.Item label="备注信息">
+                    <Textarea
+                      v-model:value="arrangementForm.remark"
+                      :auto-size="{ minRows: 2, maxRows: 4 }"
+                      placeholder="备注信息"
+                    />
+                  </Form.Item>
+                </div>
+              </template>
+
+              <template v-else-if="activeEditorType === 'ground_agent'">
+                <div class="ground-agent-old-system-layout">
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:calendar-days" />
+                      <span>拼团日期</span>
+                    </div>
+                    <div class="traffic-form-row three-columns">
+                      <Form.Item label="开始" required>
+                        <Select v-model:value="arrangementForm.scheduleStartDay" :options="scheduleDayOptions" @change="syncGroundAgentDaysCount" />
+                      </Form.Item>
+                      <Form.Item label="结束">
+                        <Select v-model:value="arrangementForm.scheduleEndDay" :options="scheduleDayOptions" @change="syncGroundAgentDaysCount" />
+                      </Form.Item>
+                      <Form.Item label="共几天">
+                        <InputNumber v-model:value="arrangementForm.daysCount" disabled :min="0" :precision="0" />
+                      </Form.Item>
+                    </div>
+                  </div>
+
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:users" />
+                      <span>供应商</span>
+                    </div>
+                    <div class="traffic-form-row two-columns">
+                      <Form.Item label="供应商" required>
+                        <Select
+                          v-model:value="arrangementForm.supplierName"
+                          allow-clear
+                          show-search
+                          :options="supplierOptions"
+                          @change="applySelectedSupplier"
+                        />
+                      </Form.Item>
+                      <Form.Item label="添加">
+                        <Button @click="openSupplierCreatePage">添加供应商</Button>
+                      </Form.Item>
+                    </div>
+                  </div>
+
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:receipt-text" />
+                      <span>价格信息</span>
+                    </div>
+                    <div class="traffic-price-list">
+                      <div
+                        v-for="(line, index) in arrangementForm.priceLines"
+                        :key="index"
+                        class="traffic-price-line"
+                      >
+                        <Select
+                          v-model:value="line.projectName"
+                          show-search
+                          :options="priceProjectOptionsForType(activeEditorType)"
+                          @change="(value) => applySelectedPriceProject(index, value)"
+                        />
+                        <InputNumber
+                          v-model:value="line.unitPrice"
+                          addon-before="¥"
+                          :min="0"
+                          :precision="2"
+                          @change="syncPrimaryPriceFields"
+                        />
+                        <div class="traffic-inline-number">
+                          <span>*数量:</span>
+                          <InputNumber
+                            v-model:value="line.quantity"
+                            :min="0"
+                            :precision="0"
+                            @change="syncPrimaryPriceFields"
+                          />
+                        </div>
+                        <div class="traffic-price-remark">
+                          <span>备注:</span>
+                          <Textarea
+                            v-model:value="line.remark"
+                            :auto-size="{ minRows: 1, maxRows: 2 }"
+                            placeholder="价格备注"
+                            @change="syncPrimaryPriceFields"
+                          />
+                        </div>
+                        <button
+                          class="traffic-remove-line-button"
+                          :class="{ disabled: arrangementForm.priceLines.length <= 1 }"
+                          :disabled="arrangementForm.priceLines.length <= 1"
+                          title="删除价格信息"
+                          type="button"
+                          @click="removeArrangementPriceLine(index)"
+                        >
+                          <IconifyIcon icon="lucide:minus" />
+                        </button>
+                        <button
+                          v-if="index === arrangementForm.priceLines.length - 1"
+                          class="traffic-add-line-button"
+                          :class="{ disabled: showMultiOrderAveragePriceNotice }"
+                          :disabled="showMultiOrderAveragePriceNotice"
+                          :title="showMultiOrderAveragePriceNotice ? '多订单均摊成本时只能保留一条价格信息' : '添加价格信息'"
+                          type="button"
+                          @click="addArrangementPriceLine"
+                        >
+                          <IconifyIcon icon="lucide:plus" />
+                        </button>
+                      </div>
+                    </div>
+                    <div v-if="showMultiOrderAveragePriceNotice" class="traffic-price-lock-tip">
+                      多订单均摊成本时，价格信息组成只能统一写成一条记录，点击 ⊕ 失效
+                    </div>
+                  </div>
+
+                  <div class="traffic-field-group">
+                    <div class="traffic-group-title">
+                      <IconifyIcon icon="lucide:wallet-cards" />
+                      <span>结算方式</span>
+                    </div>
+                    <div class="traffic-settlement-grid">
+                      <Form.Item label="合计">
+                        <InputNumber :value="editorTotalAmount" disabled addon-before="¥" :precision="2" />
+                      </Form.Item>
+                      <Form.Item label="现结">
+                        <InputNumber
+                          v-model:value="arrangementForm.cashAmount"
+                          addon-before="¥"
+                          :min="0"
+                          :max="editorTotalAmount"
+                          :precision="2"
+                        />
+                      </Form.Item>
+                      <Form.Item label="挂账">
+                        <InputNumber :value="editorCreditAmount" disabled addon-before="¥" :precision="2" />
+                      </Form.Item>
+                      <Form.Item label="预付款">
+                        <InputNumber
+                          v-model:value="arrangementForm.prepaidAmount"
+                          addon-before="¥"
+                          :min="0"
+                          :max="editorTotalAmount"
+                          :precision="2"
+                        />
+                      </Form.Item>
+                    </div>
+                  </div>
+
+                  <Form.Item label="订单信息">
+                    <Select v-model:value="arrangementForm.orderScope" :options="trafficOrderOptions" />
+                    <div class="traffic-field-tip">将此项成本归于关联订单</div>
+                  </Form.Item>
+
+                  <Form.Item label="备注信息">
+                    <Textarea
+                      v-model:value="arrangementForm.remark"
+                      :auto-size="{ minRows: 2, maxRows: 4 }"
+                      placeholder="备注信息"
+                    />
+                  </Form.Item>
+                </div>
+              </template>
+
               <template v-else>
               <div v-if="activeEditorConfig.showTrafficType" class="traffic-form-row one-column">
                 <Form.Item label="交通类型" required>
@@ -2673,7 +3882,7 @@ onMounted(loadDetail);
                   </Form.Item>
                 </div>
                 <div
-                  v-if="activeEditorType === 'scenic' || activeEditorType === 'optional'"
+                  v-if="activeEditorType === 'scenic'"
                   class="scenic-template-status"
                 >
                   <div>
@@ -2831,7 +4040,7 @@ onMounted(loadDetail);
                 无需导游报账，同步更新导游报账和计调审核数据
               </Checkbox>
               <Button type="primary" :loading="saving" @click="saveArrangementEditor">
-                {{ editingArrangementIndex >= 0 ? '保存修改' : '新增安排' }}
+                {{ activeEditorType === 'optional' ? '提交保存' : (editingArrangementIndex >= 0 ? '保存修改' : '新增安排') }}
               </Button>
             </div>
           </div>
@@ -3529,6 +4738,10 @@ onMounted(loadDetail);
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.traffic-form-row.four-columns {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .traffic-form-row.supplier-row {
   grid-template-columns: minmax(0, 1fr) 70px;
   align-items: end;
@@ -3560,10 +4773,161 @@ onMounted(loadDetail);
   align-items: center;
 }
 
+.old-system-combined-controls.optional-commission-controls {
+  grid-template-columns: minmax(0, 1fr) auto auto minmax(0, 1fr) auto;
+}
+
 .old-system-combined-controls > span {
   font-size: 12.5px;
   font-weight: 800;
   color: #475569;
+}
+
+.optional-fee-summary {
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px dashed #cbd5e1;
+}
+
+.optional-fee-summary-title {
+  margin-bottom: 9px;
+  font-size: 13px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.optional-fee-summary-row {
+  display: grid;
+  grid-template-columns:
+    auto minmax(72px, 1fr)
+    auto minmax(72px, 1fr)
+    auto minmax(72px, 1fr)
+     auto minmax(72px, 1fr)
+     auto minmax(72px, 1fr)
+     auto minmax(72px, 1fr)
+     34px
+     34px;
+  gap: 8px;
+  align-items: center;
+}
+
+.optional-fee-summary-row label {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.optional-fee-summary-row :deep(.ant-input-number) {
+  width: 100%;
+}
+
+.optional-add-summary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: #1677ff;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #91caff;
+  border-radius: 50%;
+}
+
+.optional-add-summary-button svg {
+  width: 17px;
+  height: 17px;
+}
+
+.shopping-compact-grid,
+.shopping-fee-row,
+.shopping-consumption-main-row,
+.shopping-consumption-extra-row {
+  display: grid;
+  gap: 12px;
+  align-items: end;
+}
+
+.shopping-shop-row {
+  grid-template-columns: minmax(0, 1fr) 180px 120px;
+}
+
+.shopping-supplier-row {
+  grid-template-columns: minmax(0, 1fr) 120px;
+}
+
+.shopping-fee-row {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.shopping-consumption-main-row {
+  grid-template-columns: minmax(120px, 0.9fr) minmax(120px, 0.9fr) minmax(210px, 1.35fr) minmax(240px, 1.55fr);
+}
+
+.shopping-consumption-extra-row {
+  grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1fr) 34px 34px;
+  margin-top: 12px;
+}
+
+.shopping-consumption-line + .shopping-consumption-line {
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px dashed #cbd5e1;
+}
+
+.shopping-formula-field {
+  min-width: 0;
+}
+
+.shopping-formula-label {
+  margin-bottom: 5px;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #334155;
+}
+
+.shopping-formula-controls {
+  display: grid;
+  grid-template-columns: minmax(58px, 0.7fr) auto minmax(80px, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.shopping-formula-controls span {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.shopping-formula-controls :deep(.ant-input-number),
+.shopping-consumption-main-row :deep(.ant-input-number),
+.shopping-consumption-extra-row :deep(.ant-input-number),
+.shopping-fee-row :deep(.ant-input-number) {
+  width: 100%;
+}
+
+.shopping-consumption-extra-row :deep(.ant-input) {
+  width: 100%;
+}
+
+.shopping-add-detail-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: #1677ff;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #91caff;
+  border-radius: 50%;
+}
+
+.shopping-add-detail-button svg {
+  width: 17px;
+  height: 17px;
 }
 
 .traffic-field-group {
@@ -3803,15 +5167,23 @@ onMounted(loadDetail);
 
   .traffic-form-row.two-columns,
   .traffic-form-row.three-columns,
+  .traffic-form-row.four-columns,
   .traffic-form-row.hotel-name-row,
   .traffic-form-row.vehicle-time-row,
   .traffic-form-row.supplier-row,
   .traffic-settlement-grid,
-  .traffic-price-line,
-  .vehicle-roadbook-summary,
-  .old-system-combined-controls {
-    grid-template-columns: 1fr;
-  }
+    .traffic-price-line,
+    .vehicle-roadbook-summary,
+    .old-system-combined-controls,
+    .old-system-combined-controls.optional-commission-controls,
+    .optional-fee-summary-row,
+    .shopping-compact-grid,
+    .shopping-fee-row,
+    .shopping-consumption-main-row,
+    .shopping-consumption-extra-row,
+    .shopping-formula-controls {
+     grid-template-columns: 1fr;
+   }
 
   .traffic-modal-footer {
     align-items: stretch;

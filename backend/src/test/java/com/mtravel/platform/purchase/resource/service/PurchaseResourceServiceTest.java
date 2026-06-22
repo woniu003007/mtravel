@@ -1,6 +1,7 @@
 package com.mtravel.platform.purchase.resource.service;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mtravel.platform.purchase.relation.entity.PurchaseRelationEntity;
 import com.mtravel.platform.purchase.relation.mapper.PurchaseRelationMapper;
 import com.mtravel.platform.purchase.resource.dto.PurchaseResourceSaveRequest;
@@ -9,6 +10,7 @@ import com.mtravel.platform.purchase.resource.mapper.PurchaseResourceMapper;
 import com.mtravel.platform.purchase.supplier.entity.SupplierEntity;
 import com.mtravel.platform.purchase.supplier.mapper.SupplierMapper;
 import java.time.OffsetDateTime;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.stubbing.Answer;
@@ -22,6 +24,38 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class PurchaseResourceServiceTest {
+
+    @Test
+    void pageShouldBatchLoadBoundSupplierCountsInsteadOfCountingEachResource() {
+        PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
+        SupplierMapper supplierMapper = mock(SupplierMapper.class);
+        PurchaseRelationMapper relationMapper = mock(PurchaseRelationMapper.class);
+        PurchaseResourceService service = new PurchaseResourceService(resourceMapper, supplierMapper, relationMapper);
+        Page<PurchaseResourceEntity> pageResult = Page.of(1, 200);
+        pageResult.setTotal(2);
+        pageResult.setRecords(List.of(
+                resource(10L, "scenic", "西湖景区"),
+                resource(11L, "scenic", "灵隐景区")
+        ));
+        PurchaseRelationEntity relationOne = new PurchaseRelationEntity();
+        relationOne.setResourceId(10L);
+        PurchaseRelationEntity relationTwo = new PurchaseRelationEntity();
+        relationTwo.setResourceId(10L);
+        PurchaseRelationEntity relationThree = new PurchaseRelationEntity();
+        relationThree.setResourceId(11L);
+
+        when(resourceMapper.selectPage(any(Page.class), any(Wrapper.class))).thenReturn(pageResult);
+        when(relationMapper.selectList(any(Wrapper.class))).thenReturn(List.of(relationOne, relationTwo, relationThree));
+
+        var result = service.page(1L, null, "scenic", null, null, null, "active", 1, 200);
+
+        assertThat(result.items()).hasSize(2);
+        assertThat(result.items().get(0).boundSupplierCount()).isEqualTo(2L);
+        assertThat(result.items().get(1).boundSupplierCount()).isEqualTo(1L);
+        verify(resourceMapper).selectPage(any(Page.class), any(Wrapper.class));
+        verify(relationMapper).selectList(any(Wrapper.class));
+        verify(relationMapper, never()).selectCount(any(Wrapper.class));
+    }
 
     @Test
     void createShouldAutoCreateSameNameSupplierAndBindPurchaseRelation() {
@@ -136,5 +170,15 @@ class PurchaseResourceServiceTest {
                 autoCreateSupplier,
                 "备注"
         );
+    }
+
+    private PurchaseResourceEntity resource(Long id, String resourceType, String resourceName) {
+        PurchaseResourceEntity entity = new PurchaseResourceEntity();
+        entity.setId(id);
+        entity.setTenantId(1L);
+        entity.setResourceType(resourceType);
+        entity.setResourceName(resourceName);
+        entity.setStatus("active");
+        return entity;
     }
 }

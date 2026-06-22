@@ -367,6 +367,7 @@ CREATE TABLE IF NOT EXISTS sales_product_arrangement_price_lines (
   guide_commission_amount numeric(12,2) NOT NULL DEFAULT 0,
   guide_commission_rate numeric(8,4) NOT NULL DEFAULT 0,
   company_rebate_amount numeric(12,2) NOT NULL DEFAULT 0,
+  company_rebate_rate numeric(8,4) NOT NULL DEFAULT 0,
   head_fee_amount numeric(12,2) NOT NULL DEFAULT 0,
   consumption_amount numeric(12,2) NOT NULL DEFAULT 0,
   sort_order integer NOT NULL DEFAULT 1,
@@ -392,6 +393,7 @@ CREATE TABLE IF NOT EXISTS sales_product_arrangement_price_lines (
     AND guide_commission_amount >= 0
     AND guide_commission_rate >= 0
     AND company_rebate_amount >= 0
+    AND company_rebate_rate >= 0
     AND head_fee_amount >= 0
     AND consumption_amount >= 0
   ),
@@ -402,6 +404,24 @@ DROP TRIGGER IF EXISTS trg_sales_product_arrangement_price_lines_updated_at ON s
 CREATE TRIGGER trg_sales_product_arrangement_price_lines_updated_at
 BEFORE UPDATE ON sales_product_arrangement_price_lines
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+ALTER TABLE sales_product_arrangement_price_lines ADD COLUMN IF NOT EXISTS company_rebate_rate numeric(8,4) NOT NULL DEFAULT 0;
+ALTER TABLE sales_product_arrangement_price_lines DROP CONSTRAINT IF EXISTS chk_sales_product_arrangement_price_amounts;
+ALTER TABLE sales_product_arrangement_price_lines ADD CONSTRAINT chk_sales_product_arrangement_price_amounts CHECK (
+  unit_price >= 0
+  AND quantity >= 0
+  AND amount >= 0
+  AND sale_price >= 0
+  AND cost_price >= 0
+  AND cash_amount >= 0
+  AND credit_amount >= 0
+  AND guide_commission_amount >= 0
+  AND guide_commission_rate >= 0
+  AND company_rebate_amount >= 0
+  AND company_rebate_rate >= 0
+  AND head_fee_amount >= 0
+  AND consumption_amount >= 0
+);
 
 CREATE INDEX IF NOT EXISTS idx_sales_product_arrangement_price_item
   ON sales_product_arrangement_price_lines (tenant_id, is_deleted, product_id, arrangement_item_id, sort_order);
@@ -764,6 +784,7 @@ COMMENT ON COLUMN sales_product_arrangement_price_lines.credit_amount IS '挂账
 COMMENT ON COLUMN sales_product_arrangement_price_lines.guide_commission_amount IS '导游提成金额。';
 COMMENT ON COLUMN sales_product_arrangement_price_lines.guide_commission_rate IS '导游提成比例。';
 COMMENT ON COLUMN sales_product_arrangement_price_lines.company_rebate_amount IS '公司返佣金额。';
+COMMENT ON COLUMN sales_product_arrangement_price_lines.company_rebate_rate IS '公司返佣比例。';
 COMMENT ON COLUMN sales_product_arrangement_price_lines.head_fee_amount IS '人头费金额。';
 COMMENT ON COLUMN sales_product_arrangement_price_lines.consumption_amount IS '消费金额。';
 COMMENT ON COLUMN sales_product_arrangement_price_lines.sort_order IS '排序号，数字越小越靠前。';

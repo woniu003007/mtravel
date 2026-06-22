@@ -1,6 +1,7 @@
 package com.mtravel.platform.purchase.relation.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mtravel.platform.common.BizException;
 import com.mtravel.platform.common.BusinessCrudService;
 import com.mtravel.platform.common.PageResult;
@@ -11,6 +12,12 @@ import com.mtravel.platform.purchase.relation.entity.PurchaseRelationEntity;
 import com.mtravel.platform.purchase.relation.mapper.PurchaseRelationMapper;
 import com.mtravel.platform.purchase.resource.entity.PurchaseResourceEntity;
 import com.mtravel.platform.purchase.resource.mapper.PurchaseResourceMapper;
+import com.mtravel.platform.purchase.supplier.entity.SupplierEntity;
+import com.mtravel.platform.purchase.supplier.mapper.SupplierMapper;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -26,16 +33,19 @@ public class PurchaseRelationService extends BusinessCrudService<PurchaseRelatio
     private final PurchaseRelationMapper mapper;
     private final SupplierLookupService supplierLookup;
     private final PurchaseResourceMapper resourceMapper;
+    private final SupplierMapper supplierMapper;
 
     public PurchaseRelationService(
             PurchaseRelationMapper mapper,
             SupplierLookupService supplierLookup,
-            PurchaseResourceMapper resourceMapper
+            PurchaseResourceMapper resourceMapper,
+            SupplierMapper supplierMapper
     ) {
         super(mapper);
         this.mapper = mapper;
         this.supplierLookup = supplierLookup;
         this.resourceMapper = resourceMapper;
+        this.supplierMapper = supplierMapper;
     }
 
     /** 分页查询采购关系，支持按资源名称、资源类型、状态和供应商筛选。 */
@@ -56,7 +66,18 @@ public class PurchaseRelationService extends BusinessCrudService<PurchaseRelatio
                 .orderByAsc("resource_type")
                 .orderByAsc("resource_name")
                 .orderByDesc("id");
-        return pageByWrapper(wrapper, page, pageSize);
+        Page<PurchaseRelationEntity> result = mapper.selectPage(Page.of(page, pageSize), wrapper);
+        List<PurchaseRelationEntity> records = result.getRecords();
+        Map<Long, PurchaseResourceEntity> resources = resourcesForDisplay(tenantId, records);
+        Map<Long, SupplierEntity> suppliers = suppliersForDisplay(tenantId, records);
+        List<PurchaseRelationResponse> items = records.stream()
+                .map(item -> PurchaseRelationResponse.fromEntities(
+                        item,
+                        resources.get(item.getResourceId()),
+                        suppliers.get(item.getSupplierId())
+                ))
+                .toList();
+        return new PageResult<>(items, result.getTotal());
     }
 
     /** 新增采购关系。资源类型和名称从资源主档带出，防止前端手工写错。 */
@@ -159,6 +180,47 @@ public class PurchaseRelationService extends BusinessCrudService<PurchaseRelatio
                 .eq("tenant_id", tenantId)
                 .eq("is_deleted", false)
                 .eq("id", resourceId));
+    }
+
+    /**
+     * 批量加载当前页采购关系对应的资源主档。
+     *
+     * <p>采购关系页和团队安排弹窗会一次拉取 200 条关系。如果每行再查一次资源所在地，
+     * 会形成明显 N+1 查询；这里统一批量查询并按 ID 建索引。</p>
+     */
+    private Map<Long, PurchaseResourceEntity> resourcesForDisplay(Long tenantId, List<PurchaseRelationEntity> records) {
+        List<Long> resourceIds = records.stream()
+                .map(PurchaseRelationEntity::getResourceId)
+                .filter(id -> id != null)
+                .distinct()
+                .toList();
+        if (resourceIds.isEmpty()) {
+            return Map.of();
+        }
+        return resourceMapper.selectList(new QueryWrapper<PurchaseResourceEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .in("id", resourceIds))
+                .stream()
+                .collect(Collectors.toMap(PurchaseResourceEntity::getId, Function.identity(), (left, right) -> left));
+    }
+
+    /** 批量加载当前页采购关系对应的供应商档案，避免逐行查询供应商名称、负责人和电话。 */
+    private Map<Long, SupplierEntity> suppliersForDisplay(Long tenantId, List<PurchaseRelationEntity> records) {
+        List<Long> supplierIds = records.stream()
+                .map(PurchaseRelationEntity::getSupplierId)
+                .filter(id -> id != null)
+                .distinct()
+                .toList();
+        if (supplierIds.isEmpty()) {
+            return Map.of();
+        }
+        return supplierMapper.selectList(new QueryWrapper<SupplierEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .in("id", supplierIds))
+                .stream()
+                .collect(Collectors.toMap(SupplierEntity::getId, Function.identity(), (left, right) -> left));
     }
 
     @Override

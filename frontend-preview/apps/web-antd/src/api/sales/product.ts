@@ -190,6 +190,7 @@ export namespace SalesProductApi {
     amount?: number;
     cashAmount?: number;
     companyRebateAmount?: number;
+    companyRebateRate?: number;
     consumptionAmount?: number;
     costPrice?: number;
     creditAmount?: number;
@@ -317,6 +318,36 @@ export function updateSalesProduct(id: number, data: SalesProductApi.SaveParams)
     '/sales/product/update',
     data,
     { params: { id } },
+  );
+}
+
+export function updateSalesProductArrangements(
+  id: number,
+  data: Pick<SalesProductApi.SaveParams, 'arrangementItems'>,
+) {
+  return requestClient.post<void>(
+    '/sales/product/update-arrangements',
+    data,
+    { params: { id } },
+  );
+}
+
+export function saveSalesProductArrangement(
+  id: number,
+  data: { arrangementId?: number; item: SalesProductApi.ArrangementItem },
+) {
+  return requestClient.post<{ id: number }>(
+    '/sales/product/arrangement/save',
+    data,
+    { params: { id } },
+  );
+}
+
+export function deleteSalesProductArrangement(id: number, arrangementId: number) {
+  return requestClient.post<void>(
+    '/sales/product/arrangement/delete',
+    {},
+    { params: { arrangementId, id } },
   );
 }
 

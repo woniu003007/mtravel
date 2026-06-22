@@ -371,6 +371,7 @@ export function buildSalesProductPayload(
             amount: optionalNumber(line.amount),
             cashAmount: optionalNumber(line.cashAmount),
             companyRebateAmount: optionalNumber(line.companyRebateAmount),
+            companyRebateRate: optionalNumber(line.companyRebateRate),
             consumptionAmount: optionalNumber(line.consumptionAmount),
             costPrice: optionalNumber(line.costPrice),
             creditAmount: optionalNumber(line.creditAmount),

@@ -1,6 +1,7 @@
 package com.mtravel.platform.purchase.resource.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mtravel.platform.common.BizException;
 import com.mtravel.platform.common.BusinessCrudService;
 import com.mtravel.platform.common.PageResult;
@@ -16,6 +17,8 @@ import com.mtravel.platform.purchase.resource.mapper.PurchaseResourceMapper;
 import com.mtravel.platform.purchase.supplier.entity.SupplierEntity;
 import com.mtravel.platform.purchase.supplier.mapper.SupplierMapper;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -69,7 +72,13 @@ public class PurchaseResourceService extends BusinessCrudService<PurchaseResourc
                 .eq(StringUtils.hasText(status), "status", status)
                 .like(StringUtils.hasText(keyword), "resource_name", keyword)
                 .orderByDesc("id");
-        return pageByWrapper(wrapper, page, pageSize);
+        Page<PurchaseResourceEntity> result = resourceMapper.selectPage(Page.of(page, pageSize), wrapper);
+        List<PurchaseResourceEntity> records = result.getRecords();
+        Map<Long, Long> boundCountMap = boundSupplierCountMap(tenantId, records);
+        List<PurchaseResourceResponse> items = records.stream()
+                .map(item -> PurchaseResourceResponse.fromEntity(item, boundCountMap.get(item.getId())))
+                .toList();
+        return new PageResult<>(items, result.getTotal());
     }
 
     /**
@@ -228,6 +237,29 @@ public class PurchaseResourceService extends BusinessCrudService<PurchaseResourc
                 .eq("is_deleted", false)
                 .eq("resource_type", entity.getResourceType())
                 .eq("resource_id", entity.getId()));
+    }
+
+    /**
+     * 批量统计当前页资源的供应商绑定数量。
+     *
+     * <p>资源总览页经常按 200 条拉取下拉数据，如果逐行执行 {@code count(*)}，远程数据库会产生
+     * 200 次额外往返，弹窗打开会明显变慢。这里一次查出当前页所有采购关系，再在内存中按资源 ID 计数。</p>
+     */
+    private Map<Long, Long> boundSupplierCountMap(Long tenantId, List<PurchaseResourceEntity> records) {
+        List<Long> resourceIds = records.stream()
+                .map(PurchaseResourceEntity::getId)
+                .filter(id -> id != null)
+                .toList();
+        if (resourceIds.isEmpty()) {
+            return Map.of();
+        }
+        return relationMapper.selectList(new QueryWrapper<PurchaseRelationEntity>()
+                        .select("resource_id")
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .in("resource_id", resourceIds))
+                .stream()
+                .collect(Collectors.groupingBy(PurchaseRelationEntity::getResourceId, Collectors.counting()));
     }
 
     /** 查询供应商名称，绑定列表中供应商被删除时仍保留空值，避免查询失败。 */

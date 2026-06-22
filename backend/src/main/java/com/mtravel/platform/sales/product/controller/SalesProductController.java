@@ -8,6 +8,9 @@ import com.mtravel.platform.sales.product.dto.AmapRouteCalculateResponse;
 import com.mtravel.platform.sales.product.dto.AmapJsConfigResponse;
 import com.mtravel.platform.sales.product.dto.AmapStaticMapRequest;
 import com.mtravel.platform.sales.product.dto.AmapTipResponse;
+import com.mtravel.platform.sales.product.dto.SalesProductArrangementUpdateRequest;
+import com.mtravel.platform.sales.product.dto.SalesProductArrangementUpsertRequest;
+import com.mtravel.platform.sales.product.dto.SalesProductArrangementUpsertResponse;
 import com.mtravel.platform.sales.product.dto.SalesProductResponse;
 import com.mtravel.platform.sales.product.dto.SalesProductSaveRequest;
 import com.mtravel.platform.sales.product.service.AmapRouteService;
@@ -123,6 +126,72 @@ public class SalesProductController extends ControllerSupport {
             Authentication authentication
     ) {
         return ApiResponse.ok(service.update(id, request, currentTenantId(), currentOperator(authentication)));
+    }
+
+    /**
+     * 只修改产品团队安排。
+     *
+     * <p>团队安排独立页面频繁保存车调、酒店、用餐等明细，走轻量接口避免重写产品行程和说明。</p>
+     *
+     * @param id 产品ID
+     * @param request 只读取其中的团队安排明细
+     * @param authentication 当前登录认证信息，用于记录子表重建操作人
+     * @return 空响应，前端需要最新页面数据时再单独查询详情
+     */
+    @OperationLog(module = "销售管理", type = "修改")
+    @PostMapping("/update-arrangements")
+    public ApiResponse<Void> updateArrangements(
+            @RequestParam Long id,
+            @Valid @RequestBody SalesProductArrangementUpdateRequest request,
+            Authentication authentication
+    ) {
+        service.updateArrangements(
+                id,
+                request.arrangementItems(),
+                currentTenantId(),
+                currentOperator(authentication)
+        );
+        return ApiResponse.ok();
+    }
+
+    /**
+     * 新增或修改单条团队安排。
+     *
+     * <p>弹窗保存当前一条安排时使用该接口，只处理当前安排及其明细，避免整组安排反复重建。</p>
+     *
+     * @param id 产品ID
+     * @param request 单条安排保存请求
+     * @param authentication 当前登录认证信息
+     * @return 保存后的安排 ID
+     */
+    @OperationLog(module = "销售管理", type = "修改")
+    @PostMapping("/arrangement/save")
+    public ApiResponse<SalesProductArrangementUpsertResponse> saveArrangement(
+            @RequestParam Long id,
+            @Valid @RequestBody SalesProductArrangementUpsertRequest request,
+            Authentication authentication
+    ) {
+        Long arrangementId = service.upsertArrangement(id, request, currentTenantId(), currentOperator(authentication));
+        return ApiResponse.ok(new SalesProductArrangementUpsertResponse(arrangementId));
+    }
+
+    /**
+     * 删除单条团队安排。
+     *
+     * @param id 产品ID
+     * @param arrangementId 团队安排ID
+     * @param authentication 当前登录认证信息
+     * @return 空响应
+     */
+    @OperationLog(module = "销售管理", type = "删除")
+    @PostMapping("/arrangement/delete")
+    public ApiResponse<Void> deleteArrangement(
+            @RequestParam Long id,
+            @RequestParam Long arrangementId,
+            Authentication authentication
+    ) {
+        service.deleteArrangement(id, arrangementId, currentTenantId(), currentOperator(authentication));
+        return ApiResponse.ok();
     }
 
     /**

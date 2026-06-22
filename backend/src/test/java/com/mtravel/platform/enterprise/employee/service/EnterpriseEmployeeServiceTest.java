@@ -13,6 +13,7 @@ import com.mtravel.platform.enterprise.role.mapper.EnterpriseRoleMapper;
 import com.mtravel.platform.system.user.entity.SystemUserEntity;
 import com.mtravel.platform.system.user.mapper.SystemUserMapper;
 import java.time.OffsetDateTime;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -22,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -157,6 +159,26 @@ class EnterpriseEmployeeServiceTest {
         assertThat(userCaptor.getValue().getPasswordHash()).isEqualTo("reset-hash");
     }
 
+    @Test
+    void listAllShouldBatchLoadDepartmentAndRoleNames() {
+        EnterpriseEmployeeMapper employeeMapper = mock(EnterpriseEmployeeMapper.class);
+        EnterpriseEmployeeService service = service(employeeMapper, mock(SystemUserMapper.class), mock(PasswordEncoder.class));
+        EnterpriseEmployeeEntity first = employee(31L, 5L, 9L, "陈爱晚");
+        EnterpriseEmployeeEntity second = employee(32L, 5L, 9L, "王计调");
+
+        when(employeeMapper.selectList(any(Wrapper.class))).thenReturn(List.of(first, second));
+        when(serviceDepartmentMapper.selectList(any(Wrapper.class))).thenReturn(List.of(department()));
+        when(serviceRoleMapper.selectList(any(Wrapper.class))).thenReturn(List.of(role()));
+
+        List<?> employees = service.listAll(1L, false);
+
+        assertThat(employees).hasSize(2);
+        verify(serviceDepartmentMapper, times(1)).selectList(any(Wrapper.class));
+        verify(serviceRoleMapper, times(1)).selectList(any(Wrapper.class));
+        verify(serviceDepartmentMapper, never()).selectOne(any(Wrapper.class));
+        verify(serviceRoleMapper, never()).selectOne(any(Wrapper.class));
+    }
+
     private EnterpriseRoleMapper serviceRoleMapper;
     private EnterpriseDepartmentMapper serviceDepartmentMapper;
 
@@ -227,6 +249,16 @@ class EnterpriseEmployeeServiceTest {
         employee.setUsername("chenaiwan");
         employee.setStatus("active");
         employee.setIsDeleted(false);
+        return employee;
+    }
+
+    private EnterpriseEmployeeEntity employee(Long id, Long departmentId, Long roleId, String employeeName) {
+        EnterpriseEmployeeEntity employee = employee();
+        employee.setId(id);
+        employee.setDepartmentId(departmentId);
+        employee.setRoleId(roleId);
+        employee.setEmployeeName(employeeName);
+        employee.setUsername("user" + id);
         return employee;
     }
 }

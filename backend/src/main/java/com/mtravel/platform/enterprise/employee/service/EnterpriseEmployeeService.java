@@ -2,6 +2,7 @@ package com.mtravel.platform.enterprise.employee.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mtravel.platform.common.BizException;
 import com.mtravel.platform.common.BusinessCrudService;
 import com.mtravel.platform.common.PageResult;
@@ -20,6 +21,10 @@ import com.mtravel.platform.system.user.entity.SystemUserEntity;
 import com.mtravel.platform.system.user.mapper.SystemUserMapper;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -95,7 +100,8 @@ public class EnterpriseEmployeeService extends BusinessCrudService<EnterpriseEmp
                         .like("mobile_phone", keyword))
                 .orderByAsc("sort_order")
                 .orderByAsc("id");
-        return pageByWrapper(wrapper, page, pageSize);
+        Page<EnterpriseEmployeeEntity> result = employeeMapper.selectPage(Page.of(page, pageSize), wrapper);
+        return new PageResult<>(toResponsesWithReferenceNames(result.getRecords()), result.getTotal());
     }
 
     /**
@@ -109,9 +115,7 @@ public class EnterpriseEmployeeService extends BusinessCrudService<EnterpriseEmp
                 .eq(!includeDisabled, "status", EnterpriseEmployeeStatus.ACTIVE.getValue())
                 .orderByAsc("sort_order")
                 .orderByAsc("id");
-        return employeeMapper.selectList(wrapper).stream()
-                .map(entity -> toResponse(entity))
-                .toList();
+        return toResponsesWithReferenceNames(employeeMapper.selectList(wrapper));
     }
 
     /**
@@ -388,6 +392,59 @@ public class EnterpriseEmployeeService extends BusinessCrudService<EnterpriseEmp
                         .eq("is_deleted", false)
                         .eq("id", entity.getRoleId()));
         return toResponse(entity, department, role);
+    }
+
+    /**
+     * 批量组装员工展示信息。
+     *
+     * <p>员工下拉和分页经常一次返回多条记录，若每个员工都单独查询部门和角色，会产生 N+1 查询并拖慢弹窗打开。
+     * 这里按当前结果集一次性批量查询部门、角色，再在内存中补齐展示名称。</p>
+     */
+    private List<EnterpriseEmployeeResponse> toResponsesWithReferenceNames(List<EnterpriseEmployeeEntity> employees) {
+        if (employees.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, EnterpriseDepartmentEntity> departments = departmentsById(employees);
+        Map<Long, EnterpriseRoleEntity> roles = rolesById(employees);
+        return employees.stream()
+                .map(employee -> toResponse(employee, departments.get(employee.getDepartmentId()), roles.get(employee.getRoleId())))
+                .toList();
+    }
+
+    /** 批量查询员工列表中出现的部门，避免列表行逐条查部门名称。 */
+    private Map<Long, EnterpriseDepartmentEntity> departmentsById(List<EnterpriseEmployeeEntity> employees) {
+        Set<Long> ids = employees.stream()
+                .map(EnterpriseEmployeeEntity::getDepartmentId)
+                .filter(id -> id != null)
+                .collect(Collectors.toSet());
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        Long tenantId = employees.get(0).getTenantId();
+        return departmentMapper.selectList(new QueryWrapper<EnterpriseDepartmentEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .in("id", ids))
+                .stream()
+                .collect(Collectors.toMap(EnterpriseDepartmentEntity::getId, Function.identity(), (first, ignored) -> first));
+    }
+
+    /** 批量查询员工列表中出现的角色，避免列表行逐条查角色名称。 */
+    private Map<Long, EnterpriseRoleEntity> rolesById(List<EnterpriseEmployeeEntity> employees) {
+        Set<Long> ids = employees.stream()
+                .map(EnterpriseEmployeeEntity::getRoleId)
+                .filter(id -> id != null)
+                .collect(Collectors.toSet());
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        Long tenantId = employees.get(0).getTenantId();
+        return roleMapper.selectList(new QueryWrapper<EnterpriseRoleEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .in("id", ids))
+                .stream()
+                .collect(Collectors.toMap(EnterpriseRoleEntity::getId, Function.identity(), (first, ignored) -> first));
     }
 
     private EnterpriseEmployeeResponse toResponse(

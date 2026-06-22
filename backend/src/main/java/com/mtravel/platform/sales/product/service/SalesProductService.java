@@ -8,6 +8,7 @@ import com.mtravel.platform.sales.product.dto.SalesProductArrangementItemRequest
 import com.mtravel.platform.sales.product.dto.SalesProductArrangementItemResponse;
 import com.mtravel.platform.sales.product.dto.SalesProductArrangementPriceLineRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductArrangementPriceLineResponse;
+import com.mtravel.platform.sales.product.dto.SalesProductArrangementUpsertRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductItineraryDayRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductItineraryDayResponse;
 import com.mtravel.platform.sales.product.dto.SalesProductRoadbookPointRequest;
@@ -194,6 +195,87 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
     }
 
     /**
+     * 只更新产品团队安排参数。
+     *
+     * <p>团队安排页面保存单条车调、用餐、酒店等明细时，不需要重写产品主表、行程内容和产品说明。
+     * 该方法只替换团队安排相关子表，减少一次保存涉及的数据库写入量。</p>
+     *
+     * @param id 产品ID
+     * @param arrangementItems 团队安排明细
+     * @param tenantId 当前租户ID
+     * @param operator 当前操作人
+     */
+    @Transactional
+    public void updateArrangements(
+            Long id,
+            List<SalesProductArrangementItemRequest> arrangementItems,
+            Long tenantId,
+            String operator
+    ) {
+        SalesProductEntity product = productMapper.selectOne(baseQuery(tenantId).eq("id", id));
+        if (product == null) {
+            throw new BizException(notFoundMessage());
+        }
+        softDeleteArrangementChildren(id, tenantId, operator);
+        saveArrangementItems(id, arrangementItems, tenantId, operator);
+    }
+
+    /**
+     * 新增或替换一条团队安排。
+     *
+     * <p>修改已有安排时先校验该安排属于当前产品和租户，再只软删除这一条安排及其子表。
+     * 这样车调、用餐等弹窗保存不会影响其它安排，也避免远程数据库上大量无关写入。</p>
+     *
+     * @param productId 产品ID
+     * @param request 单条安排保存请求
+     * @param tenantId 当前租户ID
+     * @param operator 当前操作人
+     * @return 新插入的安排 ID
+     */
+    @Transactional
+    public Long upsertArrangement(
+            Long productId,
+            SalesProductArrangementUpsertRequest request,
+            Long tenantId,
+            String operator
+    ) {
+        SalesProductEntity product = productMapper.selectOne(baseQuery(tenantId).eq("id", productId));
+        if (product == null) {
+            throw new BizException(notFoundMessage());
+        }
+        if (request.arrangementId() != null) {
+            SalesProductArrangementItemEntity current = arrangementMapper.selectOne(new QueryWrapper<SalesProductArrangementItemEntity>()
+                    .eq("tenant_id", tenantId)
+                    .eq("product_id", productId)
+                    .eq("is_deleted", false)
+                    .eq("id", request.arrangementId()));
+            if (current == null) {
+                throw new BizException("团队安排不存在或已删除");
+            }
+            softDeleteSingleArrangement(productId, request.arrangementId(), tenantId, operator);
+        }
+        return saveArrangementItem(productId, request.item(), tenantId, operator);
+    }
+
+    /**
+     * 删除单条团队安排。
+     *
+     * <p>只软删除当前安排及其子表，不影响同一产品下其它团队安排。</p>
+     */
+    @Transactional
+    public void deleteArrangement(Long productId, Long arrangementId, Long tenantId, String operator) {
+        SalesProductArrangementItemEntity current = arrangementMapper.selectOne(new QueryWrapper<SalesProductArrangementItemEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("product_id", productId)
+                .eq("is_deleted", false)
+                .eq("id", arrangementId));
+        if (current == null) {
+            throw new BizException("团队安排不存在或已删除");
+        }
+        softDeleteSingleArrangement(productId, arrangementId, tenantId, operator);
+    }
+
+    /**
      * 软删除销售产品模板及其子表。
      *
      * <p>当前产品尚未接团期引用，先允许软删除。后续团期模块落地后，需要在这里增加引用保护。</p>
@@ -328,58 +410,69 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
             return;
         }
         for (SalesProductArrangementItemRequest item : arrangementItems) {
-            SalesProductArrangementItemEntity entity = new SalesProductArrangementItemEntity();
-            entity.setTenantId(tenantId);
-            entity.setProductId(productId);
-            entity.setArrangementType(SalesProductArrangementType.fromValue(item.arrangementType()).getValue());
-            entity.setItemName(cleanRequired(item.itemName()));
-            entity.setArrangementContent(clean(item.arrangementContent()));
-            entity.setQuantity(decimal(item.quantity()));
-            entity.setUnitPrice(decimal(item.unitPrice()));
-            entity.setUnitName(clean(item.unitName()));
-            entity.setSettlementType(SalesProductSettlementType.fromValueOrDefault(item.settlementType()).getValue());
-            entity.setAllocationMode(clean(item.allocationMode()));
-            entity.setScheduleStartDay(clean(item.scheduleStartDay()));
-            entity.setScheduleEndDay(clean(item.scheduleEndDay()));
-            entity.setDeparturePlace(clean(item.departurePlace()));
-            entity.setArrivalPlace(clean(item.arrivalPlace()));
-            entity.setDaysCount(number(item.daysCount()));
-            entity.setResourceName(clean(item.resourceName()));
-            entity.setSupplierId(item.supplierId());
-            entity.setSupplierName(clean(item.supplierName()));
-            entity.setDriverName(clean(item.driverName()));
-            entity.setVehiclePlate(clean(item.vehiclePlate()));
-            entity.setTrafficType(clean(item.trafficType()));
-            entity.setVehicleType(clean(item.vehicleType()));
-            entity.setMealType(clean(item.mealType()));
-            entity.setFundIncluded(clean(item.fundIncluded()));
-            entity.setConfirmed(Boolean.TRUE.equals(item.confirmed()));
-            entity.setConfirmationNo(clean(item.confirmationNo()));
-            entity.setGuideId(item.guideId());
-            entity.setGuideName(clean(item.guideName()));
-            entity.setResponsibleEmployeeId(item.responsibleEmployeeId());
-            entity.setResponsibleEmployeeName(clean(item.responsibleEmployeeName()));
-            entity.setOrderScope(StringUtils.hasText(item.orderScope()) ? clean(item.orderScope()) : "=不关联订单=");
-            entity.setTotalAmount(decimal(item.totalAmount()));
-            entity.setCashAmount(decimal(item.cashAmount()));
-            entity.setCreditAmount(decimal(item.creditAmount()));
-            entity.setPrepaidAmount(decimal(item.prepaidAmount()));
-            entity.setSaleAmount(decimal(item.saleAmount()));
-            entity.setCostAmount(decimal(item.costAmount()));
-            entity.setGuideCommissionAmount(decimal(item.guideCommissionAmount()));
-            entity.setCompanyRebateAmount(decimal(item.companyRebateAmount()));
-            entity.setHeadFeeAmount(decimal(item.headFeeAmount()));
-            entity.setConsumptionAmount(decimal(item.consumptionAmount()));
-            entity.setPeopleCount(decimal(item.peopleCount()));
-            entity.setNoGuideReport(Boolean.TRUE.equals(item.noGuideReport()));
-            entity.setRemark(clean(item.remark()));
-            entity.setCreatedBy(operator);
-            entity.setIsDeleted(false);
-            arrangementMapper.insert(entity);
-            saveArrangementPriceLines(productId, entity.getId(), item.priceLines(), tenantId, operator);
-            saveVehicleQuoteSnapshot(productId, entity.getId(), item.vehicleQuoteSnapshot(), tenantId, operator);
-            saveVehicleInquiryRecords(productId, entity.getId(), item.vehicleInquiryRecords(), tenantId, operator);
+            saveArrangementItem(productId, item, tenantId, operator);
         }
+    }
+
+    /** 保存单条团队安排并返回新主键。 */
+    private Long saveArrangementItem(
+            Long productId,
+            SalesProductArrangementItemRequest item,
+            Long tenantId,
+            String operator
+    ) {
+        SalesProductArrangementItemEntity entity = new SalesProductArrangementItemEntity();
+        entity.setTenantId(tenantId);
+        entity.setProductId(productId);
+        entity.setArrangementType(SalesProductArrangementType.fromValue(item.arrangementType()).getValue());
+        entity.setItemName(cleanRequired(item.itemName()));
+        entity.setArrangementContent(clean(item.arrangementContent()));
+        entity.setQuantity(decimal(item.quantity()));
+        entity.setUnitPrice(decimal(item.unitPrice()));
+        entity.setUnitName(clean(item.unitName()));
+        entity.setSettlementType(SalesProductSettlementType.fromValueOrDefault(item.settlementType()).getValue());
+        entity.setAllocationMode(clean(item.allocationMode()));
+        entity.setScheduleStartDay(clean(item.scheduleStartDay()));
+        entity.setScheduleEndDay(clean(item.scheduleEndDay()));
+        entity.setDeparturePlace(clean(item.departurePlace()));
+        entity.setArrivalPlace(clean(item.arrivalPlace()));
+        entity.setDaysCount(number(item.daysCount()));
+        entity.setResourceName(clean(item.resourceName()));
+        entity.setSupplierId(item.supplierId());
+        entity.setSupplierName(clean(item.supplierName()));
+        entity.setDriverName(clean(item.driverName()));
+        entity.setVehiclePlate(clean(item.vehiclePlate()));
+        entity.setTrafficType(clean(item.trafficType()));
+        entity.setVehicleType(clean(item.vehicleType()));
+        entity.setMealType(clean(item.mealType()));
+        entity.setFundIncluded(clean(item.fundIncluded()));
+        entity.setConfirmed(Boolean.TRUE.equals(item.confirmed()));
+        entity.setConfirmationNo(clean(item.confirmationNo()));
+        entity.setGuideId(item.guideId());
+        entity.setGuideName(clean(item.guideName()));
+        entity.setResponsibleEmployeeId(item.responsibleEmployeeId());
+        entity.setResponsibleEmployeeName(clean(item.responsibleEmployeeName()));
+        entity.setOrderScope(StringUtils.hasText(item.orderScope()) ? clean(item.orderScope()) : "=不关联订单=");
+        entity.setTotalAmount(decimal(item.totalAmount()));
+        entity.setCashAmount(decimal(item.cashAmount()));
+        entity.setCreditAmount(decimal(item.creditAmount()));
+        entity.setPrepaidAmount(decimal(item.prepaidAmount()));
+        entity.setSaleAmount(decimal(item.saleAmount()));
+        entity.setCostAmount(decimal(item.costAmount()));
+        entity.setGuideCommissionAmount(decimal(item.guideCommissionAmount()));
+        entity.setCompanyRebateAmount(decimal(item.companyRebateAmount()));
+        entity.setHeadFeeAmount(decimal(item.headFeeAmount()));
+        entity.setConsumptionAmount(decimal(item.consumptionAmount()));
+        entity.setPeopleCount(decimal(item.peopleCount()));
+        entity.setNoGuideReport(Boolean.TRUE.equals(item.noGuideReport()));
+        entity.setRemark(clean(item.remark()));
+        entity.setCreatedBy(operator);
+        entity.setIsDeleted(false);
+        arrangementMapper.insert(entity);
+        saveArrangementPriceLines(productId, entity.getId(), item.priceLines(), tenantId, operator);
+        saveVehicleQuoteSnapshot(productId, entity.getId(), item.vehicleQuoteSnapshot(), tenantId, operator);
+        saveVehicleInquiryRecords(productId, entity.getId(), item.vehicleInquiryRecords(), tenantId, operator);
+        return entity.getId();
     }
 
     /** 保存用车报价测算快照。非用车安排也允许为空，避免通用安排保存被迫携带用车字段。 */
@@ -494,6 +587,7 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
             entity.setGuideCommissionAmount(decimal(item.guideCommissionAmount()));
             entity.setGuideCommissionRate(decimal(item.guideCommissionRate()));
             entity.setCompanyRebateAmount(decimal(item.companyRebateAmount()));
+            entity.setCompanyRebateRate(decimal(item.companyRebateRate()));
             entity.setHeadFeeAmount(decimal(item.headFeeAmount()));
             entity.setConsumptionAmount(decimal(item.consumptionAmount()));
             entity.setSortOrder(item.sortOrder() == null ? index : item.sortOrder());
@@ -549,6 +643,70 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
         vehicleInquiry.setDeletedAt(now);
         vehicleInquiry.setDeletedBy(operator);
         vehicleInquiryMapper.update(vehicleInquiry, childUpdate(tenantId, productId));
+    }
+
+    /**
+     * 只软删除团队安排相关子表。
+     *
+     * <p>团队安排弹窗保存使用该方法，避免把行程、产品说明、路书点位等无关子表也反复软删重建。</p>
+     */
+    private void softDeleteArrangementChildren(Long productId, Long tenantId, String operator) {
+        OffsetDateTime now = OffsetDateTime.now();
+        SalesProductArrangementItemEntity arrangement = new SalesProductArrangementItemEntity();
+        arrangement.setIsDeleted(true);
+        arrangement.setDeletedAt(now);
+        arrangement.setDeletedBy(operator);
+        arrangementMapper.update(arrangement, childUpdate(tenantId, productId));
+
+        SalesProductArrangementPriceLineEntity priceLine = new SalesProductArrangementPriceLineEntity();
+        priceLine.setIsDeleted(true);
+        priceLine.setDeletedAt(now);
+        priceLine.setDeletedBy(operator);
+        priceLineMapper.update(priceLine, childUpdate(tenantId, productId));
+
+        SalesProductVehicleQuoteSnapshotEntity vehicleQuote = new SalesProductVehicleQuoteSnapshotEntity();
+        vehicleQuote.setIsDeleted(true);
+        vehicleQuote.setDeletedAt(now);
+        vehicleQuote.setDeletedBy(operator);
+        vehicleQuoteSnapshotMapper.update(vehicleQuote, childUpdate(tenantId, productId));
+
+        SalesProductVehicleInquiryEntity vehicleInquiry = new SalesProductVehicleInquiryEntity();
+        vehicleInquiry.setIsDeleted(true);
+        vehicleInquiry.setDeletedAt(now);
+        vehicleInquiry.setDeletedBy(operator);
+        vehicleInquiryMapper.update(vehicleInquiry, childUpdate(tenantId, productId));
+    }
+
+    /**
+     * 只软删除一条团队安排及其子表。
+     *
+     * <p>单条弹窗修改使用该方法，所有条件同时带 product_id、tenant_id 和 arrangement_item_id，防止误删其它安排。</p>
+     */
+    private void softDeleteSingleArrangement(Long productId, Long arrangementItemId, Long tenantId, String operator) {
+        OffsetDateTime now = OffsetDateTime.now();
+        SalesProductArrangementItemEntity arrangement = new SalesProductArrangementItemEntity();
+        arrangement.setIsDeleted(true);
+        arrangement.setDeletedAt(now);
+        arrangement.setDeletedBy(operator);
+        arrangementMapper.update(arrangement, this.<SalesProductArrangementItemEntity>childUpdate(tenantId, productId).eq("id", arrangementItemId));
+
+        SalesProductArrangementPriceLineEntity priceLine = new SalesProductArrangementPriceLineEntity();
+        priceLine.setIsDeleted(true);
+        priceLine.setDeletedAt(now);
+        priceLine.setDeletedBy(operator);
+        priceLineMapper.update(priceLine, this.<SalesProductArrangementPriceLineEntity>childUpdate(tenantId, productId).eq("arrangement_item_id", arrangementItemId));
+
+        SalesProductVehicleQuoteSnapshotEntity vehicleQuote = new SalesProductVehicleQuoteSnapshotEntity();
+        vehicleQuote.setIsDeleted(true);
+        vehicleQuote.setDeletedAt(now);
+        vehicleQuote.setDeletedBy(operator);
+        vehicleQuoteSnapshotMapper.update(vehicleQuote, this.<SalesProductVehicleQuoteSnapshotEntity>childUpdate(tenantId, productId).eq("arrangement_item_id", arrangementItemId));
+
+        SalesProductVehicleInquiryEntity vehicleInquiry = new SalesProductVehicleInquiryEntity();
+        vehicleInquiry.setIsDeleted(true);
+        vehicleInquiry.setDeletedAt(now);
+        vehicleInquiry.setDeletedBy(operator);
+        vehicleInquiryMapper.update(vehicleInquiry, this.<SalesProductVehicleInquiryEntity>childUpdate(tenantId, productId).eq("arrangement_item_id", arrangementItemId));
     }
 
     /** 构造子表更新条件，所有子表修改都必须带租户和产品边界。 */
