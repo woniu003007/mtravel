@@ -58,6 +58,9 @@ function scheduleIdleTimer(router: Router) {
   if (!accessStore.accessToken || router.currentRoute.value.path === LOGIN_PATH) {
     return;
   }
+  if (accessStore.loginIdleTimeoutMinutes <= 0) {
+    return;
+  }
   const timeoutMs = accessStore.loginIdleTimeoutMinutes * 60 * 1000;
   idleTimer = window.setTimeout(() => {
     void logoutByIdleTimeout();
@@ -67,6 +70,9 @@ function scheduleIdleTimer(router: Router) {
 async function sendHeartbeatIfActive(router: Router) {
   const accessStore = useAccessStore();
   if (!accessStore.accessToken || router.currentRoute.value.path === LOGIN_PATH) {
+    return;
+  }
+  if (accessStore.loginIdleTimeoutMinutes <= 0) {
     return;
   }
   const timeoutMs = accessStore.loginIdleTimeoutMinutes * 60 * 1000;

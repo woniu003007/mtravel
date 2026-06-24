@@ -53,6 +53,7 @@ class SystemUserAuthServiceTest {
         assertThat(result.realName()).isEqualTo("系统管理员");
         assertThat(result.roles()).containsExactly("admin");
         assertThat(result.accessToken()).isEqualTo("token-value");
+        assertThat(result.idleTimeoutMinutes()).isZero();
         verify(authSessionService).createSession(
                 new AuthenticatedUser(1L, "admin", "系统管理员", 1L, List.of("admin")),
                 Duration.ofMinutes(120)

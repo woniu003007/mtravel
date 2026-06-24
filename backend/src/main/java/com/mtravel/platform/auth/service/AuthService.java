@@ -83,8 +83,9 @@ public class AuthService {
         );
         Duration idleTimeout = authConfigService.getIdleTimeout(user.tenantId());
         String sessionId = authSessionService.createSession(user, idleTimeout);
+        long clientIdleTimeoutMinutes = securityProperties.isSessionTimeoutEnabled() ? idleTimeout.toMinutes() : 0;
         return new LoginResult(user.id(), user.username(), user.realName(), user.roles(), "/workspace",
-                jwtService.createAccessToken(user, sessionId), idleTimeout.toMinutes());
+                jwtService.createAccessToken(user, sessionId), clientIdleTimeoutMinutes);
     }
 
     /**

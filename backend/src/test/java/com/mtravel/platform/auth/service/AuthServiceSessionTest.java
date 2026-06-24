@@ -24,6 +24,7 @@ class AuthServiceSessionTest {
     @Test
     void loginShouldReturnIdleTimeoutAndCreateSessionBeforeToken() {
         SecurityProperties securityProperties = new SecurityProperties();
+        securityProperties.setSessionTimeoutEnabled(true);
         securityProperties.setDemoUsername("demo01");
         securityProperties.setDemoPassword("pwd");
         TenantProperties tenantProperties = new TenantProperties();
@@ -68,5 +69,49 @@ class AuthServiceSessionTest {
                 new AuthenticatedUser(1L, "demo01", "系统管理员", 1L, List.of("admin")),
                 Duration.ofMinutes(90)
         );
+    }
+
+    @Test
+    void loginShouldReturnZeroIdleTimeoutWhenSessionTimeoutDisabled() {
+        SecurityProperties securityProperties = new SecurityProperties();
+        securityProperties.setSessionTimeoutEnabled(false);
+        TenantProperties tenantProperties = new TenantProperties();
+        tenantProperties.setDefaultTenantId(1L);
+        JwtService jwtService = mock(JwtService.class);
+        TokenBlacklistService tokenBlacklistService = mock(TokenBlacklistService.class);
+        AuthSessionService authSessionService = mock(AuthSessionService.class);
+        AuthConfigService authConfigService = mock(AuthConfigService.class);
+        SystemUserMapper systemUserMapper = mock(SystemUserMapper.class);
+        PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
+        SystemUserEntity userEntity = new SystemUserEntity();
+        userEntity.setId(1L);
+        userEntity.setTenantId(1L);
+        userEntity.setUsername("demo01");
+        userEntity.setPasswordHash("hash-value");
+        userEntity.setRealName("系统管理员");
+        userEntity.setRoleCode("admin");
+        userEntity.setStatus("active");
+        userEntity.setIsDeleted(false);
+        when(systemUserMapper.selectOne(any())).thenReturn(userEntity);
+        when(passwordEncoder.matches("pwd", "hash-value")).thenReturn(true);
+        when(authConfigService.getIdleTimeout(1L)).thenReturn(Duration.ofMinutes(90));
+        when(authSessionService.createSession(any(AuthenticatedUser.class), any(Duration.class))).thenReturn("sid-1");
+        when(jwtService.createAccessToken(any(AuthenticatedUser.class), org.mockito.Mockito.eq("sid-1")))
+                .thenReturn("token-value");
+        AuthService service = new AuthService(
+                securityProperties,
+                tenantProperties,
+                jwtService,
+                tokenBlacklistService,
+                authSessionService,
+                authConfigService,
+                systemUserMapper,
+                passwordEncoder
+        );
+
+        LoginResult result = service.login(new LoginRequest("demo01", "pwd"));
+
+        assertThat(result.accessToken()).isEqualTo("token-value");
+        assertThat(result.idleTimeoutMinutes()).isZero();
     }
 }

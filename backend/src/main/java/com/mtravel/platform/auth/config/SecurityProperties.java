@@ -13,11 +13,14 @@ public class SecurityProperties {
     /** JWT 签名密钥，生产环境必须通过环境变量配置强密钥。 */
     private String jwtSecret = "dev-only-change-me-please-use-a-strong-secret-key-32bytes";
 
-    /** 访问 token 有效分钟数。 */
-    private long accessTokenMinutes = 120;
+    /** 访问 token 有效分钟数。当前开发阶段默认 30 天，避免频繁被打回登录页。 */
+    private long accessTokenMinutes = 43_200;
 
     /** 默认无操作退出分钟数，租户级配置会优先生效。 */
     private long idleTimeoutMinutes = 120;
+
+    /** 是否启用 Redis 会话超时强校验。false 表示暂时关闭自动退出，只保留手动退出和黑名单。 */
+    private boolean sessionTimeoutEnabled = false;
 
     /** 历史 demo 登录账号配置，数据库用户登录接入后不再作为认证依据。 */
     private String demoUsername = "admin";
@@ -47,6 +50,14 @@ public class SecurityProperties {
 
     public void setIdleTimeoutMinutes(long idleTimeoutMinutes) {
         this.idleTimeoutMinutes = idleTimeoutMinutes;
+    }
+
+    public boolean isSessionTimeoutEnabled() {
+        return sessionTimeoutEnabled;
+    }
+
+    public void setSessionTimeoutEnabled(boolean sessionTimeoutEnabled) {
+        this.sessionTimeoutEnabled = sessionTimeoutEnabled;
     }
 
     public String getDemoUsername() {

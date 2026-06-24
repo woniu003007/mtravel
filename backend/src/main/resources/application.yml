@@ -37,7 +37,8 @@ mtravel:
     default-tenant-id: ${DEFAULT_TENANT_ID:1}
   security:
     jwt-secret: ${JWT_SECRET:dev-only-change-me-please-use-a-strong-secret-key-32bytes}
-    access-token-minutes: ${ACCESS_TOKEN_MINUTES:120}
+    access-token-minutes: ${ACCESS_TOKEN_MINUTES:43200}
     idle-timeout-minutes: ${IDLE_TIMEOUT_MINUTES:120}
+    session-timeout-enabled: ${SESSION_TIMEOUT_ENABLED:false}
     demo-username: ${DEMO_USERNAME:admin}
     demo-password: ${DEMO_PASSWORD:123456}

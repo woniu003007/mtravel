@@ -96,7 +96,7 @@ export const useAccessStore = defineStore('core-access', {
       this.loginExpired = loginExpired;
     },
     setLoginIdleTimeoutMinutes(minutes: number) {
-      this.loginIdleTimeoutMinutes = minutes > 0 ? minutes : 120;
+      this.loginIdleTimeoutMinutes = Math.max(0, Number(minutes) || 0);
     },
     setRefreshToken(token: AccessToken) {
       this.refreshToken = token;

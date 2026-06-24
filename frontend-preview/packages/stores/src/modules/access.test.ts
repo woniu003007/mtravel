@@ -36,7 +36,7 @@ describe('useAccessStore', () => {
     store.setLoginIdleTimeoutMinutes(90);
     expect(store.loginIdleTimeoutMinutes).toBe(90);
     store.setLoginIdleTimeoutMinutes(0);
-    expect(store.loginIdleTimeoutMinutes).toBe(120);
+    expect(store.loginIdleTimeoutMinutes).toBe(0);
   });
 
   // 测试设置空的访问菜单列表

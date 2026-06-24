@@ -1,5 +1,7 @@
 package com.mtravel.platform.auth.filter;
 
+import com.mtravel.platform.auth.config.SecurityProperties;
+import com.mtravel.platform.auth.dto.AuthenticatedUser;
 import com.mtravel.platform.auth.service.AuthSessionService;
 import com.mtravel.platform.auth.service.JwtService;
 import com.mtravel.platform.auth.service.TokenBlacklistService;
@@ -7,6 +9,8 @@ import com.mtravel.platform.system.config.service.AuthConfigService;
 import com.mtravel.platform.system.log.service.OperationLogService;
 import com.mtravel.platform.tenant.TenantProperties;
 import jakarta.servlet.FilterChain;
+import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -23,6 +27,7 @@ class JwtAuthenticationFilterTest {
     void blacklistedTokenShouldReturnUnauthorized() throws Exception {
         JwtService jwtService = mock(JwtService.class);
         TokenBlacklistService tokenBlacklistService = mock(TokenBlacklistService.class);
+        SecurityProperties securityProperties = new SecurityProperties();
         TenantProperties tenantProperties = new TenantProperties();
         OperationLogService operationLogService = mock(OperationLogService.class);
         AuthSessionService authSessionService = mock(AuthSessionService.class);
@@ -30,6 +35,7 @@ class JwtAuthenticationFilterTest {
         JwtAuthenticationFilter filter = new JwtAuthenticationFilter(
                 jwtService,
                 tokenBlacklistService,
+                securityProperties,
                 tenantProperties,
                 operationLogService,
                 authSessionService,
@@ -48,5 +54,42 @@ class JwtAuthenticationFilterTest {
         assertThat(response.getContentAsString()).contains("登录状态已失效");
         verify(jwtService, never()).parse("old-token");
         verify(filterChain, never()).doFilter(request, response);
+    }
+
+    @Test
+    void sessionTimeoutDisabledShouldNotRejectWhenRedisSessionExpired() throws Exception {
+        JwtService jwtService = mock(JwtService.class);
+        TokenBlacklistService tokenBlacklistService = mock(TokenBlacklistService.class);
+        SecurityProperties securityProperties = new SecurityProperties();
+        securityProperties.setSessionTimeoutEnabled(false);
+        TenantProperties tenantProperties = new TenantProperties();
+        OperationLogService operationLogService = mock(OperationLogService.class);
+        AuthSessionService authSessionService = mock(AuthSessionService.class);
+        AuthConfigService authConfigService = mock(AuthConfigService.class);
+        JwtAuthenticationFilter filter = new JwtAuthenticationFilter(
+                jwtService,
+                tokenBlacklistService,
+                securityProperties,
+                tenantProperties,
+                operationLogService,
+                authSessionService,
+                authConfigService
+        );
+
+        AuthenticatedUser user = new AuthenticatedUser(9L, "admin", "系统管理员", 1L, List.of("admin"), "sid-1");
+        when(tokenBlacklistService.isBlacklisted("valid-token")).thenReturn(false);
+        when(jwtService.parse("valid-token")).thenReturn(user);
+        when(authConfigService.getIdleTimeout(1L)).thenReturn(Duration.ofMinutes(120));
+        when(authSessionService.validateAndRefresh(user, "sid-1", Duration.ofMinutes(120))).thenReturn(false);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/auth/codes");
+        request.addHeader("Authorization", "Bearer valid-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, filterChain);
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        verify(authSessionService, never()).validateAndRefresh(user, "sid-1", Duration.ofMinutes(120));
+        verify(filterChain).doFilter(request, response);
     }
 }

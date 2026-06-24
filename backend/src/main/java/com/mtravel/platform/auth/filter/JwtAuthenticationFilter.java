@@ -1,5 +1,6 @@
 package com.mtravel.platform.auth.filter;
 
+import com.mtravel.platform.auth.config.SecurityProperties;
 import com.mtravel.platform.auth.dto.AuthenticatedUser;
 import com.mtravel.platform.auth.service.AuthSessionService;
 import com.mtravel.platform.auth.service.JwtService;
@@ -34,6 +35,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final TokenBlacklistService tokenBlacklistService;
+    private final SecurityProperties securityProperties;
     private final TenantProperties tenantProperties;
     private final OperationLogService operationLogService;
     private final AuthSessionService authSessionService;
@@ -42,6 +44,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     public JwtAuthenticationFilter(
             JwtService jwtService,
             TokenBlacklistService tokenBlacklistService,
+            SecurityProperties securityProperties,
             TenantProperties tenantProperties,
             OperationLogService operationLogService,
             AuthSessionService authSessionService,
@@ -49,6 +52,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     ) {
         this.jwtService = jwtService;
         this.tokenBlacklistService = tokenBlacklistService;
+        this.securityProperties = securityProperties;
         this.tenantProperties = tenantProperties;
         this.operationLogService = operationLogService;
         this.authSessionService = authSessionService;
@@ -70,13 +74,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (token != null) {
                 try {
                     AuthenticatedUser user = jwtService.parse(token);
-                    Duration idleTimeout = authConfigService.getIdleTimeout(user.tenantId());
-                    // Redis 会话是无操作退出和同账号单点在线的最终判断依据。
-                    if (!authSessionService.validateAndRefresh(user, user.sessionId(), idleTimeout)) {
-                        SecurityContextHolder.clearContext();
-                        TenantContextHolder.setTenantId(user.tenantId());
-                        writeUnauthorized(request, response);
-                        return;
+                    if (securityProperties.isSessionTimeoutEnabled()) {
+                        Duration idleTimeout = authConfigService.getIdleTimeout(user.tenantId());
+                        // Redis 会话是无操作退出和同账号单点在线的最终判断依据。当前可通过配置关闭，避免开发阶段频繁强制退出。
+                        if (!authSessionService.validateAndRefresh(user, user.sessionId(), idleTimeout)) {
+                            SecurityContextHolder.clearContext();
+                            TenantContextHolder.setTenantId(user.tenantId());
+                            writeUnauthorized(request, response);
+                            return;
+                        }
                     }
                     List<SimpleGrantedAuthority> authorities = user.roles().stream()
                             .map(role -> new SimpleGrantedAuthority("ROLE_" + role))
