@@ -181,6 +181,11 @@ function openTeamArrangementPage(record: Record<string, any>) {
   router.push(`/sales/product/team-arrangement/${row.id}`);
 }
 
+function openSchedulePage(record: Record<string, any>) {
+  const row = record as ProductRow;
+  router.push(`/sales/product/schedule/${row.id}`);
+}
+
 function confirmDelete(record: Record<string, any>) {
   const row = record as ProductRow;
   Modal.confirm({
@@ -316,7 +321,7 @@ onMounted(() => {
           <template v-else-if="column.key === 'action'">
             <Space size="small" wrap>
               <Button type="link" size="small" @click="showPendingAction('创建团队')">创建团队</Button>
-              <Button type="link" size="small" @click="showPendingAction('团期管理')">团期管理</Button>
+              <Button type="link" size="small" @click="openSchedulePage(record)">团期管理</Button>
               <Button type="link" size="small" @click="openEditPage(record)">修改产品</Button>
               <Button type="link" size="small" @click="openTeamArrangementPage(record)">团队安排</Button>
               <Button type="link" size="small" @click="showPendingAction('返点规则')">返点规则</Button>

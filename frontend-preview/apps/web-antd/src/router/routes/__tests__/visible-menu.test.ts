@@ -11,7 +11,6 @@ const undevelopedPrefixes = [
   '/statistics',
   '/system',
   '/sales/order',
-  '/sales/team',
   '/sales/schedule',
   '/sales/group-booking',
   '/sales/combine-order',
@@ -38,6 +37,13 @@ function readRouteModule(fileName: string) {
   return readFileSync(resolve(routeModuleDir, fileName), 'utf8');
 }
 
+function visibleRouteChunk(source: string) {
+  return source
+    .split('\n')
+    .filter((line) => !line.includes('hideInMenu: true'))
+    .join('\n');
+}
+
 describe('visible business menu routes', () => {
   it('does not expose undeveloped prototype pages as visible menus', () => {
     const businessRouteFiles = readdirSync(routeModuleDir)
@@ -60,10 +66,12 @@ describe('visible business menu routes', () => {
       .filter((fileName) => fileName.endsWith('.ts'))
       .filter((fileName) => !fileName.endsWith('.test.ts'))
       .map(readRouteModule)
+      .map(visibleRouteChunk)
       .join('\n');
 
     expect(allBusinessRoutes).toContain("title: '客户单位'");
     expect(allBusinessRoutes).toContain("title: '产品管理'");
+    expect(allBusinessRoutes).toContain("title: '团队管理'");
     expect(allBusinessRoutes).toContain("title: '自控房源与房态库存'");
     expect(allBusinessRoutes).toContain("title: '导游管理'");
     expect(allBusinessRoutes).toContain("title: '产品字典'");

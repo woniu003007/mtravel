@@ -60,5 +60,9 @@ backend/logs/
 output/
 outputs/
 
+# local business samples / credentials / personal data
+确认单/
+网上预定门票系统/
+
 # local backups
 backups/

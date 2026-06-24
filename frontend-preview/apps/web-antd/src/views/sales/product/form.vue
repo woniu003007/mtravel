@@ -714,10 +714,15 @@ function handleEditTabChange(key: string) {
     router.push(`/sales/product/team-arrangement/${productId.value}`);
     return;
   }
-  activeEditTab.value = normalizeEditTab(key);
   if (key === 'schedule') {
-    message.info('团期管理将在团期模块接入后开放');
+    if (!productId.value) {
+      message.info('请先保存产品后再维护团期');
+      return;
+    }
+    router.push(`/sales/product/schedule/${productId.value}`);
+    return;
   }
+  activeEditTab.value = normalizeEditTab(key);
 }
 
 function goBack() {
@@ -764,6 +769,13 @@ onMounted(async () => {
   if (activeEditTab.value === 'arrangement') {
     if (productId.value) {
       router.replace(`/sales/product/team-arrangement/${productId.value}`);
+      return;
+    }
+    activeEditTab.value = 'basic';
+  }
+  if (activeEditTab.value === 'schedule') {
+    if (productId.value) {
+      router.replace(`/sales/product/schedule/${productId.value}`);
       return;
     }
     activeEditTab.value = 'basic';
@@ -1159,14 +1171,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div v-show="activeEditTab === 'schedule'" class="placeholder-panel">
-            <Card>
-              <div class="section-title">团期管理后续接入</div>
-              <div class="muted mt-2">
-                本页先保留老系统页签位置。团期正式开发后，会从产品模板生成可售团期，并进入团队、订单和游客名单链路。
-              </div>
-            </Card>
-          </div>
+          <div v-show="activeEditTab === 'schedule'" class="placeholder-panel" />
         </Form>
       </Card>
     </Spin>

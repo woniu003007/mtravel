@@ -1,0 +1,1119 @@
+package com.mtravel.platform.sales.team.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.mtravel.platform.common.BizException;
+import com.mtravel.platform.common.PageResult;
+import com.mtravel.platform.sales.booking.order.service.SalesBookingOrderService;
+import com.mtravel.platform.sales.product.entity.SalesProductDescriptionEntity;
+import com.mtravel.platform.sales.product.entity.SalesProductEntity;
+import com.mtravel.platform.sales.product.entity.SalesProductItineraryDayEntity;
+import com.mtravel.platform.sales.product.enums.SalesProductStatus;
+import com.mtravel.platform.sales.product.mapper.SalesProductDescriptionMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductItineraryDayMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductMapper;
+import com.mtravel.platform.sales.team.dto.SalesTeamBatchEditRequest;
+import com.mtravel.platform.sales.team.dto.SalesTeamBatchCreateRequest;
+import com.mtravel.platform.sales.team.dto.SalesTeamListResponse;
+import com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse;
+import com.mtravel.platform.sales.team.dto.SalesTeamPriceResponse;
+import com.mtravel.platform.sales.team.dto.SalesTeamPriceSaveRequest;
+import com.mtravel.platform.sales.team.dto.SalesTeamResponse;
+import com.mtravel.platform.sales.team.dto.SalesTeamSaveRequest;
+import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
+import com.mtravel.platform.sales.team.entity.SalesTeamNoLogEntity;
+import com.mtravel.platform.sales.team.entity.SalesTeamPriceEntity;
+import com.mtravel.platform.sales.team.entity.SalesTeamStatusLogEntity;
+import com.mtravel.platform.sales.team.enums.SalesTeamPriceStatus;
+import com.mtravel.platform.sales.team.enums.SalesTeamStatus;
+import com.mtravel.platform.sales.team.enums.SalesTeamStatusAction;
+import com.mtravel.platform.sales.team.enums.SalesTeamType;
+import com.mtravel.platform.sales.team.mapper.SalesTeamMapper;
+import com.mtravel.platform.sales.team.mapper.SalesTeamNoLogMapper;
+import com.mtravel.platform.sales.team.mapper.SalesTeamPriceMapper;
+import com.mtravel.platform.sales.team.mapper.SalesTeamStatusLogMapper;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.CollectionUtils;
+import org.springframework.util.StringUtils;
+
+/**
+ * 销售团期管理业务服务。
+ *
+ * <p>本服务负责产品下正式团队的生成、价格维护和状态流转。产品只是线路模板，批量生成团期后才会
+ * 形成可收客的 sales_teams 数据；同一团队不同客户类型价格保存在 sales_team_prices。</p>
+ */
+@Service
+public class SalesTeamScheduleService {
+
+    private static final String DEFAULT_TEAM_NO_PREFIX = "CS-SP-BK";
+    private static final DateTimeFormatter TEAM_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyMMdd");
+    private static final Pattern TEAM_SUFFIX_PATTERN = Pattern.compile("([A-Z](?:\\d+)?)$");
+    private static final String TEAM_PROFILE_MARKER = "[[TEAM_PROFILE_JSON]]";
+    private static final Pattern TEAM_PROFILE_STRING_FIELD_PATTERN = Pattern.compile("\"%s\"\\s*:\\s*\"([^\"]*)\"");
+
+    private final SalesProductMapper productMapper;
+    private final SalesProductDescriptionMapper descriptionMapper;
+    private final SalesProductItineraryDayMapper itineraryDayMapper;
+    private final SalesTeamMapper teamMapper;
+    private final SalesTeamPriceMapper priceMapper;
+    private final SalesTeamStatusLogMapper statusLogMapper;
+    private final SalesTeamNoLogMapper noLogMapper;
+    private final SalesBookingOrderService bookingOrderService;
+
+    /**
+     * 测试专用兼容构造器。
+     *
+     * <p>单元测试只关注团队和价格行为，团号日志 Mapper 可为空；Spring 运行时使用带日志 Mapper 的构造器。</p>
+     */
+    public SalesTeamScheduleService(
+            SalesProductMapper productMapper,
+            SalesTeamMapper teamMapper,
+            SalesTeamPriceMapper priceMapper,
+            SalesTeamStatusLogMapper statusLogMapper
+    ) {
+        this(productMapper, null, null, teamMapper, priceMapper, statusLogMapper, null, null);
+    }
+
+    /**
+     * 测试专用兼容构造器，允许团队操作页测试注入产品说明 Mapper。
+     */
+    public SalesTeamScheduleService(
+            SalesProductMapper productMapper,
+            SalesProductDescriptionMapper descriptionMapper,
+            SalesTeamMapper teamMapper,
+            SalesTeamPriceMapper priceMapper,
+            SalesTeamStatusLogMapper statusLogMapper
+    ) {
+        this(productMapper, descriptionMapper, null, teamMapper, priceMapper, statusLogMapper, null, null);
+    }
+
+    /**
+     * 测试专用兼容构造器，允许团队操作页测试注入产品说明和每日行程 Mapper。
+     */
+    public SalesTeamScheduleService(
+            SalesProductMapper productMapper,
+            SalesProductDescriptionMapper descriptionMapper,
+            SalesProductItineraryDayMapper itineraryDayMapper,
+            SalesTeamMapper teamMapper,
+            SalesTeamPriceMapper priceMapper,
+            SalesTeamStatusLogMapper statusLogMapper
+    ) {
+        this(productMapper, descriptionMapper, itineraryDayMapper, teamMapper, priceMapper, statusLogMapper, null, null);
+    }
+
+    /**
+     * 运行时构造器，注入团队主表、价格表、状态日志和团号日志访问对象。
+     */
+    @Autowired
+    public SalesTeamScheduleService(
+            SalesProductMapper productMapper,
+            SalesProductDescriptionMapper descriptionMapper,
+            SalesProductItineraryDayMapper itineraryDayMapper,
+            SalesTeamMapper teamMapper,
+            SalesTeamPriceMapper priceMapper,
+            SalesTeamStatusLogMapper statusLogMapper,
+            SalesTeamNoLogMapper noLogMapper,
+            SalesBookingOrderService bookingOrderService
+    ) {
+        this.productMapper = productMapper;
+        this.descriptionMapper = descriptionMapper;
+        this.itineraryDayMapper = itineraryDayMapper;
+        this.teamMapper = teamMapper;
+        this.priceMapper = priceMapper;
+        this.statusLogMapper = statusLogMapper;
+        this.noLogMapper = noLogMapper;
+        this.bookingOrderService = bookingOrderService;
+    }
+
+    /**
+     * 分页查询产品下的团期。
+     *
+     * <p>先分页查询团队主表，再一次性批量查询当前页团队的价格行，避免按行 N+1 查询。</p>
+     *
+     * @param tenantId 当前租户 ID
+     * @param productId 产品 ID
+     * @param startDate 发团开始日期
+     * @param endDate 发团结束日期
+     * @param status 团队状态
+     * @param keyword 团号或操作计调关键字
+     * @param page 当前页
+     * @param pageSize 每页数量
+     * @return 团期分页结果
+     */
+    public PageResult<SalesTeamResponse> page(
+            Long tenantId,
+            Long productId,
+            LocalDate startDate,
+            LocalDate endDate,
+            String status,
+            String keyword,
+            long page,
+            long pageSize
+    ) {
+        QueryWrapper<SalesTeamEntity> wrapper = baseTeamQuery(tenantId)
+                .eq(productId != null, "product_id", productId)
+                .ge(startDate != null, "departure_date", startDate)
+                .le(endDate != null, "departure_date", endDate)
+                .eq(StringUtils.hasText(status), "status", status)
+                .and(StringUtils.hasText(keyword), nested -> nested
+                        .like("team_no", clean(keyword))
+                        .or()
+                        .like("operator_employee_name", clean(keyword)))
+                .orderByAsc("departure_date")
+                .orderByAsc("team_no");
+        Page<SalesTeamEntity> result = teamMapper.selectPage(Page.of(page, pageSize), wrapper);
+        if (result.getRecords().isEmpty()) {
+            return new PageResult<>(List.of(), result.getTotal());
+        }
+        Map<Long, List<SalesTeamPriceResponse>> prices = loadPricesForTeams(tenantId, result.getRecords());
+        List<SalesTeamResponse> items = result.getRecords().stream()
+                .map(team -> SalesTeamResponse.fromEntity(team, prices.getOrDefault(team.getId(), List.of())))
+                .toList();
+        return new PageResult<>(items, result.getTotal());
+    }
+
+    /**
+     * 分页查询销售团队全局列表。
+     *
+     * <p>该列表对应老系统“销售管理 / 团队管理”，查询粒度是正式团队，而不是某个产品下的团期。
+     * 当前页团队查出后只批量补充产品名称、业务类型、天数和出发地，不加载客户类型价格，避免列表页
+     * 因价格明细产生 N+1 查询或响应体过大。</p>
+     *
+     * @param tenantId 当前租户 ID
+     * @param teamType 团队类型，散拼、整团、散团、单项等
+     * @param keyword 团号、团队名称或备注关键字
+     * @param operatorKeyword 操作计调关键字
+     * @param departurePlace 出发地关键字
+     * @param businessType 业务类型
+     * @param startDate 出团开始日期
+     * @param endDate 出团结束日期
+     * @param travelDays 行程天数
+     * @param teamStatus 团队状态或日期状态
+     * @param page 当前页
+     * @param pageSize 每页数量
+     * @return 团队管理分页结果
+     */
+    public PageResult<SalesTeamListResponse> globalPage(
+            Long tenantId,
+            String teamType,
+            String keyword,
+            String operatorKeyword,
+            String departurePlace,
+            String businessType,
+            LocalDate startDate,
+            LocalDate endDate,
+            Integer travelDays,
+            String teamStatus,
+            long page,
+            long pageSize
+    ) {
+        QueryWrapper<SalesTeamEntity> wrapper = baseTeamQuery(tenantId)
+                .eq(StringUtils.hasText(teamType), "team_type", clean(teamType))
+                .like(StringUtils.hasText(operatorKeyword), "operator_employee_name", clean(operatorKeyword))
+                .ge(startDate != null, "departure_date", startDate)
+                .le(endDate != null, "departure_date", endDate);
+        applyGlobalStatusFilter(wrapper, teamStatus);
+        applyGlobalProductFilters(wrapper, tenantId, keyword, departurePlace, businessType, travelDays);
+        wrapper.orderByDesc("departure_date").orderByAsc("team_no");
+
+        Page<SalesTeamEntity> result = teamMapper.selectPage(Page.of(page, Math.min(pageSize, 200)), wrapper);
+        if (result.getRecords().isEmpty()) {
+            return new PageResult<>(List.of(), result.getTotal());
+        }
+        Map<Long, SalesProductEntity> products = loadProductsForTeams(tenantId, result.getRecords());
+        List<SalesTeamListResponse> items = result.getRecords().stream()
+                .map(team -> SalesTeamListResponse.fromEntity(team, products.get(team.getProductId())))
+                .toList();
+        return new PageResult<>(items, result.getTotal());
+    }
+
+    /**
+     * 查询团队操作页只读详情。
+     *
+     * <p>团队操作页是正式团队执行入口，第一版只聚合团队主表、产品基础资料、产品说明和客户类型价格。
+     * 订单、导游报账、打印、拼团转团等后续链路不在这里做假数据，前端按空列表或待接入按钮展示。</p>
+     *
+     * @param teamId 团队 ID
+     * @param tenantId 当前租户 ID
+     * @return 团队操作页详情
+     */
+    public SalesTeamOperationResponse operationDetail(Long teamId, Long tenantId) {
+        SalesTeamEntity team = requireTeam(teamId, tenantId);
+        SalesProductEntity product = null;
+        if (team.getProductId() != null) {
+            product = productMapper.selectOne(baseProductQuery(tenantId).eq("id", team.getProductId()));
+        }
+        SalesProductDescriptionEntity description = null;
+        if (descriptionMapper != null && team.getProductId() != null) {
+            description = descriptionMapper.selectOne(baseDescriptionQuery(tenantId).eq("product_id", team.getProductId()));
+        }
+        List<SalesProductItineraryDayEntity> itineraryDays = loadProductItineraryDays(tenantId, team.getProductId());
+        List<SalesTeamPriceResponse> prices = loadPricesForTeams(tenantId, List.of(team))
+                .getOrDefault(team.getId(), List.of());
+        List<SalesTeamOperationResponse.OrderRow> orderRows = bookingOrderService == null
+                ? List.of()
+                : bookingOrderService.toOperationRows(bookingOrderService.listOrdersByTeam(teamId, tenantId));
+        return SalesTeamOperationResponse.from(team, product, description, prices, itineraryDays, orderRows);
+    }
+
+    /**
+     * 按日期范围批量生成团期。
+     *
+     * <p>命中星期条件的每一天都会创建一条散拼团队。创建时从产品带入截止收客天数、单房差和预控人数，
+     * 并同步创建默认客户类型价格行。</p>
+     *
+     * @param productId 产品 ID
+     * @param request 批量生成请求
+     * @param tenantId 当前租户 ID
+     * @param operator 当前操作人
+     * @return 新生成的团队列表
+     */
+    @Transactional
+    public List<SalesTeamResponse> batchCreate(
+            Long productId,
+            SalesTeamBatchCreateRequest request,
+            Long tenantId,
+            String operator
+    ) {
+        SalesProductEntity product = requireActiveProduct(productId, tenantId);
+        List<LocalDate> dates = collectDates(request);
+        if (dates.isEmpty()) {
+            throw new BizException("没有符合条件的发团日期");
+        }
+        List<SalesTeamResponse> created = new ArrayList<>();
+        Set<String> generatedInThisBatch = new HashSet<>();
+        for (LocalDate departureDate : dates) {
+            String teamNo = nextTeamNo(product, tenantId, departureDate, generatedInThisBatch);
+            SalesTeamEntity team = buildTeam(product, request, tenantId, operator, departureDate, teamNo);
+            teamMapper.insert(team);
+            SalesTeamPriceEntity price = buildPrice(team, request, tenantId, operator);
+            priceMapper.insert(price);
+            insertStatusLog(tenantId, team.getId(), null, team.getStatus(), SalesTeamStatusAction.CREATE, operator, "批量生成团期");
+            insertNoLog(tenantId, productId, departureDate, teamNo, suffixOf(teamNo), operator);
+            created.add(SalesTeamResponse.fromEntity(team, List.of(SalesTeamPriceResponse.fromEntity(price))));
+        }
+        return created;
+    }
+
+    /**
+     * 保存团队主信息。
+     *
+     * <p>修改总位数时保留已占用位数，并重算余位；总位数不能小于已占用位数。</p>
+     */
+    @Transactional
+    public SalesTeamResponse saveTeam(Long teamId, SalesTeamSaveRequest request, Long tenantId, String operator) {
+        SalesTeamEntity current = requireTeam(teamId, tenantId);
+        SalesTeamEntity update = new SalesTeamEntity();
+        if (request.departureDate() != null) {
+            update.setDepartureDate(request.departureDate());
+        }
+        if (StringUtils.hasText(request.teamType())) {
+            update.setTeamType(SalesTeamType.fromValueOrDefault(request.teamType()).getValue());
+        }
+        Integer usedSeats = number(current.getUsedSeats());
+        Integer totalSeats = request.totalSeats() == null ? current.getTotalSeats() : request.totalSeats();
+        if (totalSeats != null && totalSeats < usedSeats) {
+            throw new BizException("总位数不能小于已占用位数");
+        }
+        if (request.totalSeats() != null) {
+            update.setTotalSeats(totalSeats);
+            update.setRemainingSeats(totalSeats - usedSeats);
+        }
+        if (request.singleRoomDifference() != null) {
+            update.setSingleRoomDifference(money(request.singleRoomDifference()));
+        }
+        UpdateWrapper<SalesTeamEntity> wrapper = baseTeamUpdate(tenantId).eq("id", teamId);
+        applyNullableTeamProfileFields(wrapper, request);
+        int updated = teamMapper.update(update, wrapper);
+        if (updated == 0) {
+            throw new BizException("团队不存在或已删除");
+        }
+        SalesTeamEntity latest = requireTeam(teamId, tenantId);
+        return SalesTeamResponse.fromEntity(latest, loadPricesForTeams(tenantId, List.of(latest)).getOrDefault(teamId, List.of()));
+    }
+
+    /**
+     * 保存团队客户类型价格。
+     *
+     * <p>同一团队同一客户类型重复保存时更新原价格行；新客户类型则新增价格行。</p>
+     */
+    @Transactional
+    public SalesTeamPriceResponse savePrice(
+            Long teamId,
+            SalesTeamPriceSaveRequest request,
+            Long tenantId,
+            String operator
+    ) {
+        SalesTeamEntity team = requireTeam(teamId, tenantId);
+        SalesTeamPriceEntity current = findPrice(teamId, request.customerCategoryId(), request.customerCategoryName(), tenantId);
+        if (current == null) {
+            SalesTeamPriceEntity entity = new SalesTeamPriceEntity();
+            applyPriceFields(entity, request);
+            entity.setTenantId(tenantId);
+            entity.setTeamId(team.getId());
+            entity.setProductId(team.getProductId());
+            entity.setStatus(SalesTeamPriceStatus.ACTIVE.getValue());
+            entity.setCreatedBy(operator);
+            entity.setIsDeleted(false);
+            priceMapper.insert(entity);
+            return SalesTeamPriceResponse.fromEntity(entity);
+        }
+        SalesTeamPriceEntity update = new SalesTeamPriceEntity();
+        applyPriceFields(update, request);
+        int updated = priceMapper.update(update, basePriceUpdate(tenantId).eq("id", current.getId()));
+        if (updated == 0) {
+            throw new BizException("团队价格不存在或已删除");
+        }
+        SalesTeamPriceEntity latest = priceMapper.selectOne(basePriceQuery(tenantId).eq("id", current.getId()));
+        return SalesTeamPriceResponse.fromEntity(latest == null ? current : latest);
+    }
+
+    /**
+     * 批量编辑团期和客户类型价格。
+     *
+     * <p>该方法复刻旧系统“添加/修改团期信息”弹窗规则：先选择团队，再选择客户类型。
+     * 选中客户类型时只处理这些客户类型价格；未选客户类型时处理团队下已有全部价格，
+     * 若团队没有价格且本次是修改价格，则补一条默认价格。</p>
+     */
+    @Transactional
+    public void batchEdit(SalesTeamBatchEditRequest request, Long tenantId, String operator) {
+        if (CollectionUtils.isEmpty(request.teamIds())) {
+            throw new BizException("请选择团队");
+        }
+        boolean updateTeam = Boolean.TRUE.equals(request.updateTotalSeats())
+                || Boolean.TRUE.equals(request.updateSingleRoomDifference());
+        boolean updatePrice = hasPricePayload(request);
+        boolean deletePrice = Boolean.TRUE.equals(request.deletePrice());
+        if (!updateTeam && !updatePrice && !deletePrice) {
+            throw new BizException("请选择需要修改的内容");
+        }
+        for (Long teamId : request.teamIds()) {
+            SalesTeamEntity team = requireTeam(teamId, tenantId);
+            if (updateTeam) {
+                batchUpdateTeam(team, request, tenantId);
+            }
+            if (deletePrice) {
+                deletePricesByBatchRule(team, request, tenantId, operator);
+            } else if (updatePrice) {
+                savePricesByBatchRule(team, request, tenantId, operator);
+            }
+        }
+    }
+
+    /**
+     * 删除团队价格行。
+     *
+     * <p>删除价格只软删除当前价格行，不影响团队主记录。</p>
+     */
+    @Transactional
+    public void deletePrice(Long priceId, Long tenantId, String operator) {
+        SalesTeamPriceEntity update = new SalesTeamPriceEntity();
+        update.setIsDeleted(true);
+        update.setDeletedAt(OffsetDateTime.now());
+        update.setDeletedBy(operator);
+        int updated = priceMapper.update(update, basePriceUpdate(tenantId).eq("id", priceId));
+        if (updated == 0) {
+            throw new BizException("团队价格不存在或已删除");
+        }
+    }
+
+    /**
+     * 批量变更团队状态。
+     *
+     * <p>状态动作按老系统按钮语义限制：正常可停收或取消，停收可启用或取消，取消可恢复或删除。</p>
+     */
+    @Transactional
+    public void changeStatus(List<Long> teamIds, String action, Long tenantId, String operator, String remark) {
+        if (CollectionUtils.isEmpty(teamIds)) {
+            throw new BizException("请选择团队");
+        }
+        for (Long teamId : teamIds) {
+            switch (action) {
+                case "stop" -> updateStatus(teamId, tenantId, operator, remark, SalesTeamStatus.NORMAL, SalesTeamStatus.STOPPED, SalesTeamStatusAction.STOP);
+                case "start" -> updateStatus(teamId, tenantId, operator, remark, SalesTeamStatus.STOPPED, SalesTeamStatus.NORMAL, SalesTeamStatusAction.START);
+                case "cancel" -> cancelTeam(teamId, tenantId, operator, remark);
+                case "recover" -> updateStatus(teamId, tenantId, operator, remark, SalesTeamStatus.CANCELLED, SalesTeamStatus.NORMAL, SalesTeamStatusAction.RECOVER);
+                case "delete" -> deleteTeam(teamId, tenantId, operator);
+                default -> throw new BizException("状态动作不合法");
+            }
+        }
+    }
+
+    /**
+     * 删除团队。
+     *
+     * <p>只有取消状态的团队可以软删除。该规则防止用户直接删除仍在收客或停收中的团队。</p>
+     */
+    @Transactional
+    public void deleteTeam(Long teamId, Long tenantId, String operator) {
+        SalesTeamEntity team = requireTeam(teamId, tenantId);
+        if (!SalesTeamStatus.CANCELLED.getValue().equals(team.getStatus())) {
+            throw new BizException("只有取消状态的团队可以删除");
+        }
+        OffsetDateTime now = OffsetDateTime.now();
+        SalesTeamEntity teamUpdate = new SalesTeamEntity();
+        teamUpdate.setIsDeleted(true);
+        teamUpdate.setDeletedAt(now);
+        teamUpdate.setDeletedBy(operator);
+        teamMapper.update(teamUpdate, baseTeamUpdate(tenantId).eq("id", teamId));
+
+        SalesTeamPriceEntity priceUpdate = new SalesTeamPriceEntity();
+        priceUpdate.setIsDeleted(true);
+        priceUpdate.setDeletedAt(now);
+        priceUpdate.setDeletedBy(operator);
+        priceMapper.update(priceUpdate, basePriceUpdate(tenantId).eq("team_id", teamId));
+
+        insertStatusLog(tenantId, teamId, team.getStatus(), team.getStatus(), SalesTeamStatusAction.DELETE, operator, "删除取消状态团队");
+    }
+
+    private QueryWrapper<SalesTeamEntity> baseTeamQuery(Long tenantId) {
+        return new QueryWrapper<SalesTeamEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false);
+    }
+
+    private UpdateWrapper<SalesTeamEntity> baseTeamUpdate(Long tenantId) {
+        return new UpdateWrapper<SalesTeamEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false);
+    }
+
+    /**
+     * 显式写入团队属性字段，允许页面提交空字符串清空团队快照。
+     *
+     * <p>实体更新会忽略 null；这里用 wrapper.set 保证“用户清空”和“字段未参与本次保存”
+     * 可以区分。前端团期行内保存只传总位/房差时不会清空这些属性。</p>
+     */
+    private void applyNullableTeamProfileFields(UpdateWrapper<SalesTeamEntity> wrapper, SalesTeamSaveRequest request) {
+        if (request.businessType() != null) {
+            wrapper.set("business_type", clean(request.businessType()));
+        }
+        if (request.departmentId() != null || request.departmentName() != null) {
+            wrapper.set("department_id", request.departmentId());
+            wrapper.set("department_name", clean(request.departmentName()));
+        }
+        if (request.operatorEmployeeId() != null || request.operatorEmployeeName() != null) {
+            wrapper.set("operator_employee_id", request.operatorEmployeeId());
+            wrapper.set("operator_employee_name", clean(request.operatorEmployeeName()));
+        }
+        if (request.escortEmployeeId() != null || request.escortEmployeeName() != null) {
+            wrapper.set("escort_employee_id", request.escortEmployeeId());
+            wrapper.set("escort_employee_name", clean(request.escortEmployeeName()));
+        }
+        if (request.remark() != null) {
+            wrapper.set("remark", clean(request.remark()));
+        }
+    }
+
+    private QueryWrapper<SalesTeamPriceEntity> basePriceQuery(Long tenantId) {
+        return new QueryWrapper<SalesTeamPriceEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false);
+    }
+
+    private QueryWrapper<SalesProductEntity> baseProductQuery(Long tenantId) {
+        return new QueryWrapper<SalesProductEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false);
+    }
+
+    private QueryWrapper<SalesProductDescriptionEntity> baseDescriptionQuery(Long tenantId) {
+        return new QueryWrapper<SalesProductDescriptionEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false);
+    }
+
+    private QueryWrapper<SalesProductItineraryDayEntity> baseItineraryDayQuery(Long tenantId) {
+        return new QueryWrapper<SalesProductItineraryDayEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false);
+    }
+
+    private List<SalesProductItineraryDayEntity> loadProductItineraryDays(Long tenantId, Long productId) {
+        if (itineraryDayMapper == null || productId == null) {
+            return List.of();
+        }
+        return itineraryDayMapper.selectList(baseItineraryDayQuery(tenantId)
+                .eq("product_id", productId)
+                .orderByAsc("day_no"));
+    }
+
+    private void applyGlobalStatusFilter(QueryWrapper<SalesTeamEntity> wrapper, String teamStatus) {
+        if (!StringUtils.hasText(teamStatus)) {
+            return;
+        }
+        String status = clean(teamStatus);
+        LocalDate today = LocalDate.now();
+        switch (status) {
+            case "not_departed" -> wrapper.ge("departure_date", today);
+            case "departed" -> wrapper.lt("departure_date", today);
+            case "normal", "stopped", "cancelled" -> wrapper.eq("status", status);
+            default -> {
+                // 未识别的页面选项不拼接条件，避免因为前端临时枚举导致团队列表为空。
+            }
+        }
+    }
+
+    private void applyGlobalProductFilters(
+            QueryWrapper<SalesTeamEntity> wrapper,
+            Long tenantId,
+            String keyword,
+            String departurePlace,
+            String businessType,
+            Integer travelDays
+    ) {
+        boolean hasProductFilter = StringUtils.hasText(keyword)
+                || StringUtils.hasText(departurePlace)
+                || StringUtils.hasText(businessType)
+                || travelDays != null;
+        if (!hasProductFilter) {
+            return;
+        }
+        QueryWrapper<SalesProductEntity> productWrapper = baseProductQuery(tenantId)
+                .select("id")
+                .eq(StringUtils.hasText(businessType), "business_type", clean(businessType))
+                .eq(travelDays != null, "travel_days", travelDays);
+        if (StringUtils.hasText(keyword)) {
+            String value = clean(keyword);
+            productWrapper.and(nested -> nested
+                    .like("product_name", value)
+                    .or()
+                    .like("remark", value));
+        }
+        if (StringUtils.hasText(departurePlace)) {
+            String value = clean(departurePlace);
+            productWrapper.and(nested -> nested
+                    .like("province", value)
+                    .or()
+                    .like("city", value)
+                    .or()
+                    .like("district", value));
+        }
+        List<Long> productIds = productMapper.selectList(productWrapper)
+                .stream()
+                .map(SalesProductEntity::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (StringUtils.hasText(keyword)) {
+            String value = clean(keyword);
+            wrapper.and(nested -> {
+                nested.like("team_no", value)
+                        .or()
+                        .like("remark", value);
+                if (!productIds.isEmpty()) {
+                    nested.or().in("product_id", productIds);
+                }
+            });
+        } else if (productIds.isEmpty()) {
+            wrapper.apply("1 = 0");
+        } else {
+            wrapper.in("product_id", productIds);
+        }
+    }
+
+    private UpdateWrapper<SalesTeamPriceEntity> basePriceUpdate(Long tenantId) {
+        return new UpdateWrapper<SalesTeamPriceEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false);
+    }
+
+    private SalesProductEntity requireActiveProduct(Long productId, Long tenantId) {
+        SalesProductEntity product = productMapper.selectOne(new QueryWrapper<SalesProductEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq("id", productId));
+        if (product == null) {
+            throw new BizException("产品不存在或已删除");
+        }
+        if (!SalesProductStatus.ACTIVE.getValue().equals(product.getStatus())) {
+            throw new BizException("停用产品不能生成团期");
+        }
+        return product;
+    }
+
+    private SalesTeamEntity requireTeam(Long teamId, Long tenantId) {
+        SalesTeamEntity team = teamMapper.selectOne(baseTeamQuery(tenantId).eq("id", teamId));
+        if (team == null) {
+            throw new BizException("团队不存在或已删除");
+        }
+        return team;
+    }
+
+    private List<LocalDate> collectDates(SalesTeamBatchCreateRequest request) {
+        if (request.dates() != null && !request.dates().isEmpty()) {
+            return request.dates().stream()
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .sorted()
+                    .toList();
+        }
+        if (request.endDate().isBefore(request.startDate())) {
+            throw new BizException("结束日期不能早于开始日期");
+        }
+        Set<Integer> weekdays = new HashSet<>(Objects.requireNonNullElse(request.weekdays(), List.of()));
+        List<LocalDate> dates = new ArrayList<>();
+        LocalDate current = request.startDate();
+        while (!current.isAfter(request.endDate())) {
+            int weekday = current.getDayOfWeek().getValue();
+            if (weekdays.isEmpty() || weekdays.contains(weekday)) {
+                dates.add(current);
+            }
+            current = current.plusDays(1);
+        }
+        return dates;
+    }
+
+    private SalesTeamEntity buildTeam(
+            SalesProductEntity product,
+            SalesTeamBatchCreateRequest request,
+            Long tenantId,
+            String operator,
+            LocalDate departureDate,
+            String teamNo
+    ) {
+        Integer totalSeats = request.totalSeats() == null ? number(product.getPlannedCapacity()) : request.totalSeats();
+        TeamProfileSnapshot profile = parseTeamProfile(product.getRemark());
+        SalesTeamEntity entity = new SalesTeamEntity();
+        entity.setTenantId(tenantId);
+        entity.setProductId(product.getId());
+        entity.setTeamNo(teamNo);
+        entity.setTeamType(SalesTeamType.SANPIN.getValue());
+        entity.setBusinessType(firstText(profile.businessType(), product.getBusinessType()));
+        entity.setDepartureDate(departureDate);
+        entity.setDepartmentName(clean(profile.departmentName()));
+        entity.setOperatorEmployeeId(request.operatorEmployeeId());
+        entity.setOperatorEmployeeName(firstText(request.operatorEmployeeName(), profile.operatorName()));
+        entity.setEscortEmployeeName(clean(profile.escortName()));
+        entity.setStatus(SalesTeamStatus.NORMAL.getValue());
+        entity.setTotalSeats(totalSeats);
+        entity.setUsedSeats(0);
+        entity.setRemainingSeats(totalSeats);
+        entity.setSingleRoomDifference(request.singleRoomDifference() == null
+                ? money(product.getSingleRoomDifference())
+                : money(request.singleRoomDifference()));
+        entity.setCloseDaysBefore(number(product.getCloseDaysBefore()));
+        entity.setCreatedBy(operator);
+        entity.setIsDeleted(false);
+        return entity;
+    }
+
+    /**
+     * 从产品团队安排备注扩展区解析默认团队属性。
+     *
+     * <p>当前产品团队安排页把团队默认属性暂存在 remark 的 JSON 标记后。这里仅做兼容读取，
+     * 解析失败时返回空快照，避免历史备注格式影响团期生成。</p>
+     */
+    private TeamProfileSnapshot parseTeamProfile(String rawRemark) {
+        String text = Objects.toString(rawRemark, "");
+        int markerIndex = text.indexOf(TEAM_PROFILE_MARKER);
+        if (markerIndex < 0) {
+            return TeamProfileSnapshot.empty();
+        }
+        String json = text.substring(markerIndex + TEAM_PROFILE_MARKER.length());
+        return new TeamProfileSnapshot(
+                jsonStringField(json, "businessType"),
+                jsonStringField(json, "departmentName"),
+                jsonStringField(json, "operatorName"),
+                jsonStringField(json, "escortName")
+        );
+    }
+
+    private String jsonStringField(String json, String fieldName) {
+        Matcher matcher = Pattern.compile(TEAM_PROFILE_STRING_FIELD_PATTERN.pattern().formatted(Pattern.quote(fieldName))).matcher(json);
+        return matcher.find() ? clean(matcher.group(1)) : null;
+    }
+
+    private String firstText(String first, String second) {
+        String cleanFirst = clean(first);
+        return StringUtils.hasText(cleanFirst) ? cleanFirst : clean(second);
+    }
+
+    /**
+     * 产品团队安排默认属性快照。正式团队生成时复制这些值，后续团队可单独修改。
+     */
+    private record TeamProfileSnapshot(
+            String businessType,
+            String departmentName,
+            String operatorName,
+            String escortName
+    ) {
+        static TeamProfileSnapshot empty() {
+            return new TeamProfileSnapshot(null, null, null, null);
+        }
+    }
+
+    private SalesTeamPriceEntity buildPrice(
+            SalesTeamEntity team,
+            SalesTeamBatchCreateRequest request,
+            Long tenantId,
+            String operator
+    ) {
+        SalesTeamPriceEntity price = new SalesTeamPriceEntity();
+        price.setTenantId(tenantId);
+        price.setTeamId(team.getId());
+        price.setProductId(team.getProductId());
+        price.setCustomerCategoryId(request.customerCategoryId());
+        price.setCustomerCategoryName(defaultCategoryName(request.customerCategoryName()));
+        price.setAdultPrice(money(request.adultPrice()));
+        price.setChildPrice(money(request.childPrice()));
+        price.setChildNoBedPrice(money(request.childNoBedPrice()));
+        price.setSeniorPrice(money(request.seniorPrice()));
+        price.setExtraFee(money(request.extraFee()));
+        price.setStatus(SalesTeamPriceStatus.ACTIVE.getValue());
+        price.setCreatedBy(operator);
+        price.setIsDeleted(false);
+        return price;
+    }
+
+    private void batchUpdateTeam(SalesTeamEntity current, SalesTeamBatchEditRequest request, Long tenantId) {
+        SalesTeamEntity update = new SalesTeamEntity();
+        Integer usedSeats = number(current.getUsedSeats());
+        if (Boolean.TRUE.equals(request.updateTotalSeats())) {
+            Integer totalSeats = number(request.totalSeats());
+            if (totalSeats < usedSeats) {
+                throw new BizException("总位数不能小于已占用位数");
+            }
+            update.setTotalSeats(totalSeats);
+            update.setRemainingSeats(totalSeats - usedSeats);
+        }
+        if (Boolean.TRUE.equals(request.updateSingleRoomDifference())) {
+            update.setSingleRoomDifference(money(request.singleRoomDifference()));
+        }
+        int updated = teamMapper.update(update, baseTeamUpdate(tenantId).eq("id", current.getId()));
+        if (updated == 0) {
+            throw new BizException("团队不存在或已删除");
+        }
+    }
+
+    private boolean hasPricePayload(SalesTeamBatchEditRequest request) {
+        return request.adultPrice() != null
+                || request.childPrice() != null
+                || request.childNoBedPrice() != null
+                || request.seniorPrice() != null
+                || request.extraFee() != null;
+    }
+
+    private void savePricesByBatchRule(
+            SalesTeamEntity team,
+            SalesTeamBatchEditRequest request,
+            Long tenantId,
+            String operator
+    ) {
+        List<SalesTeamBatchEditRequest.CustomerCategoryItem> categories =
+                Objects.requireNonNullElse(request.customerCategories(), List.of());
+        if (!categories.isEmpty()) {
+            for (SalesTeamBatchEditRequest.CustomerCategoryItem category : categories) {
+                saveBatchPriceForCategory(team, request, category, tenantId, operator);
+            }
+            return;
+        }
+        List<SalesTeamPriceEntity> existingPrices = priceMapper.selectList(basePriceQuery(tenantId).eq("team_id", team.getId()));
+        if (existingPrices.isEmpty()) {
+            saveBatchPriceForCategory(team, request, new SalesTeamBatchEditRequest.CustomerCategoryItem(null, "默认"), tenantId, operator);
+            return;
+        }
+        for (SalesTeamPriceEntity existingPrice : existingPrices) {
+            SalesTeamPriceEntity update = new SalesTeamPriceEntity();
+            applyBatchPriceFields(update, request);
+            priceMapper.update(update, basePriceUpdate(tenantId).eq("id", existingPrice.getId()));
+        }
+    }
+
+    private void saveBatchPriceForCategory(
+            SalesTeamEntity team,
+            SalesTeamBatchEditRequest request,
+            SalesTeamBatchEditRequest.CustomerCategoryItem category,
+            Long tenantId,
+            String operator
+    ) {
+        Long categoryId = normalizeCategoryId(category.id());
+        String categoryName = categoryId == null ? defaultCategoryName(category.name()) : clean(category.name());
+        SalesTeamPriceEntity current = findPrice(team.getId(), categoryId, categoryName, tenantId);
+        if (current == null) {
+            SalesTeamPriceEntity entity = new SalesTeamPriceEntity();
+            applyBatchPriceFields(entity, request);
+            entity.setTenantId(tenantId);
+            entity.setTeamId(team.getId());
+            entity.setProductId(team.getProductId());
+            entity.setCustomerCategoryId(categoryId);
+            entity.setCustomerCategoryName(defaultCategoryName(categoryName));
+            entity.setStatus(SalesTeamPriceStatus.ACTIVE.getValue());
+            entity.setCreatedBy(operator);
+            entity.setIsDeleted(false);
+            priceMapper.insert(entity);
+            return;
+        }
+        SalesTeamPriceEntity update = new SalesTeamPriceEntity();
+        applyBatchPriceFields(update, request);
+        priceMapper.update(update, basePriceUpdate(tenantId).eq("id", current.getId()));
+    }
+
+    private void deletePricesByBatchRule(
+            SalesTeamEntity team,
+            SalesTeamBatchEditRequest request,
+            Long tenantId,
+            String operator
+    ) {
+        SalesTeamPriceEntity update = new SalesTeamPriceEntity();
+        update.setIsDeleted(true);
+        update.setDeletedAt(OffsetDateTime.now());
+        update.setDeletedBy(operator);
+        UpdateWrapper<SalesTeamPriceEntity> wrapper = basePriceUpdate(tenantId).eq("team_id", team.getId());
+        List<SalesTeamBatchEditRequest.CustomerCategoryItem> categories =
+                Objects.requireNonNullElse(request.customerCategories(), List.of());
+        if (!categories.isEmpty()) {
+            List<Long> categoryIds = categories.stream()
+                    .map(SalesTeamBatchEditRequest.CustomerCategoryItem::id)
+                    .map(this::normalizeCategoryId)
+                    .filter(Objects::nonNull)
+                    .toList();
+            boolean includeDefault = categories.stream()
+                    .map(SalesTeamBatchEditRequest.CustomerCategoryItem::id)
+                    .map(this::normalizeCategoryId)
+                    .anyMatch(Objects::isNull);
+            wrapper.and(nested -> {
+                if (!categoryIds.isEmpty()) {
+                    nested.in("customer_category_id", categoryIds);
+                    if (includeDefault) {
+                        nested.or().isNull("customer_category_id");
+                    }
+                } else {
+                    nested.isNull("customer_category_id");
+                }
+            });
+        }
+        priceMapper.update(update, wrapper);
+    }
+
+    private void applyBatchPriceFields(SalesTeamPriceEntity entity, SalesTeamBatchEditRequest request) {
+        entity.setAdultPrice(money(request.adultPrice()));
+        entity.setChildPrice(money(request.childPrice()));
+        entity.setChildNoBedPrice(money(request.childNoBedPrice()));
+        entity.setSeniorPrice(money(request.seniorPrice()));
+        entity.setExtraFee(money(request.extraFee()));
+    }
+
+    private void applyPriceFields(SalesTeamPriceEntity entity, SalesTeamPriceSaveRequest request) {
+        entity.setCustomerCategoryId(request.customerCategoryId());
+        entity.setCustomerCategoryName(defaultCategoryName(request.customerCategoryName()));
+        entity.setAdultPrice(money(request.adultPrice()));
+        entity.setChildPrice(money(request.childPrice()));
+        entity.setChildNoBedPrice(money(request.childNoBedPrice()));
+        entity.setSeniorPrice(money(request.seniorPrice()));
+        entity.setExtraFee(money(request.extraFee()));
+    }
+
+    private SalesTeamPriceEntity findPrice(Long teamId, Long categoryId, String categoryName, Long tenantId) {
+        QueryWrapper<SalesTeamPriceEntity> wrapper = basePriceQuery(tenantId).eq("team_id", teamId);
+        if (categoryId != null) {
+            wrapper.eq("customer_category_id", categoryId);
+        } else {
+            wrapper.isNull("customer_category_id").eq("customer_category_name", defaultCategoryName(categoryName));
+        }
+        return priceMapper.selectOne(wrapper);
+    }
+
+    private Map<Long, List<SalesTeamPriceResponse>> loadPricesForTeams(Long tenantId, List<SalesTeamEntity> teams) {
+        List<Long> teamIds = teams.stream()
+                .map(SalesTeamEntity::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (teamIds.isEmpty()) {
+            return Map.of();
+        }
+        return priceMapper.selectList(basePriceQuery(tenantId).in("team_id", teamIds).orderByAsc("id"))
+                .stream()
+                .map(SalesTeamPriceResponse::fromEntity)
+                .collect(Collectors.groupingBy(SalesTeamPriceResponse::teamId));
+    }
+
+    private Map<Long, SalesProductEntity> loadProductsForTeams(Long tenantId, List<SalesTeamEntity> teams) {
+        List<Long> productIds = teams.stream()
+                .map(SalesTeamEntity::getProductId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (productIds.isEmpty()) {
+            return Map.of();
+        }
+        return productMapper.selectList(baseProductQuery(tenantId).in("id", productIds))
+                .stream()
+                .collect(Collectors.toMap(SalesProductEntity::getId, item -> item, (left, right) -> left));
+    }
+
+    private void updateStatus(
+            Long teamId,
+            Long tenantId,
+            String operator,
+            String remark,
+            SalesTeamStatus requiredStatus,
+            SalesTeamStatus targetStatus,
+            SalesTeamStatusAction action
+    ) {
+        SalesTeamEntity team = requireTeam(teamId, tenantId);
+        if (!requiredStatus.getValue().equals(team.getStatus())) {
+            throw new BizException("团队当前状态不能执行该操作");
+        }
+        SalesTeamEntity update = new SalesTeamEntity();
+        update.setStatus(targetStatus.getValue());
+        int updated = teamMapper.update(update, baseTeamUpdate(tenantId).eq("id", teamId).eq("status", requiredStatus.getValue()));
+        if (updated == 0) {
+            throw new BizException("团队状态已变化，请刷新后重试");
+        }
+        insertStatusLog(tenantId, teamId, requiredStatus.getValue(), targetStatus.getValue(), action, operator, remark);
+    }
+
+    private void cancelTeam(Long teamId, Long tenantId, String operator, String remark) {
+        SalesTeamEntity team = requireTeam(teamId, tenantId);
+        SalesTeamStatus current = SalesTeamStatus.fromValue(team.getStatus());
+        if (current == SalesTeamStatus.CANCELLED) {
+            throw new BizException("团队已经取消");
+        }
+        SalesTeamEntity update = new SalesTeamEntity();
+        update.setStatus(SalesTeamStatus.CANCELLED.getValue());
+        teamMapper.update(update, baseTeamUpdate(tenantId).eq("id", teamId));
+        insertStatusLog(tenantId, teamId, current.getValue(), SalesTeamStatus.CANCELLED.getValue(), SalesTeamStatusAction.CANCEL, operator, remark);
+    }
+
+    private String nextTeamNo(
+            SalesProductEntity product,
+            Long tenantId,
+            LocalDate departureDate,
+            Set<String> generatedInThisBatch
+    ) {
+        String base = teamNoBase(product, departureDate);
+        List<String> existingNos = teamMapper.selectList(baseTeamQuery(tenantId)
+                        .eq("product_id", product.getId())
+                        .eq("departure_date", departureDate)
+                        .likeRight("team_no", base))
+                .stream()
+                .filter(item -> departureDate.equals(item.getDepartureDate()))
+                .map(SalesTeamEntity::getTeamNo)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(ArrayList::new));
+        existingNos.addAll(generatedInThisBatch.stream().filter(no -> no.startsWith(base)).toList());
+        int nextIndex = existingNos.stream()
+                .map(this::suffixOf)
+                .mapToInt(this::suffixIndex)
+                .max()
+                .orElse(-1) + 1;
+        String teamNo = base + suffixByIndex(nextIndex);
+        generatedInThisBatch.add(teamNo);
+        return teamNo;
+    }
+
+    private String teamNoBase(SalesProductEntity product, LocalDate departureDate) {
+        return DEFAULT_TEAM_NO_PREFIX + "-" + departureDate.format(TEAM_DATE_FORMATTER);
+    }
+
+    private String suffixOf(String teamNo) {
+        Matcher matcher = TEAM_SUFFIX_PATTERN.matcher(teamNo == null ? "" : teamNo);
+        return matcher.find() ? matcher.group(1) : "A";
+    }
+
+    private int suffixIndex(String suffix) {
+        if (!StringUtils.hasText(suffix)) {
+            return 0;
+        }
+        char first = suffix.charAt(0);
+        if (suffix.length() == 1) {
+            return Math.max(0, first - 'A');
+        }
+        String numericPart = suffix.substring(1);
+        try {
+            return 26 + Integer.parseInt(numericPart);
+        } catch (NumberFormatException ignored) {
+            return Math.max(0, first - 'A');
+        }
+    }
+
+    private String suffixByIndex(int index) {
+        if (index < 26) {
+            return String.valueOf((char) ('A' + index));
+        }
+        return "Z" + (index - 26);
+    }
+
+    private void insertStatusLog(
+            Long tenantId,
+            Long teamId,
+            String fromStatus,
+            String toStatus,
+            SalesTeamStatusAction action,
+            String operator,
+            String remark
+    ) {
+        if (teamId == null) {
+            return;
+        }
+        SalesTeamStatusLogEntity log = new SalesTeamStatusLogEntity();
+        log.setTenantId(tenantId);
+        log.setTeamId(teamId);
+        log.setFromStatus(fromStatus);
+        log.setToStatus(toStatus);
+        log.setActionType(action.getValue());
+        log.setOperator(operator);
+        log.setActionTime(OffsetDateTime.now());
+        log.setRemark(remark);
+        statusLogMapper.insert(log);
+    }
+
+    private void insertNoLog(
+            Long tenantId,
+            Long productId,
+            LocalDate departureDate,
+            String teamNo,
+            String suffixCode,
+            String operator
+    ) {
+        if (noLogMapper == null) {
+            return;
+        }
+        SalesTeamNoLogEntity log = new SalesTeamNoLogEntity();
+        log.setTenantId(tenantId);
+        log.setProductId(productId);
+        log.setDepartureDate(departureDate);
+        log.setTeamNo(teamNo);
+        log.setSuffixCode(suffixCode);
+        log.setOperator(operator);
+        log.setCreatedAt(OffsetDateTime.now());
+        noLogMapper.insert(log);
+    }
+
+    private String clean(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String defaultCategoryName(String value) {
+        return StringUtils.hasText(value) ? value.trim() : "默认";
+    }
+
+    private Long normalizeCategoryId(Long categoryId) {
+        return categoryId == null || categoryId == 0 ? null : categoryId;
+    }
+
+    private BigDecimal money(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
+    }
+
+    private Integer number(Integer value) {
+        return value == null ? 0 : value;
+    }
+}
