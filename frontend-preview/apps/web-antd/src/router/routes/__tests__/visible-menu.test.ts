@@ -9,7 +9,6 @@ const routeModuleDir = resolve(appRoot, 'src/router/routes/modules');
 const undevelopedPrefixes = [
   '/finance',
   '/statistics',
-  '/system',
   '/sales/order',
   '/sales/schedule',
   '/sales/group-booking',
@@ -75,11 +74,12 @@ describe('visible business menu routes', () => {
     expect(allBusinessRoutes).toContain("title: '自控房源与房态库存'");
     expect(allBusinessRoutes).toContain("title: '导游管理'");
     expect(allBusinessRoutes).toContain("title: '产品字典'");
+    expect(allBusinessRoutes).toContain("title: '系统配置'");
+    expect(allBusinessRoutes).toContain("title: '总经理审批'");
 
     expect(allBusinessRoutes).not.toContain("title: '团期管理'");
     expect(allBusinessRoutes).not.toContain("title: '财务管理'");
     expect(allBusinessRoutes).not.toContain("title: '数据统计'");
-    expect(allBusinessRoutes).not.toContain("title: '系统设置'");
     expect(allBusinessRoutes).not.toContain("title: '合同模板管理'");
     expect(allBusinessRoutes).not.toContain("title: '接送站管理'");
   });

@@ -109,6 +109,18 @@ public class MenuController {
                                 Map.of("name", "ProductDictionary", "path", "/enterprise/product-dictionary", "component", "/enterprise/product-dictionary/index",
                                         "meta", Map.of("title", "产品字典", "icon", "lucide:list-checks"))
                         )
+                ),
+                Map.of(
+                        "name", "System",
+                        "path", "/system",
+                        "redirect", "/system/config",
+                        "meta", Map.of("title", "系统设置", "icon", "lucide:settings", "order", 9),
+                        "children", List.of(
+                                Map.of("name", "SystemConfig", "path", "/system/config", "component", "/system/config/index",
+                                        "meta", Map.of("title", "系统配置", "icon", "lucide:sliders-horizontal")),
+                                Map.of("name", "RiskApproval", "path", "/system/risk-approval", "component", "/system/risk-approval/index",
+                                        "meta", Map.of("title", "总经理审批", "icon", "lucide:badge-check"))
+                        )
                 )
         ));
     }

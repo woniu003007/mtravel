@@ -43,6 +43,26 @@ public class SalesBookingOrderEntity extends TenantSoftDeleteEntity {
     @TableField("customer_team_no")
     private String customerTeamNo;
 
+    /** 原始订单摘要，用于团队操作页追溯拼团、转团或来源订单。 */
+    @TableField("original_order_info")
+    private String originalOrderInfo;
+
+    /** 业务员员工 ID。 */
+    @TableField("salesperson_employee_id")
+    private Long salespersonEmployeeId;
+
+    /** 业务员姓名快照。 */
+    @TableField("salesperson_employee_name")
+    private String salespersonEmployeeName;
+
+    /** 收客计调员工 ID。 */
+    @TableField("booking_operator_employee_id")
+    private Long bookingOperatorEmployeeId;
+
+    /** 收客计调姓名快照。 */
+    @TableField("booking_operator_employee_name")
+    private String bookingOperatorEmployeeName;
+
     /** 客源地省份。 */
     @TableField("source_province")
     private String sourceProvince;
@@ -201,6 +221,46 @@ public class SalesBookingOrderEntity extends TenantSoftDeleteEntity {
 
     public void setCustomerTeamNo(String customerTeamNo) {
         this.customerTeamNo = customerTeamNo;
+    }
+
+    public String getOriginalOrderInfo() {
+        return originalOrderInfo;
+    }
+
+    public void setOriginalOrderInfo(String originalOrderInfo) {
+        this.originalOrderInfo = originalOrderInfo;
+    }
+
+    public Long getSalespersonEmployeeId() {
+        return salespersonEmployeeId;
+    }
+
+    public void setSalespersonEmployeeId(Long salespersonEmployeeId) {
+        this.salespersonEmployeeId = salespersonEmployeeId;
+    }
+
+    public String getSalespersonEmployeeName() {
+        return salespersonEmployeeName;
+    }
+
+    public void setSalespersonEmployeeName(String salespersonEmployeeName) {
+        this.salespersonEmployeeName = salespersonEmployeeName;
+    }
+
+    public Long getBookingOperatorEmployeeId() {
+        return bookingOperatorEmployeeId;
+    }
+
+    public void setBookingOperatorEmployeeId(Long bookingOperatorEmployeeId) {
+        this.bookingOperatorEmployeeId = bookingOperatorEmployeeId;
+    }
+
+    public String getBookingOperatorEmployeeName() {
+        return bookingOperatorEmployeeName;
+    }
+
+    public void setBookingOperatorEmployeeName(String bookingOperatorEmployeeName) {
+        this.bookingOperatorEmployeeName = bookingOperatorEmployeeName;
     }
 
     public String getSourceProvince() {

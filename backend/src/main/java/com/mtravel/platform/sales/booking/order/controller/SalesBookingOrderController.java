@@ -2,6 +2,9 @@ package com.mtravel.platform.sales.booking.order.controller;
 
 import com.mtravel.platform.common.ApiResponse;
 import com.mtravel.platform.common.ControllerSupport;
+import com.mtravel.platform.sales.booking.order.dto.SalesBookingFeeChangeCreateRequest;
+import com.mtravel.platform.sales.booking.order.dto.SalesBookingFeeChangeResponse;
+import com.mtravel.platform.sales.booking.order.dto.SalesBookingGuestImportPreviewResponse;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderResponse;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderSaveRequest;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingTeamDraftResponse;
@@ -11,6 +14,11 @@ import com.mtravel.platform.sales.team.service.SalesTeamScheduleService;
 import com.mtravel.platform.system.log.web.OperationLog;
 import com.mtravel.platform.tenant.TenantProperties;
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
@@ -20,7 +28,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * 销售收客订单接口。
@@ -106,5 +116,94 @@ public class SalesBookingOrderController extends ControllerSupport {
             Authentication authentication
     ) {
         return ApiResponse.ok(orderService.save(request, currentTenantId(), currentOperator(authentication)));
+    }
+
+    /**
+     * 新增订单费用变更并立即生效。
+     *
+     * @param orderId 订单 ID
+     * @param request 费用变更新增请求
+     * @param authentication 当前认证信息
+     * @return 已登记的费用变更
+     */
+    @OperationLog(module = "销售管理", type = "新增")
+    @PostMapping("/fee-change/create")
+    public ApiResponse<SalesBookingFeeChangeResponse> createFeeChange(
+            @RequestParam Long orderId,
+            @Valid @RequestBody SalesBookingFeeChangeCreateRequest request,
+            Authentication authentication
+    ) {
+        return ApiResponse.ok(orderService.createFeeChange(
+                orderId,
+                request,
+                currentTenantId(),
+                currentOperator(authentication)
+        ));
+    }
+
+    /**
+     * 作废订单费用变更。
+     *
+     * @param id 费用变更 ID
+     * @param authentication 当前认证信息
+     * @return 操作结果
+     */
+    @OperationLog(module = "销售管理", type = "作废")
+    @PostMapping("/fee-change/cancel")
+    public ApiResponse<Void> cancelFeeChange(@RequestParam Long id, Authentication authentication) {
+        orderService.cancelFeeChange(id, currentTenantId(), currentOperator(authentication));
+        return ApiResponse.ok();
+    }
+
+    /**
+     * 导出老系统格式游客名单。
+     *
+     * @param id 订单 ID
+     * @param response HTTP 响应
+     */
+    @OperationLog(module = "销售管理", type = "导出")
+    @GetMapping("/guest-export")
+    public void exportGuests(@RequestParam Long id, HttpServletResponse response) throws IOException {
+        ByteArrayOutputStream workbook = orderService.exportGuestWorkbook(id, currentTenantId());
+        String filename = orderService.guestExportFilename(id, currentTenantId());
+        String encodedFilename = URLEncoder.encode(filename, StandardCharsets.UTF_8).replace("+", "%20");
+        response.setContentType("application/vnd.ms-excel");
+        response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + encodedFilename);
+        response.setContentLength(workbook.size());
+        workbook.writeTo(response.getOutputStream());
+    }
+
+    /**
+     * 下载空白游客名单导入模板。
+     *
+     * @param response HTTP 响应
+     */
+    @OperationLog(module = "销售管理", type = "导出")
+    @GetMapping("/guest-import/template")
+    public void downloadGuestImportTemplate(HttpServletResponse response) throws IOException {
+        ByteArrayOutputStream workbook = orderService.guestImportTemplateWorkbook();
+        String filename = orderService.guestImportTemplateFilename();
+        String encodedFilename = URLEncoder.encode(filename, StandardCharsets.UTF_8).replace("+", "%20");
+        response.setContentType("application/vnd.ms-excel");
+        response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + encodedFilename);
+        response.setContentLength(workbook.size());
+        workbook.writeTo(response.getOutputStream());
+    }
+
+    /**
+     * 预览导入游客名单 Excel。
+     *
+     * @param file 游客名单 Excel 文件，支持 xls/xlsx
+     * @return 解析出的游客草稿和校验提示
+     */
+    @OperationLog(module = "销售管理", type = "导入")
+    @PostMapping("/guest-import/preview")
+    public ApiResponse<SalesBookingGuestImportPreviewResponse> importGuestsPreview(
+            @RequestPart("file") MultipartFile file
+    ) throws IOException {
+        return ApiResponse.ok(orderService.importGuestWorkbookPreview(
+                file.getInputStream(),
+                file.getOriginalFilename()
+        ));
     }
 }

@@ -16,6 +16,7 @@ import {
   Table,
   Tag,
   Textarea,
+  Tooltip,
   message,
 } from 'ant-design-vue';
 import dayjs from 'dayjs';
@@ -86,20 +87,22 @@ const actionIcons: Record<string, string> = {
   teamArrangement: 'lucide:clipboard-list',
 };
 
+const ORDER_TABLE_SCROLL_X = 1840;
 const orderColumns: TableColumnsType<OrderRow> = [
-  { dataIndex: 'orderInfo', key: 'orderInfo', title: '订单信息', width: 160 },
+  { dataIndex: 'orderInfo', key: 'orderInfo', title: '订单信息', width: 310 },
   { dataIndex: 'pickupRemark', key: 'pickupRemark', title: '接送备注', width: 120 },
-  { dataIndex: 'sourcePlace', key: 'sourcePlace', title: '客源地', width: 90 },
+  { dataIndex: 'sourcePlace', key: 'sourcePlace', title: '客源地', width: 96 },
   { dataIndex: 'guestName', key: 'guestName', title: '客人', width: 90 },
-  { dataIndex: 'guestCount', key: 'guestCount', title: '人数', width: 64 },
-  { dataIndex: 'priceDetail', key: 'priceDetail', title: '价格详情', width: 120 },
-  { dataIndex: 'receivableAmount', key: 'receivableAmount', title: '应收', width: 90 },
-  { dataIndex: 'receivedAmount', key: 'receivedAmount', title: '已收', width: 90 },
-  { dataIndex: 'balanceAmount', key: 'balanceAmount', title: '余额', width: 90 },
+  { align: 'center', dataIndex: 'guestCount', key: 'guestCount', title: '人数', width: 104 },
+  { dataIndex: 'priceDetail', key: 'priceDetail', title: '价格详情', width: 220 },
+  { align: 'right', dataIndex: 'receivableAmount', key: 'receivableAmount', title: '应收', width: 90 },
+  { align: 'right', dataIndex: 'receivedAmount', key: 'receivedAmount', title: '已收', width: 90 },
+  { align: 'right', dataIndex: 'balanceAmount', key: 'balanceAmount', title: '余额', width: 90 },
   { dataIndex: 'feeRemark', key: 'feeRemark', title: '费用说明', width: 140 },
-  { dataIndex: 'orderRemark', key: 'orderRemark', title: '订单备注', width: 140 },
+  { dataIndex: 'orderRemark', key: 'orderRemark', title: '订单备注', width: 180 },
   { dataIndex: 'bookingInfo', key: 'bookingInfo', title: '日期/预定人', width: 130 },
-  { dataIndex: 'status', key: 'status', title: '状态', width: 88 },
+  { align: 'center', dataIndex: 'status', key: 'status', title: '状态', width: 88 },
+  { align: 'center', fixed: 'right', key: 'operation', title: '操作', width: 92 },
 ];
 
 const teamId = computed(() => Number(route.params.id || 0));
@@ -218,6 +221,13 @@ function emptyText(value?: string | number | null) {
   return value ? String(value) : '--';
 }
 
+function orderStatusColor(status?: string) {
+  if (status === '已确认' || status === 'confirmed') return 'green';
+  if (status === '已取消' || status === 'cancelled') return 'red';
+  if (status === '未处理' || status === 'pending') return 'gold';
+  return 'default';
+}
+
 function stageState(stageKey: string) {
   if (stageKey === 'receive') return 'active';
   if (stageKey === 'arrange' && (team.value?.usedSeats || 0) > 0) return 'active';
@@ -263,9 +273,10 @@ function handleAction(action: ActionInfo) {
   message.info(action.note || `${action.label}待接入`);
 }
 
-function openOrder(row: OrderRow) {
-  if (!team.value?.id || !row.id) return;
-  router.push(`/sales/team/booking/${team.value.id}/${row.id}`);
+function openOrder(row: { id?: null | number | string }) {
+  const orderId = Number(row.id || 0);
+  if (!team.value?.id || !orderId) return;
+  router.push(`/sales/team/booking/${team.value.id}/${orderId}`);
 }
 
 function dictionaryOptions(items: DictItem[]) {
@@ -562,6 +573,7 @@ onMounted(loadDetail);
             :data-source="orders"
             :pagination="false"
             :row-selection="rowSelection"
+            :scroll="{ x: ORDER_TABLE_SCROLL_X }"
             row-key="id"
             size="small"
             class="order-table"
@@ -570,8 +582,68 @@ onMounted(loadDetail);
             <template #emptyText>
               <Empty description="订单模块未接入，当前暂无订单数据" />
             </template>
-            <template #bodyCell="{ text }">
-              {{ emptyText(text) }}
+            <template #bodyCell="{ column, record, text }">
+              <template v-if="column.key === 'orderInfo'">
+                <div
+                  class="order-info-cell"
+                  :title="[
+                    emptyText(record.orderNo),
+                    emptyText(record.orderInfo),
+                    emptyText(record.pickupInfo),
+                    emptyText(record.dropoffInfo),
+                    emptyText(record.originalOrderInfo),
+                  ].join('\n')"
+                >
+                  <div class="order-info-no">{{ emptyText(record.orderNo) }}</div>
+                  <div class="order-cell-secondary">{{ emptyText(record.orderInfo) }}</div>
+                  <div v-if="record.pickupInfo" class="order-multiline-cell">{{ record.pickupInfo }}</div>
+                  <div v-if="record.dropoffInfo" class="order-multiline-cell">{{ record.dropoffInfo }}</div>
+                  <div v-if="record.originalOrderInfo" class="order-original-row">
+                    原始订单信息：{{ record.originalOrderInfo }}
+                  </div>
+                </div>
+              </template>
+              <template v-else-if="column.key === 'guestCount'">
+                <div class="order-count-cell">{{ emptyText(record.guestCountText || text) }}</div>
+              </template>
+              <template v-else-if="column.key === 'priceDetail'">
+                <div class="order-multiline-cell" :title="emptyText(record.priceDetail)">
+                  {{ emptyText(record.priceDetail) }}
+                </div>
+              </template>
+              <template v-else-if="column.key === 'feeRemark'">
+                <div class="order-multiline-cell" :title="emptyText(record.feeRemark)">
+                  {{ emptyText(record.feeRemark) }}
+                </div>
+              </template>
+              <template v-else-if="column.key === 'orderRemark'">
+                <Tooltip
+                  :title="emptyText(record.orderRemark)"
+                  overlay-class-name="order-remark-tooltip"
+                  placement="topLeft"
+                >
+                  <div class="order-remark-ellipsis">
+                    {{ emptyText(record.orderRemark) }}
+                  </div>
+                </Tooltip>
+              </template>
+              <template v-else-if="['receivableAmount', 'receivedAmount', 'balanceAmount'].includes(String(column.key))">
+                <div class="order-money-cell">{{ emptyText(text) }}</div>
+              </template>
+              <template v-else-if="column.key === 'status'">
+                <div class="order-status-cell">
+                  <Tag :color="orderStatusColor(record.status)">{{ emptyText(record.status) }}</Tag>
+                </div>
+              </template>
+              <template v-else-if="column.key === 'operation'">
+                <Button type="link" size="small" class="order-edit-button" @click.stop="openOrder(record)">
+                  <IconifyIcon icon="lucide:file-pen-line" />
+                  <span>修改</span>
+                </Button>
+              </template>
+              <template v-else>
+                <div class="order-cell-clamp" :title="emptyText(text)">{{ emptyText(text) }}</div>
+              </template>
             </template>
           </Table>
         </div>
@@ -1158,6 +1230,7 @@ onMounted(loadDetail);
 }
 
 .order-table :deep(.ant-table) {
+  table-layout: fixed;
   font-size: 12.5px;
   background: #fff;
   border: 1px solid #d7dee8;
@@ -1174,12 +1247,19 @@ onMounted(loadDetail);
 }
 
 .order-table :deep(.ant-table-cell) {
+  padding: 7px 9px !important;
+  vertical-align: top;
   border-color: #e2e8f0 !important;
 }
 
 .order-table :deep(.ant-table-tbody > tr > td) {
   color: #334155;
+  cursor: pointer;
   background: #fff;
+}
+
+.order-table :deep(.ant-table-tbody > tr:hover > td) {
+  background: #f8fbff;
 }
 
 .order-table :deep(.ant-table-placeholder > td) {
@@ -1194,6 +1274,121 @@ onMounted(loadDetail);
 
 .order-table :deep(.ant-empty-description) {
   color: #64748b;
+}
+
+.order-info-cell {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.order-info-no {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.35;
+  color: #1554ad;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-cell-secondary {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #334155;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-multiline-cell {
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #334155;
+  word-break: break-word;
+  white-space: pre-line;
+}
+
+.order-original-row {
+  padding-top: 4px;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #64748b;
+  word-break: break-word;
+  border-top: 1px dashed #cbd5e1;
+}
+
+.order-remark-ellipsis {
+  display: -webkit-box;
+  max-height: 58px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #334155;
+  word-break: break-word;
+  cursor: help;
+  white-space: pre-line;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.order-cell-clamp {
+  display: -webkit-box;
+  max-height: 58px;
+  overflow: hidden;
+  line-height: 1.5;
+  color: #334155;
+  word-break: break-word;
+  white-space: pre-line;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.order-count-cell,
+.order-money-cell {
+  overflow: hidden;
+  font-weight: 900;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-count-cell {
+  text-align: center;
+}
+
+.order-money-cell {
+  color: #0f766e;
+  text-align: right;
+}
+
+.order-status-cell {
+  display: flex;
+  justify-content: center;
+}
+
+.order-status-cell :deep(.ant-tag) {
+  margin-inline-end: 0;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.order-edit-button {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  height: 24px;
+  padding: 0 2px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.order-edit-button svg {
+  width: 14px;
+  height: 14px;
 }
 
 .muted {
@@ -1352,6 +1547,17 @@ onMounted(loadDetail);
   background: #f8fbff;
   border: 1px dashed #cbd5e1;
   border-radius: 6px;
+}
+
+:global(.order-remark-tooltip) {
+  max-width: 520px;
+}
+
+:global(.order-remark-tooltip .ant-tooltip-inner) {
+  max-height: 360px;
+  overflow: auto;
+  line-height: 1.6;
+  white-space: pre-wrap;
 }
 
 @media (width <= 1440px) {

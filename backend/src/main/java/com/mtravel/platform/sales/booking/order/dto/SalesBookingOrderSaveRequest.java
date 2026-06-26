@@ -21,6 +21,11 @@ import java.util.List;
  * @param contactName 客户联系人。
  * @param contactPhone 联系电话。
  * @param customerTeamNo 客户方团队编号。
+ * @param originalOrderInfo 原始订单摘要，用于拼团、转团或来源订单追溯。
+ * @param salespersonEmployeeId 业务员员工 ID。
+ * @param salespersonEmployeeName 业务员姓名快照。
+ * @param bookingOperatorEmployeeId 收客计调员工 ID。
+ * @param bookingOperatorEmployeeName 收客计调姓名快照。
  * @param sourceProvince 客源地省份。
  * @param sourceCity 客源地城市。
  * @param sourceDistrict 客源地区县。
@@ -36,6 +41,7 @@ import java.util.List;
  * @param confirmRemark 确认说明。
  * @param orderRemark 订单备注。
  * @param receivedAmount 已收金额。
+ * @param riskApprovalRequestId 客户风控审批申请 ID。合同到期或授信超限且系统开启强制审批时必填。
  * @param status 订单状态，pending、confirmed、cancelled。
  * @param priceLines 价格明细。
  * @param guests 游客名单。
@@ -55,6 +61,13 @@ public record SalesBookingOrderSaveRequest(
         String contactPhone,
         @Size(max = 120, message = "客户团号不能超过120个字符")
         String customerTeamNo,
+        String originalOrderInfo,
+        Long salespersonEmployeeId,
+        @Size(max = 100, message = "业务员姓名不能超过100个字符")
+        String salespersonEmployeeName,
+        Long bookingOperatorEmployeeId,
+        @Size(max = 100, message = "收客计调姓名不能超过100个字符")
+        String bookingOperatorEmployeeName,
         @Size(max = 80, message = "省份不能超过80个字符")
         String sourceProvince,
         @Size(max = 80, message = "城市不能超过80个字符")
@@ -76,6 +89,7 @@ public record SalesBookingOrderSaveRequest(
         String orderRemark,
         @DecimalMin(value = "0.00", message = "已收金额不能小于0")
         BigDecimal receivedAmount,
+        Long riskApprovalRequestId,
         String status,
         @Valid
         List<SalesBookingOrderPriceLineRequest> priceLines,

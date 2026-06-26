@@ -3,6 +3,20 @@
 
 BEGIN;
 
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS trigger AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 仅用于让本脚本可在独立临时库中校验。正式库中 tenants 已由客户管理脚本创建。
+CREATE TABLE IF NOT EXISTS tenants (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_code varchar(50)
+);
+
 CREATE TABLE IF NOT EXISTS system_configs (
   id BIGSERIAL PRIMARY KEY,
   tenant_id bigint NOT NULL REFERENCES tenants(id),
@@ -22,7 +36,7 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE INDEX IF NOT EXISTS idx_system_configs_tenant_key
   ON system_configs (tenant_id, config_key);
 
-COMMENT ON TABLE system_configs IS '系统配置表。用于保存每个租户可独立设置的运行参数，例如登录无操作自动退出时间。';
+COMMENT ON TABLE system_configs IS '系统配置表。用于保存每个租户可独立设置的登录安全、业务风控、AI辅助录入和地图服务等运行参数。';
 COMMENT ON COLUMN system_configs.id IS '系统配置主键ID，系统内部使用。';
 COMMENT ON COLUMN system_configs.tenant_id IS '租户ID，标识该配置属于哪一家地接公司。';
 COMMENT ON COLUMN system_configs.config_key IS '配置键，使用稳定英文编码标识具体配置项。';
@@ -36,6 +50,12 @@ COMMENT ON INDEX idx_system_configs_tenant_key IS '按租户和配置键查询�
 
 INSERT INTO system_configs (tenant_id, config_key, config_value, remark)
 SELECT id, 'login_idle_timeout_minutes', '120', '浏览器无操作自动退出时间，单位分钟'
+FROM tenants
+WHERE tenant_code = 'default'
+ON CONFLICT (tenant_id, config_key) DO NOTHING;
+
+INSERT INTO system_configs (tenant_id, config_key, config_value, remark)
+SELECT id, 'customer_risk_approval_enabled', 'false', '客户合同到期或授信超限时是否强制总经理审批'
 FROM tenants
 WHERE tenant_code = 'default'
 ON CONFLICT (tenant_id, config_key) DO NOTHING;

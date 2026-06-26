@@ -3,37 +3,61 @@ package com.mtravel.platform.sales.booking.order.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.mtravel.platform.common.BizException;
+import com.mtravel.platform.customer.risk.dto.CustomerRiskApprovalResponse;
+import com.mtravel.platform.customer.risk.service.CustomerRiskApprovalService;
+import com.mtravel.platform.enterprise.expenseitem.entity.EnterpriseExpenseItemEntity;
+import com.mtravel.platform.enterprise.expenseitem.mapper.EnterpriseExpenseItemMapper;
 import com.mtravel.platform.sales.booking.aiimport.service.IdCardValidationResult;
 import com.mtravel.platform.sales.booking.aiimport.service.IdCardValidator;
+import com.mtravel.platform.sales.booking.order.dto.SalesBookingFeeChangeCreateRequest;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingFeeChangeResponse;
+import com.mtravel.platform.sales.booking.order.dto.SalesBookingGuestImportPreviewResponse;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderGuestRequest;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderGuestResponse;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderPriceLineRequest;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderPriceLineResponse;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderResponse;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderSaveRequest;
+import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderChargeLineEntity;
 import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderEntity;
-import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderFeeChangeEntity;
 import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderGuestEntity;
-import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderPriceLineEntity;
+import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderChargeLineMapper;
 import com.mtravel.platform.sales.booking.order.enums.SalesBookingGuestType;
 import com.mtravel.platform.sales.booking.order.enums.SalesBookingOrderStatus;
-import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderFeeChangeMapper;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderGuestMapper;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderMapper;
-import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderPriceLineMapper;
 import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
 import com.mtravel.platform.sales.team.enums.SalesTeamStatus;
 import com.mtravel.platform.sales.team.mapper.SalesTeamMapper;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import org.apache.poi.ss.usermodel.BorderStyle;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.Font;
+import org.apache.poi.ss.usermodel.HorizontalAlignment;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.VerticalAlignment;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.ss.util.CellRangeAddress;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,43 +76,71 @@ public class SalesBookingOrderService {
     private static final DateTimeFormatter ORDER_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyMMdd");
 
     private final SalesBookingOrderMapper orderMapper;
-    private final SalesBookingOrderPriceLineMapper priceLineMapper;
+    private final SalesBookingOrderChargeLineMapper chargeLineMapper;
     private final SalesBookingOrderGuestMapper guestMapper;
-    private final SalesBookingOrderFeeChangeMapper feeChangeMapper;
     private final SalesTeamMapper teamMapper;
     private final IdCardValidator idCardValidator;
+    private final EnterpriseExpenseItemMapper expenseItemMapper;
+    private final CustomerRiskApprovalService riskApprovalService;
 
     /**
      * 单元测试兼容构造器。测试只验证主链路，可不显式传身份证校验器。
      */
-    @Autowired
     public SalesBookingOrderService(
             SalesBookingOrderMapper orderMapper,
-            SalesBookingOrderPriceLineMapper priceLineMapper,
+            SalesBookingOrderChargeLineMapper chargeLineMapper,
             SalesBookingOrderGuestMapper guestMapper,
-            SalesBookingOrderFeeChangeMapper feeChangeMapper,
             SalesTeamMapper teamMapper
     ) {
-        this(orderMapper, priceLineMapper, guestMapper, feeChangeMapper, teamMapper, new IdCardValidator());
+        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), null, null);
     }
 
     /**
-     * 运行时构造器，注入订单、价格、游客、费用变更和团队 Mapper。
+     * 风控测试构造器，允许注入客户风险审批服务。
      */
     public SalesBookingOrderService(
             SalesBookingOrderMapper orderMapper,
-            SalesBookingOrderPriceLineMapper priceLineMapper,
+            SalesBookingOrderChargeLineMapper chargeLineMapper,
             SalesBookingOrderGuestMapper guestMapper,
-            SalesBookingOrderFeeChangeMapper feeChangeMapper,
             SalesTeamMapper teamMapper,
-            IdCardValidator idCardValidator
+            CustomerRiskApprovalService riskApprovalService
+    ) {
+        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), null, riskApprovalService);
+    }
+
+    /**
+     * 费用变更测试构造器，允许注入费用项目 Mapper 校验附加费用项目。
+     */
+    public SalesBookingOrderService(
+            SalesBookingOrderMapper orderMapper,
+            SalesBookingOrderChargeLineMapper chargeLineMapper,
+            SalesBookingOrderGuestMapper guestMapper,
+            SalesTeamMapper teamMapper,
+            EnterpriseExpenseItemMapper expenseItemMapper
+    ) {
+        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), expenseItemMapper, null);
+    }
+
+    /**
+     * 运行时构造器，注入订单、价格、游客、费用变更、团队 Mapper 及身份证校验器。
+     */
+    @Autowired
+    public SalesBookingOrderService(
+            SalesBookingOrderMapper orderMapper,
+            SalesBookingOrderChargeLineMapper chargeLineMapper,
+            SalesBookingOrderGuestMapper guestMapper,
+            SalesTeamMapper teamMapper,
+            IdCardValidator idCardValidator,
+            EnterpriseExpenseItemMapper expenseItemMapper,
+            CustomerRiskApprovalService riskApprovalService
     ) {
         this.orderMapper = orderMapper;
-        this.priceLineMapper = priceLineMapper;
+        this.chargeLineMapper = chargeLineMapper;
         this.guestMapper = guestMapper;
-        this.feeChangeMapper = feeChangeMapper;
         this.teamMapper = teamMapper;
         this.idCardValidator = idCardValidator;
+        this.expenseItemMapper = expenseItemMapper;
+        this.riskApprovalService = riskApprovalService;
     }
 
     /**
@@ -108,6 +160,11 @@ public class SalesBookingOrderService {
         SalesBookingOrderStatus status = parseStatus(request.status());
         SalesBookingOrderEntity current = request.id() == null ? null : requireOrder(request.id(), tenantId);
         assertTeamCanReceive(team, status, current == null);
+        BigDecimal requestedReceivable = sumReceivable(request.priceLines());
+        if (current != null && current.getId() != null) {
+            requestedReceivable = requestedReceivable.add(activeFeeChangeTotal(current.getId(), tenantId)).setScale(2, RoundingMode.HALF_UP);
+        }
+        assertCustomerRiskApproved(request, current, tenantId, requestedReceivable);
 
         SalesBookingOrderEntity entity = current == null ? new SalesBookingOrderEntity() : new SalesBookingOrderEntity();
         applyOrderFields(entity, request, team, status, tenantId, operator, current);
@@ -120,6 +177,7 @@ public class SalesBookingOrderService {
 
         rebuildPriceLines(entity, request.priceLines(), tenantId, operator);
         rebuildGuests(entity, request.guests(), tenantId, operator);
+        bindRiskApprovalRequest(request, entity, tenantId);
         refreshTeamSeats(team, tenantId);
 
         return toResponse(entity);
@@ -134,7 +192,7 @@ public class SalesBookingOrderService {
      */
     public SalesBookingOrderResponse detail(Long orderId, Long tenantId) {
         SalesBookingOrderEntity order = requireOrder(orderId, tenantId);
-        return toResponse(order);
+        return withRiskApprovalRequestId(toResponse(order), order);
     }
 
     /**
@@ -149,9 +207,10 @@ public class SalesBookingOrderService {
     private SalesBookingOrderResponse toResponse(SalesBookingOrderEntity order) {
         Long tenantId = order.getTenantId();
         Long orderId = order.getId();
-        List<SalesBookingOrderPriceLineEntity> priceLineEntities = Objects.requireNonNullElse(
-                priceLineMapper.selectList(basePriceLineQuery(tenantId)
+        List<SalesBookingOrderChargeLineEntity> priceLineEntities = Objects.requireNonNullElse(
+                chargeLineMapper.selectList(baseChargeLineQuery(tenantId)
                         .eq("order_id", orderId)
+                        .eq("line_kind", "base_price")
                         .orderByAsc("sort_order")
                         .orderByAsc("id")),
                 List.of()
@@ -171,9 +230,10 @@ public class SalesBookingOrderService {
                 .stream()
                 .map(SalesBookingOrderGuestResponse::fromEntity)
                 .toList();
-        List<SalesBookingOrderFeeChangeEntity> feeChangeEntities = Objects.requireNonNullElse(
-                feeChangeMapper.selectList(baseFeeChangeQuery(tenantId)
+        List<SalesBookingOrderChargeLineEntity> feeChangeEntities = Objects.requireNonNullElse(
+                chargeLineMapper.selectList(baseChargeLineQuery(tenantId)
                         .eq("order_id", orderId)
+                        .eq("line_kind", "adjustment")
                         .orderByDesc("registered_at")
                         .orderByDesc("id")),
                 List.of()
@@ -183,6 +243,19 @@ public class SalesBookingOrderService {
                 .map(SalesBookingFeeChangeResponse::fromEntity)
                 .toList();
         return SalesBookingOrderResponse.fromEntity(order, priceLines, guests, feeChanges);
+    }
+
+    private SalesBookingOrderResponse withRiskApprovalRequestId(SalesBookingOrderResponse response, SalesBookingOrderEntity order) {
+        if (riskApprovalService == null) {
+            return response;
+        }
+        CustomerRiskApprovalResponse approval = riskApprovalService.latestApprovedForOrder(
+                order.getTenantId(),
+                order.getCustomerId(),
+                order.getTeamId(),
+                order.getId()
+        );
+        return approval == null ? response : response.withRiskApprovalRequestId(approval.id());
     }
 
     private void applyOrderFields(
@@ -204,6 +277,11 @@ public class SalesBookingOrderService {
         entity.setContactName(clean(request.contactName()));
         entity.setContactPhone(clean(request.contactPhone()));
         entity.setCustomerTeamNo(clean(request.customerTeamNo()));
+        entity.setOriginalOrderInfo(resolveOriginalOrderInfo(request, current));
+        entity.setSalespersonEmployeeId(request.salespersonEmployeeId());
+        entity.setSalespersonEmployeeName(clean(request.salespersonEmployeeName()));
+        entity.setBookingOperatorEmployeeId(request.bookingOperatorEmployeeId());
+        entity.setBookingOperatorEmployeeName(clean(request.bookingOperatorEmployeeName()));
         entity.setSourceProvince(clean(request.sourceProvince()));
         entity.setSourceCity(clean(request.sourceCity()));
         entity.setSourceDistrict(clean(request.sourceDistrict()));
@@ -222,6 +300,9 @@ public class SalesBookingOrderService {
         entity.setEscortCount(countByPriceOrGuests(priceLines, guests, SalesBookingGuestType.ESCORT));
         entity.setGuestCount(resolveOrderGuestCount(priceLines, guests));
         BigDecimal receivable = sumReceivable(priceLines);
+        if (current != null && current.getId() != null) {
+            receivable = receivable.add(activeFeeChangeTotal(current.getId(), tenantId)).setScale(2, RoundingMode.HALF_UP);
+        }
         BigDecimal received = money(request.receivedAmount());
         entity.setReceivableAmount(receivable);
         entity.setReceivedAmount(received);
@@ -234,6 +315,249 @@ public class SalesBookingOrderService {
         entity.setBookedAt(current == null || current.getBookedAt() == null ? OffsetDateTime.now() : current.getBookedAt());
         entity.setCreatedBy(current == null ? operator : current.getCreatedBy());
         entity.setIsDeleted(false);
+    }
+
+    /**
+     * 保存订单前校验客户风控审批。
+     *
+     * <p>风险服务只在运行时注入；单元测试的轻量构造器未注入时跳过，避免旧测试链路必须构造整个客户模块。</p>
+     */
+    private void assertCustomerRiskApproved(
+            SalesBookingOrderSaveRequest request,
+            SalesBookingOrderEntity current,
+            Long tenantId,
+            BigDecimal requestedReceivable
+    ) {
+        if (riskApprovalService == null || request.customerId() == null) {
+            return;
+        }
+        riskApprovalService.assertOrderCanSave(
+                tenantId,
+                request.customerId(),
+                request.teamId(),
+                current == null ? request.id() : current.getId(),
+                requestedReceivable,
+                request.riskApprovalRequestId()
+        );
+    }
+
+    /** 保存成功后回填风控审批单订单 ID，便于审批页和订单详情互相追溯。 */
+    private void bindRiskApprovalRequest(SalesBookingOrderSaveRequest request, SalesBookingOrderEntity entity, Long tenantId) {
+        if (riskApprovalService == null) {
+            return;
+        }
+        riskApprovalService.bindOrder(tenantId, request.riskApprovalRequestId(), entity.getId(), entity.getTeamId());
+    }
+
+    /**
+     * 新增订单费用变更并立即刷新订单应收。
+     *
+     * <p>费用项目必须来自企业资料中的附加费用项目；金额按方向转成正负数，状态直接记为 approved，
+     * 因为收客页录入的变更当前按业务要求立即生效。</p>
+     */
+    @Transactional
+    public SalesBookingFeeChangeResponse createFeeChange(
+            Long orderId,
+            SalesBookingFeeChangeCreateRequest request,
+            Long tenantId,
+            String operator
+    ) {
+        SalesBookingOrderEntity order = requireOrder(orderId, tenantId);
+        EnterpriseExpenseItemEntity project = requireExtraFeeProject(request.feeProjectId(), tenantId);
+        SalesBookingOrderChargeLineEntity entity = new SalesBookingOrderChargeLineEntity();
+        entity.setTenantId(tenantId);
+        entity.setOrderId(order.getId());
+        entity.setTeamId(order.getTeamId());
+        entity.setLineKind("adjustment");
+        entity.setLineType("extra_fee");
+        entity.setItemName(project.getProjectName());
+        entity.setChangeType(clean(request.changeType()));
+        entity.setFeeProjectId(project.getId());
+        entity.setFeeProjectName(project.getProjectName());
+        entity.setFeeDescription(clean(request.feeDescription()));
+        entity.setAmount(signedFeeChangeAmount(request.changeType(), request.amount()));
+        entity.setStatus("approved");
+        entity.setRegisteredBy(operator);
+        entity.setRegisteredAt(OffsetDateTime.now());
+        entity.setCreatedBy(operator);
+        entity.setRemark(clean(request.remark()));
+        entity.setIsDeleted(false);
+        chargeLineMapper.insert(entity);
+        applyOrderReceivableDelta(order, entity.getAmount(), tenantId);
+        return SalesBookingFeeChangeResponse.fromEntity(entity);
+    }
+
+    /**
+     * 作废订单费用变更并刷新订单应收。
+     *
+     * <p>历史费用变更不物理删除，使用 cancelled 状态保留登记记录，统计和订单应收只汇总 approved 记录。</p>
+     */
+    @Transactional
+    public void cancelFeeChange(Long feeChangeId, Long tenantId, String operator) {
+        SalesBookingOrderChargeLineEntity current = chargeLineMapper.selectOne(baseChargeLineQuery(tenantId)
+                .eq("line_kind", "adjustment")
+                .eq("id", feeChangeId));
+        if (current == null) {
+            throw new BizException("费用变更不存在或已删除");
+        }
+        SalesBookingOrderChargeLineEntity update = new SalesBookingOrderChargeLineEntity();
+        update.setStatus("cancelled");
+        update.setRemark(joinCancelRemark(current.getRemark(), operator));
+        int updated = chargeLineMapper.update(update, baseChargeLineUpdate(tenantId)
+                .eq("line_kind", "adjustment")
+                .eq("id", feeChangeId));
+        if (updated == 0) {
+            throw new BizException("费用变更不存在或已删除");
+        }
+        applyOrderReceivableDelta(requireOrder(current.getOrderId(), tenantId), money(current.getAmount()).negate(), tenantId);
+    }
+
+    /**
+     * 导出老系统样式游客名单 Excel。
+     *
+     * <p>使用 Excel 97-2003 xls 格式，保持老系统模板中的列、边框、合并区域和文本型证件号/手机号。</p>
+     */
+    public ByteArrayOutputStream exportGuestWorkbook(Long orderId, Long tenantId) {
+        SalesBookingOrderEntity order = requireOrder(orderId, tenantId);
+        List<SalesBookingOrderGuestEntity> guests = Objects.requireNonNullElse(
+                guestMapper.selectList(baseGuestQuery(tenantId)
+                        .eq("order_id", orderId)
+                        .orderByAsc("index_no")
+                        .orderByAsc("id")),
+                List.of()
+        );
+        try (Workbook workbook = new HSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("Sheet1");
+            applyGuestExportColumnWidths(sheet);
+            CellStyle style = guestExportCellStyle(workbook);
+            String[] headers = {"序号", "客人姓名", "组号", "证件号", "性别", "出生年月", "客户类型", "年龄", "联系电话", "单人备注", "领队", "组备注"};
+            writeRow(sheet, 0, style, headers);
+            int rowIndex = 1;
+            for (SalesBookingOrderGuestEntity guest : guests) {
+                writeGuestRow(sheet, rowIndex, style, guest);
+                rowIndex += 1;
+            }
+            writeMergedInfoRow(sheet, rowIndex, style, "行程", order.getTravelDescription());
+            writeMergedInfoRow(sheet, rowIndex + 1, style, "去程", order.getPickupInfo());
+            writeMergedInfoRow(sheet, rowIndex + 2, style, "回程", order.getDropoffInfo());
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            workbook.write(output);
+            return output;
+        } catch (IOException exception) {
+            throw new BizException("游客名单导出失败");
+        }
+    }
+
+    /**
+     * 生成空白游客名单导入模板。
+     *
+     * <p>模板字段和导入解析字段保持一致，用户无需先从某个订单导出再清空游客信息。</p>
+     */
+    public ByteArrayOutputStream guestImportTemplateWorkbook() {
+        try (Workbook workbook = new HSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("Sheet1");
+            applyGuestExportColumnWidths(sheet);
+            CellStyle style = guestExportCellStyle(workbook);
+            String[] headers = {"序号", "客人姓名", "组号", "证件号", "性别", "出生年月", "客户类型", "年龄", "联系电话", "单人备注", "领队", "组备注"};
+            writeRow(sheet, 0, style, headers);
+            for (int rowIndex = 1; rowIndex <= 5; rowIndex++) {
+                writeRow(sheet, rowIndex, style, new String[]{"", "", "", "", "", "", "", "", "", "", "", ""});
+            }
+            writeMergedInfoRow(sheet, 6, style, "行程", "");
+            writeMergedInfoRow(sheet, 7, style, "去程", "");
+            writeMergedInfoRow(sheet, 8, style, "回程", "");
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            workbook.write(output);
+            return output;
+        } catch (IOException exception) {
+            throw new BizException("游客名单模板生成失败");
+        }
+    }
+
+    /** 返回游客名单导入模板文件名。 */
+    public String guestImportTemplateFilename() {
+        return "游客名单导入模板.xls";
+    }
+
+    /** 生成仿老系统的游客名单文件名。 */
+    public String guestExportFilename(Long orderId, Long tenantId) {
+        SalesBookingOrderEntity order = requireOrder(orderId, tenantId);
+        List<SalesBookingOrderGuestEntity> guests = Objects.requireNonNullElse(
+                guestMapper.selectList(baseGuestQuery(tenantId)
+                        .eq("order_id", orderId)
+                        .orderByAsc("index_no")
+                        .orderByAsc("id")),
+                List.of()
+        );
+        String firstGuestName = guests.isEmpty() ? "游客" : cleanFilenamePart(guests.get(0).getGuestName(), "游客");
+        String orderNo = cleanFilenamePart(order.getOrderNo(), "订单");
+        String timestamp = java.time.LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        return "名单导出%s_%s_%d人_%s.xls".formatted(orderNo, firstGuestName, guests.size(), timestamp);
+    }
+
+    /**
+     * 预览导入老系统样式游客名单 Excel。
+     *
+     * <p>本方法只解析第一张工作表并返回游客草稿，不写入订单表。身份证相关字段由程序校验推导，
+     * 客户类型按当前门票年龄规则计算：18 岁以下儿童、60 岁及以上老人，其余成人。</p>
+     *
+     * @param inputStream Excel 文件输入流
+     * @param filename 文件名，用于错误提示
+     * @return 导入预览结果
+     */
+    public SalesBookingGuestImportPreviewResponse importGuestWorkbookPreview(InputStream inputStream, String filename) {
+        try (Workbook workbook = WorkbookFactory.create(inputStream)) {
+            if (workbook.getNumberOfSheets() == 0) {
+                throw new BizException("游客名单 Excel 没有工作表");
+            }
+            Sheet sheet = workbook.getSheetAt(0);
+            DataFormatter formatter = new DataFormatter();
+            int headerRowIndex = findGuestImportHeaderRow(sheet, formatter);
+            if (headerRowIndex < 0) {
+                throw new BizException("未识别到游客名单表头，请使用包含客人姓名、证件号等列的 Excel");
+            }
+            Map<String, Integer> columns = guestImportColumns(sheet.getRow(headerRowIndex), formatter);
+            List<SalesBookingOrderGuestResponse> guests = new ArrayList<>();
+            List<String> warnings = new ArrayList<>();
+            Set<String> duplicateKeys = new HashSet<>();
+            int duplicateCount = 0;
+            for (int rowIndex = headerRowIndex + 1; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
+                Row row = sheet.getRow(rowIndex);
+                if (row == null || isGuestImportIgnoredRow(row, formatter)) {
+                    continue;
+                }
+                SalesBookingOrderGuestEntity guest = parseGuestImportRow(row, formatter, columns, guests.size() + 1);
+                if (!StringUtils.hasText(guest.getGuestName()) && !StringUtils.hasText(guest.getCertificateNo())) {
+                    continue;
+                }
+                String key = guestImportDuplicateKey(guest);
+                if (StringUtils.hasText(key) && !duplicateKeys.add(key)) {
+                    duplicateCount += 1;
+                    warnings.add("第%d行与文件内已有游客重复，已跳过".formatted(rowIndex + 1));
+                    continue;
+                }
+                if (Boolean.FALSE.equals(guest.getIdCardValid())) {
+                    warnings.add("第%d行%s身份证校验异常：%s".formatted(
+                            rowIndex + 1,
+                            StringUtils.hasText(guest.getGuestName()) ? "（" + guest.getGuestName() + "）" : "",
+                            guest.getIdCardWarning()
+                    ));
+                }
+                guests.add(SalesBookingOrderGuestResponse.fromEntity(guest));
+            }
+            int validCount = (int) guests.stream().filter(item -> Boolean.TRUE.equals(item.idCardValid())).count();
+            int invalidCount = (int) guests.stream().filter(item -> Boolean.FALSE.equals(item.idCardValid())).count();
+            return new SalesBookingGuestImportPreviewResponse(
+                    guests,
+                    guests.size(),
+                    validCount,
+                    invalidCount,
+                    duplicateCount,
+                    List.copyOf(warnings)
+            );
+        } catch (IOException exception) {
+            throw new BizException("游客名单导入失败：" + cleanFilenamePart(filename, "Excel"));
+        }
     }
 
     private void rebuildPriceLines(
@@ -249,20 +573,24 @@ public class SalesBookingOrderService {
             if (isBlankPriceLine(request)) {
                 continue;
             }
-            SalesBookingOrderPriceLineEntity entity = new SalesBookingOrderPriceLineEntity();
+            SalesBookingOrderChargeLineEntity entity = new SalesBookingOrderChargeLineEntity();
             entity.setTenantId(tenantId);
             entity.setOrderId(order.getId());
             entity.setTeamId(order.getTeamId());
+            entity.setLineKind("base_price");
             entity.setLineType(resolveLineType(request.lineType()));
             entity.setItemName(resolveItemName(request.itemName(), entity.getLineType()));
             entity.setUnitPrice(money(request.unitPrice()));
             entity.setQuantity(money(request.quantity()));
-            entity.setSubtotalAmount(entity.getUnitPrice().multiply(entity.getQuantity()).setScale(2, RoundingMode.HALF_UP));
+            entity.setAmount(entity.getUnitPrice().multiply(entity.getQuantity()).setScale(2, RoundingMode.HALF_UP));
+            entity.setStatus("effective");
+            entity.setRegisteredBy(operator);
+            entity.setRegisteredAt(OffsetDateTime.now());
             entity.setSortOrder(index + 1);
             entity.setRemark(clean(request.remark()));
             entity.setCreatedBy(operator);
             entity.setIsDeleted(false);
-            priceLineMapper.insert(entity);
+            chargeLineMapper.insert(entity);
         }
     }
 
@@ -330,11 +658,13 @@ public class SalesBookingOrderService {
     }
 
     private void softDeletePriceLines(Long orderId, Long tenantId, String operator) {
-        SalesBookingOrderPriceLineEntity update = new SalesBookingOrderPriceLineEntity();
+        SalesBookingOrderChargeLineEntity update = new SalesBookingOrderChargeLineEntity();
         update.setIsDeleted(true);
         update.setDeletedAt(OffsetDateTime.now());
         update.setDeletedBy(operator);
-        priceLineMapper.update(update, basePriceLineUpdate(tenantId).eq("order_id", orderId));
+        chargeLineMapper.update(update, baseChargeLineUpdate(tenantId)
+                .eq("order_id", orderId)
+                .eq("line_kind", "base_price"));
     }
 
     private void softDeleteGuests(Long orderId, Long tenantId, String operator) {
@@ -343,6 +673,29 @@ public class SalesBookingOrderService {
         update.setDeletedAt(OffsetDateTime.now());
         update.setDeletedBy(operator);
         guestMapper.update(update, baseGuestUpdate(tenantId).eq("order_id", orderId));
+    }
+
+    private void applyOrderReceivableDelta(SalesBookingOrderEntity order, BigDecimal delta, Long tenantId) {
+        BigDecimal receivable = money(order.getReceivableAmount()).add(money(delta)).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal received = money(order.getReceivedAmount());
+        SalesBookingOrderEntity update = new SalesBookingOrderEntity();
+        update.setReceivableAmount(receivable);
+        update.setBalanceAmount(receivable.subtract(received).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP));
+        orderMapper.update(update, baseOrderUpdate(tenantId).eq("id", order.getId()));
+    }
+
+    private BigDecimal activeFeeChangeTotal(Long orderId, Long tenantId) {
+        return Objects.requireNonNullElse(
+                chargeLineMapper.selectList(baseChargeLineQuery(tenantId)
+                        .eq("order_id", orderId)
+                        .eq("line_kind", "adjustment")
+                        .eq("status", "approved")),
+                List.<SalesBookingOrderChargeLineEntity>of()
+        ).stream()
+                .map(SalesBookingOrderChargeLineEntity::getAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
     }
 
     private SalesTeamEntity requireTeam(Long teamId, Long tenantId) {
@@ -359,6 +712,22 @@ public class SalesBookingOrderService {
             throw new BizException("收客订单不存在或已删除");
         }
         return order;
+    }
+
+    private EnterpriseExpenseItemEntity requireExtraFeeProject(Long projectId, Long tenantId) {
+        if (expenseItemMapper == null) {
+            throw new BizException("费用项目服务未初始化");
+        }
+        EnterpriseExpenseItemEntity project = expenseItemMapper.selectOne(new QueryWrapper<EnterpriseExpenseItemEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq("status", "active")
+                .eq("resource_type", "extra_fee")
+                .eq("id", projectId));
+        if (project == null) {
+            throw new BizException("费用项目不存在或已停用");
+        }
+        return project;
     }
 
     private void assertTeamCanReceive(SalesTeamEntity team, SalesBookingOrderStatus status, boolean creating) {
@@ -455,6 +824,16 @@ public class SalesBookingOrderService {
         return "SO-" + LocalDate.now().format(ORDER_DATE_FORMATTER) + "-" + System.currentTimeMillis() % 100_000;
     }
 
+    /**
+     * 原始订单摘要多来自拼团、转团或历史迁移。旧前端不传该字段时，修改订单不能把已有来源信息清空。
+     */
+    private String resolveOriginalOrderInfo(SalesBookingOrderSaveRequest request, SalesBookingOrderEntity current) {
+        if (StringUtils.hasText(request.originalOrderInfo())) {
+            return clean(request.originalOrderInfo());
+        }
+        return current == null ? null : current.getOriginalOrderInfo();
+    }
+
     private String resolveGuestType(String value) {
         if (!StringUtils.hasText(value)) {
             return SalesBookingGuestType.ADULT.value();
@@ -495,14 +874,8 @@ public class SalesBookingOrderService {
                 .eq("is_deleted", false);
     }
 
-    private QueryWrapper<SalesBookingOrderPriceLineEntity> basePriceLineQuery(Long tenantId) {
-        return new QueryWrapper<SalesBookingOrderPriceLineEntity>()
-                .eq("tenant_id", tenantId)
-                .eq("is_deleted", false);
-    }
-
-    private UpdateWrapper<SalesBookingOrderPriceLineEntity> basePriceLineUpdate(Long tenantId) {
-        return new UpdateWrapper<SalesBookingOrderPriceLineEntity>()
+    private QueryWrapper<SalesBookingOrderChargeLineEntity> baseChargeLineQuery(Long tenantId) {
+        return new QueryWrapper<SalesBookingOrderChargeLineEntity>()
                 .eq("tenant_id", tenantId)
                 .eq("is_deleted", false);
     }
@@ -519,8 +892,8 @@ public class SalesBookingOrderService {
                 .eq("is_deleted", false);
     }
 
-    private QueryWrapper<SalesBookingOrderFeeChangeEntity> baseFeeChangeQuery(Long tenantId) {
-        return new QueryWrapper<SalesBookingOrderFeeChangeEntity>()
+    private UpdateWrapper<SalesBookingOrderChargeLineEntity> baseChargeLineUpdate(Long tenantId) {
+        return new UpdateWrapper<SalesBookingOrderChargeLineEntity>()
                 .eq("tenant_id", tenantId)
                 .eq("is_deleted", false);
     }
@@ -541,12 +914,305 @@ public class SalesBookingOrderService {
         return value == null ? BigDecimal.ZERO : value.setScale(2, RoundingMode.HALF_UP);
     }
 
+    private BigDecimal signedFeeChangeAmount(String changeType, BigDecimal amount) {
+        BigDecimal normalized = money(amount).abs();
+        return "decrease".equals(changeType) ? normalized.negate() : normalized;
+    }
+
     private int number(Integer value) {
         return value == null ? 0 : value;
     }
 
     private String clean(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String joinCancelRemark(String oldRemark, String operator) {
+        String cancelText = "作废人：" + (StringUtils.hasText(operator) ? operator : "system");
+        if (!StringUtils.hasText(oldRemark)) {
+            return cancelText;
+        }
+        return oldRemark + "；" + cancelText;
+    }
+
+    private void applyGuestExportColumnWidths(Sheet sheet) {
+        int[] widths = {2252, 2218, 2252, 6246, 1297, 2525, 2218, 2491, 4573, 2218, 1297, 1774};
+        for (int i = 0; i < widths.length; i++) {
+            sheet.setColumnWidth(i, widths[i]);
+        }
+    }
+
+    private CellStyle guestExportCellStyle(Workbook workbook) {
+        Font font = workbook.createFont();
+        font.setFontName("Arial");
+        font.setFontHeightInPoints((short) 9);
+        CellStyle style = workbook.createCellStyle();
+        style.setFont(font);
+        style.setAlignment(HorizontalAlignment.LEFT);
+        style.setVerticalAlignment(VerticalAlignment.TOP);
+        style.setWrapText(true);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderBottom(BorderStyle.THIN);
+        return style;
+    }
+
+    private void writeRow(Sheet sheet, int rowIndex, CellStyle style, String[] values) {
+        Row row = sheet.createRow(rowIndex);
+        row.setHeight((short) 400);
+        for (int col = 0; col < values.length; col++) {
+            Cell cell = row.createCell(col);
+            cell.setCellStyle(style);
+            cell.setCellValue(values[col] == null ? "" : values[col]);
+        }
+    }
+
+    private void writeGuestRow(Sheet sheet, int rowIndex, CellStyle style, SalesBookingOrderGuestEntity guest) {
+        writeRow(sheet, rowIndex, style, new String[]{
+                textPrefix(guest.getIndexNo()),
+                nullToBlank(guest.getGuestName()),
+                textPrefix(guest.getRoomGroup()),
+                textPrefix(guest.getCertificateNo()),
+                nullToBlank(guest.getGender()),
+                guest.getBirthDate() == null ? "" : guest.getBirthDate().toString(),
+                SalesBookingGuestType.labelOf(guest.getGuestType()),
+                textPrefix(guest.getAge()),
+                textPrefix(guest.getPhone()),
+                nullToBlank(guest.getRemark()),
+                Boolean.TRUE.equals(guest.getLeaderFlag()) ? "是" : "否",
+                nullToBlank(guest.getRoomRemark())
+        });
+    }
+
+    private void writeMergedInfoRow(Sheet sheet, int rowIndex, CellStyle style, String title, String value) {
+        writeRow(sheet, rowIndex, style, new String[]{title, nullToBlank(value), "", "", "", "", "", "", "", "", "", ""});
+        sheet.addMergedRegion(new CellRangeAddress(rowIndex, rowIndex, 1, 11));
+        for (int col = 2; col <= 11; col++) {
+            sheet.getRow(rowIndex).getCell(col).setCellStyle(style);
+        }
+    }
+
+    private int findGuestImportHeaderRow(Sheet sheet, DataFormatter formatter) {
+        int maxRow = Math.min(sheet.getLastRowNum(), 20);
+        for (int rowIndex = 0; rowIndex <= maxRow; rowIndex++) {
+            Row row = sheet.getRow(rowIndex);
+            if (row == null) {
+                continue;
+            }
+            Map<String, Integer> columns = guestImportColumns(row, formatter);
+            if (columns.containsKey("guestName") && columns.containsKey("certificateNo")) {
+                return rowIndex;
+            }
+        }
+        return -1;
+    }
+
+    private Map<String, Integer> guestImportColumns(Row row, DataFormatter formatter) {
+        Map<String, Integer> columns = new HashMap<>();
+        if (row == null) {
+            return columns;
+        }
+        for (int col = 0; col < row.getLastCellNum(); col++) {
+            String header = normalizeGuestImportHeader(cellText(row, col, formatter));
+            switch (header) {
+                case "序号" -> columns.putIfAbsent("indexNo", col);
+                case "客人姓名", "姓名", "游客姓名", "客户姓名" -> columns.putIfAbsent("guestName", col);
+                case "组号", "房间组号", "房号", "分房" -> columns.putIfAbsent("roomGroup", col);
+                case "证件号", "身份证号", "身份证", "证件号码" -> columns.putIfAbsent("certificateNo", col);
+                case "性别" -> columns.putIfAbsent("gender", col);
+                case "出生年月", "出生日期", "生日" -> columns.putIfAbsent("birthDate", col);
+                case "客户类型", "游客类型", "客人类型", "类型" -> columns.putIfAbsent("guestType", col);
+                case "年龄" -> columns.putIfAbsent("age", col);
+                case "联系电话", "电话", "手机号", "手机号码" -> columns.putIfAbsent("phone", col);
+                case "单人备注", "个人备注", "备注" -> columns.putIfAbsent("remark", col);
+                case "领队" -> columns.putIfAbsent("leaderFlag", col);
+                case "组备注", "分房备注", "房间备注" -> columns.putIfAbsent("roomRemark", col);
+                default -> {
+                }
+            }
+        }
+        return columns;
+    }
+
+    private SalesBookingOrderGuestEntity parseGuestImportRow(
+            Row row,
+            DataFormatter formatter,
+            Map<String, Integer> columns,
+            int defaultIndexNo
+    ) {
+        SalesBookingOrderGuestEntity guest = new SalesBookingOrderGuestEntity();
+        guest.setIndexNo(parseInteger(columnText(row, columns, "indexNo", formatter), defaultIndexNo));
+        guest.setGuestName(clean(columnText(row, columns, "guestName", formatter)));
+        guest.setRoomGroup(clean(columnText(row, columns, "roomGroup", formatter)));
+        guest.setCertificateNo(clean(stripTextPrefix(columnText(row, columns, "certificateNo", formatter)).toUpperCase()));
+        guest.setPhone(clean(stripTextPrefix(columnText(row, columns, "phone", formatter))));
+        guest.setLeaderFlag(parseBoolean(columnText(row, columns, "leaderFlag", formatter)));
+        guest.setRemark(clean(columnText(row, columns, "remark", formatter)));
+        guest.setRoomRemark(clean(columnText(row, columns, "roomRemark", formatter)));
+        String inputGender = clean(columnText(row, columns, "gender", formatter));
+        LocalDate inputBirthDate = parseLocalDate(columnText(row, columns, "birthDate", formatter));
+        Integer inputAge = parseInteger(columnText(row, columns, "age", formatter), null);
+        applyImportedIdentityFields(guest, inputGender, inputBirthDate, inputAge);
+        guest.setGuestType(resolveImportedGuestType(columnText(row, columns, "guestType", formatter), guest.getAge()));
+        return guest;
+    }
+
+    private void applyImportedIdentityFields(
+            SalesBookingOrderGuestEntity guest,
+            String inputGender,
+            LocalDate inputBirthDate,
+            Integer inputAge
+    ) {
+        if (StringUtils.hasText(guest.getCertificateNo())) {
+            IdCardValidationResult result = idCardValidator.validate(guest.getCertificateNo());
+            guest.setIdCardValid(result.valid());
+            guest.setIdCardWarning(String.join("；", result.warnings()));
+            guest.setBirthDate(result.birthDate() == null ? inputBirthDate : LocalDate.parse(result.birthDate()));
+            guest.setGender(StringUtils.hasText(inputGender) ? inputGender : result.gender());
+            guest.setAge(inputAge == null ? result.age() : inputAge);
+            return;
+        }
+        guest.setIdCardValid(null);
+        guest.setIdCardWarning(null);
+        guest.setBirthDate(inputBirthDate);
+        guest.setGender(inputGender);
+        guest.setAge(inputAge);
+    }
+
+    private boolean isGuestImportIgnoredRow(Row row, DataFormatter formatter) {
+        String first = cellText(row, 0, formatter);
+        if (List.of("行程", "去程", "回程", "来程", "返程").contains(first.trim())) {
+            return true;
+        }
+        boolean allBlank = true;
+        for (int col = 0; col < row.getLastCellNum(); col++) {
+            if (StringUtils.hasText(cellText(row, col, formatter))) {
+                allBlank = false;
+                break;
+            }
+        }
+        return allBlank;
+    }
+
+    private String columnText(Row row, Map<String, Integer> columns, String key, DataFormatter formatter) {
+        Integer columnIndex = columns.get(key);
+        return columnIndex == null ? "" : cellText(row, columnIndex, formatter);
+    }
+
+    private String cellText(Row row, int columnIndex, DataFormatter formatter) {
+        if (row == null || columnIndex < 0) {
+            return "";
+        }
+        Cell cell = row.getCell(columnIndex);
+        return stripTextPrefix(formatter.formatCellValue(cell)).trim();
+    }
+
+    private String stripTextPrefix(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replaceFirst("^\\t+", "").trim();
+    }
+
+    private String normalizeGuestImportHeader(String value) {
+        return stripTextPrefix(value)
+                .replaceAll("\\s+", "")
+                .replace("：", "")
+                .replace(":", "");
+    }
+
+    private Integer parseInteger(String value, Integer fallback) {
+        String cleaned = stripTextPrefix(value);
+        if (!StringUtils.hasText(cleaned)) {
+            return fallback;
+        }
+        try {
+            return new BigDecimal(cleaned.replaceAll("[^0-9.]", "")).intValue();
+        } catch (NumberFormatException exception) {
+            return fallback;
+        }
+    }
+
+    private boolean parseBoolean(String value) {
+        String cleaned = stripTextPrefix(value);
+        return List.of("是", "Y", "YES", "TRUE", "1", "领队").contains(cleaned.toUpperCase());
+    }
+
+    private LocalDate parseLocalDate(String value) {
+        String cleaned = stripTextPrefix(value);
+        if (!StringUtils.hasText(cleaned)) {
+            return null;
+        }
+        String normalized = cleaned.replace(".", "-").replace("/", "-");
+        try {
+            if (normalized.matches("\\d{4}-\\d{1,2}-\\d{1,2}.*")) {
+                String[] parts = normalized.substring(0, 10).split("-");
+                return LocalDate.of(
+                        Integer.parseInt(parts[0]),
+                        Integer.parseInt(parts[1]),
+                        Integer.parseInt(parts[2])
+                );
+            }
+        } catch (RuntimeException exception) {
+            return null;
+        }
+        return null;
+    }
+
+    private String resolveImportedGuestType(String inputType, Integer age) {
+        if (age != null) {
+            if (age < 18) {
+                return SalesBookingGuestType.CHILD.value();
+            }
+            if (age >= 60) {
+                return SalesBookingGuestType.SENIOR.value();
+            }
+        }
+        String normalized = stripTextPrefix(inputType);
+        if (normalized.contains("不占")) {
+            return SalesBookingGuestType.CHILD_NO_BED.value();
+        }
+        if (normalized.contains("全陪")) {
+            return SalesBookingGuestType.ESCORT.value();
+        }
+        if (normalized.contains("儿童") || normalized.contains("小孩")) {
+            return SalesBookingGuestType.CHILD.value();
+        }
+        if (normalized.contains("老人") || normalized.contains("老年")) {
+            return SalesBookingGuestType.SENIOR.value();
+        }
+        return SalesBookingGuestType.ADULT.value();
+    }
+
+    private String guestImportDuplicateKey(SalesBookingOrderGuestEntity guest) {
+        if (StringUtils.hasText(guest.getCertificateNo())) {
+            return "cert:" + guest.getCertificateNo().trim().toUpperCase();
+        }
+        if (StringUtils.hasText(guest.getGuestName()) && StringUtils.hasText(guest.getPhone())) {
+            return "name-phone:" + guest.getGuestName().trim() + ":" + guest.getPhone().trim();
+        }
+        return "";
+    }
+
+    private String textPrefix(Object value) {
+        if (value == null) {
+            return "";
+        }
+        String text = value.toString();
+        return StringUtils.hasText(text) ? "\t" + text : "";
+    }
+
+    private String nullToBlank(String value) {
+        return value == null ? "" : value;
+    }
+
+    private String cleanFilenamePart(String value, String fallback) {
+        String cleaned = clean(value);
+        if (!StringUtils.hasText(cleaned)) {
+            return fallback;
+        }
+        return cleaned.replaceAll("[\\\\/:*?\"<>|\\s]+", "_");
     }
 
     /**
@@ -560,17 +1226,22 @@ public class SalesBookingOrderService {
         if (CollectionUtils.isEmpty(orders)) {
             return List.of();
         }
+        Map<Long, List<SalesBookingOrderChargeLineEntity>> priceLinesByOrderId = loadBasePriceLinesByOrderId(orders);
         List<com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse.OrderRow> rows = new ArrayList<>();
         for (SalesBookingOrderEntity order : orders) {
             rows.add(new com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse.OrderRow(
                     order.getId(),
                     order.getOrderNo(),
                     joinNonBlank(order.getCustomerName(), order.getCustomerTeamNo()),
+                    order.getPickupInfo(),
+                    order.getDropoffInfo(),
+                    order.getOriginalOrderInfo(),
                     order.getPickupRemark(),
                     joinNonBlank(order.getSourceProvince(), order.getSourceCity(), order.getSourceDistrict()),
                     firstLeaderOrCustomer(order),
                     order.getGuestCount(),
-                    order.getFeeRemark(),
+                    operationGuestCountText(order),
+                    formatPriceDetail(priceLinesByOrderId.get(order.getId())),
                     moneyText(order.getReceivableAmount()),
                     moneyText(order.getReceivedAmount()),
                     moneyText(order.getBalanceAmount()),
@@ -583,11 +1254,77 @@ public class SalesBookingOrderService {
         return rows;
     }
 
+    private String operationGuestCountText(SalesBookingOrderEntity order) {
+        int total = number(order.getGuestCount());
+        int adult = number(order.getAdultCount());
+        int child = number(order.getChildCount()) + number(order.getChildNoBedCount());
+        int senior = number(order.getSeniorCount());
+        return total + "人[" + adult + "/" + child + "/" + senior + "]";
+    }
+
+    private Map<Long, List<SalesBookingOrderChargeLineEntity>> loadBasePriceLinesByOrderId(
+            List<SalesBookingOrderEntity> orders
+    ) {
+        Map<Long, List<SalesBookingOrderChargeLineEntity>> priceLinesByOrderId = new HashMap<>();
+        Map<Long, List<SalesBookingOrderEntity>> ordersByTenantId = orders.stream()
+                .filter(order -> order.getTenantId() != null && order.getId() != null)
+                .collect(Collectors.groupingBy(SalesBookingOrderEntity::getTenantId));
+        for (Map.Entry<Long, List<SalesBookingOrderEntity>> entry : ordersByTenantId.entrySet()) {
+            List<Long> orderIds = entry.getValue().stream()
+                    .map(SalesBookingOrderEntity::getId)
+                    .filter(Objects::nonNull)
+                    .toList();
+            if (orderIds.isEmpty()) {
+                continue;
+            }
+            List<SalesBookingOrderChargeLineEntity> priceLines = Objects.requireNonNullElse(
+                    chargeLineMapper.selectList(baseChargeLineQuery(entry.getKey())
+                            .in("order_id", orderIds)
+                            .eq("line_kind", "base_price")
+                            .orderByAsc("order_id")
+                            .orderByAsc("sort_order")
+                            .orderByAsc("id")),
+                    List.of()
+            );
+            for (SalesBookingOrderChargeLineEntity line : priceLines) {
+                priceLinesByOrderId.computeIfAbsent(line.getOrderId(), key -> new ArrayList<>()).add(line);
+            }
+        }
+        return priceLinesByOrderId;
+    }
+
+    private String formatPriceDetail(List<SalesBookingOrderChargeLineEntity> priceLines) {
+        if (CollectionUtils.isEmpty(priceLines)) {
+            return "";
+        }
+        return priceLines.stream()
+                .map(this::formatPriceLine)
+                .filter(StringUtils::hasText)
+                .collect(Collectors.joining("\n"));
+    }
+
+    private String formatPriceLine(SalesBookingOrderChargeLineEntity line) {
+        if (line == null) {
+            return "";
+        }
+        String itemName = StringUtils.hasText(line.getItemName()) ? line.getItemName() : "价格项";
+        return itemName + "：" + compactMoneyText(line.getUnitPrice())
+                + " * " + compactMoneyText(line.getQuantity())
+                + " = " + compactMoneyText(line.getAmount());
+    }
+
     private String firstLeaderOrCustomer(SalesBookingOrderEntity order) {
         if (StringUtils.hasText(order.getContactName())) {
             return order.getContactName();
         }
         return order.getCustomerName();
+    }
+
+    private String compactMoneyText(BigDecimal value) {
+        if (value == null) {
+            return "0";
+        }
+        return value.stripTrailingZeros().toPlainString();
     }
 
     private String moneyText(BigDecimal value) {

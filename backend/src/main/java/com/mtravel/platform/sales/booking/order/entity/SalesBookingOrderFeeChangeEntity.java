@@ -9,8 +9,8 @@ import java.time.OffsetDateTime;
 /**
  * 收客订单费用变更实体，对应 sales_order_fee_changes 表。
  *
- * <p>费用变更是订单保存后的追加调整记录，后续由费用变更管理审核。本次收客订单页面先读取展示，
- * 不在订单保存接口里直接生成审批记录。</p>
+ * <p>费用变更是订单保存后的追加调整记录。收客页新增的费用变更立即生效，金额正负由变更方向决定；
+ * 费用项目保存 ID 和名称快照，用于后续统计和历史追溯。</p>
  */
 @TableName("sales_order_fee_changes")
 public class SalesBookingOrderFeeChangeEntity extends TenantSoftDeleteEntity {
@@ -27,15 +27,23 @@ public class SalesBookingOrderFeeChangeEntity extends TenantSoftDeleteEntity {
     @TableField("change_type")
     private String changeType;
 
+    /** 费用项目 ID，来自企业资料附加费用项目。 */
+    @TableField("fee_project_id")
+    private Long feeProjectId;
+
+    /** 费用项目名称快照。 */
+    @TableField("fee_project_name")
+    private String feeProjectName;
+
     /** 费用变更说明。 */
     @TableField("fee_description")
     private String feeDescription;
 
-    /** 变更金额。 */
+    /** 变更金额。加收为正数，退减为负数。 */
     @TableField("amount")
     private BigDecimal amount;
 
-    /** 审核状态：pending、approved、rejected。 */
+    /** 状态：pending、approved、rejected、cancelled。 */
     @TableField("status")
     private String status;
 
@@ -69,6 +77,22 @@ public class SalesBookingOrderFeeChangeEntity extends TenantSoftDeleteEntity {
 
     public void setChangeType(String changeType) {
         this.changeType = changeType;
+    }
+
+    public Long getFeeProjectId() {
+        return feeProjectId;
+    }
+
+    public void setFeeProjectId(Long feeProjectId) {
+        this.feeProjectId = feeProjectId;
+    }
+
+    public String getFeeProjectName() {
+        return feeProjectName;
+    }
+
+    public void setFeeProjectName(String feeProjectName) {
+        this.feeProjectName = feeProjectName;
     }
 
     public String getFeeDescription() {

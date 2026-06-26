@@ -1,6 +1,6 @@
 package com.mtravel.platform.sales.booking.order.dto;
 
-import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderPriceLineEntity;
+import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderChargeLineEntity;
 import java.math.BigDecimal;
 
 /**
@@ -16,14 +16,14 @@ public record SalesBookingOrderPriceLineResponse(
         String remark
 ) {
     /** 将价格明细实体转换为接口返回对象。 */
-    public static SalesBookingOrderPriceLineResponse fromEntity(SalesBookingOrderPriceLineEntity entity) {
+    public static SalesBookingOrderPriceLineResponse fromEntity(SalesBookingOrderChargeLineEntity entity) {
         return new SalesBookingOrderPriceLineResponse(
                 entity.getId(),
                 entity.getLineType(),
                 entity.getItemName(),
                 entity.getUnitPrice(),
                 entity.getQuantity(),
-                entity.getSubtotalAmount(),
+                entity.getAmount(),
                 entity.getRemark()
         );
     }

@@ -45,4 +45,13 @@ public enum SalesBookingGuestType {
     public static boolean valid(String value) {
         return Arrays.stream(values()).anyMatch(item -> item.value.equals(value));
     }
+
+    /** 返回游客类型中文名称，未知值按成人处理。 */
+    public static String labelOf(String value) {
+        return Arrays.stream(values())
+                .filter(item -> item.value.equals(value))
+                .map(SalesBookingGuestType::label)
+                .findFirst()
+                .orElse(ADULT.label);
+    }
 }

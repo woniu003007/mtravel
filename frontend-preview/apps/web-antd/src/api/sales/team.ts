@@ -247,13 +247,17 @@ export namespace SalesTeamApi {
   export interface OperationOrderRow {
     balanceAmount?: string;
     bookingInfo?: string;
+    dropoffInfo?: string;
     feeRemark?: string;
     guestCount?: number;
+    guestCountText?: string;
     guestName?: string;
     id: number;
     orderInfo?: string;
     orderNo?: string;
     orderRemark?: string;
+    originalOrderInfo?: string;
+    pickupInfo?: string;
     pickupRemark?: string;
     priceDetail?: string;
     receivableAmount?: string;

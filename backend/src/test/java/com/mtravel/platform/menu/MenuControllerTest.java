@@ -37,12 +37,13 @@ class MenuControllerTest {
                 "/enterprise/employee",
                 "/enterprise/guide",
                 "/enterprise/expense-item",
-                "/enterprise/product-dictionary"
+                "/enterprise/product-dictionary",
+                "/system/config",
+                "/system/risk-approval"
         );
         assertThat(menus.toString())
                 .doesNotContain("/finance")
                 .doesNotContain("/statistics")
-                .doesNotContain("/system")
                 .doesNotContain("PrototypePage");
     }
 

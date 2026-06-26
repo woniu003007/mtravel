@@ -78,6 +78,11 @@ CREATE TABLE IF NOT EXISTS sales_orders (
   is_deleted boolean NOT NULL DEFAULT false,
   deleted_at timestamptz,
   deleted_by varchar(64),
+  salesperson_employee_id bigint,
+  salesperson_employee_name varchar(100),
+  booking_operator_employee_id bigint,
+  booking_operator_employee_name varchar(100),
+  original_order_info text,
   CONSTRAINT fk_sales_orders_team
     FOREIGN KEY (tenant_id, team_id) REFERENCES sales_teams (tenant_id, id),
   CONSTRAINT fk_sales_orders_customer
@@ -101,6 +106,13 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE UNIQUE INDEX IF NOT EXISTS uk_sales_orders_tenant_order_no_active
   ON sales_orders (tenant_id, order_no)
   WHERE is_deleted = false;
+
+ALTER TABLE sales_orders
+  ADD COLUMN IF NOT EXISTS original_order_info text,
+  ADD COLUMN IF NOT EXISTS salesperson_employee_id bigint,
+  ADD COLUMN IF NOT EXISTS salesperson_employee_name varchar(100),
+  ADD COLUMN IF NOT EXISTS booking_operator_employee_id bigint,
+  ADD COLUMN IF NOT EXISTS booking_operator_employee_name varchar(100);
 
 CREATE INDEX IF NOT EXISTS idx_sales_orders_tenant_deleted_team
   ON sales_orders (tenant_id, is_deleted, team_id, status);
@@ -211,7 +223,7 @@ CREATE TABLE IF NOT EXISTS sales_order_fee_changes (
   change_type varchar(20) NOT NULL DEFAULT 'increase',
   fee_description text NOT NULL,
   amount numeric(14,2) NOT NULL DEFAULT 0,
-  status varchar(20) NOT NULL DEFAULT 'pending',
+  status varchar(20) NOT NULL DEFAULT 'approved',
   registered_by varchar(80),
   registered_at timestamptz NOT NULL DEFAULT now(),
   created_by varchar(80),
@@ -221,14 +233,41 @@ CREATE TABLE IF NOT EXISTS sales_order_fee_changes (
   is_deleted boolean NOT NULL DEFAULT false,
   deleted_at timestamptz,
   deleted_by varchar(64),
+  fee_project_id bigint,
+  fee_project_name varchar(120),
   CONSTRAINT fk_sales_order_fee_changes_order
     FOREIGN KEY (tenant_id, order_id) REFERENCES sales_orders (tenant_id, id),
   CONSTRAINT fk_sales_order_fee_changes_team
     FOREIGN KEY (tenant_id, team_id) REFERENCES sales_teams (tenant_id, id),
   CONSTRAINT chk_sales_order_fee_changes_type CHECK (change_type IN ('increase', 'decrease')),
-  CONSTRAINT chk_sales_order_fee_changes_status CHECK (status IN ('pending', 'approved', 'rejected')),
-  CONSTRAINT chk_sales_order_fee_changes_amount CHECK (amount >= 0)
+  CONSTRAINT chk_sales_order_fee_changes_status CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+  CONSTRAINT chk_sales_order_fee_changes_amount CHECK (
+    (change_type = 'increase' AND amount > 0)
+    OR (change_type = 'decrease' AND amount < 0)
+  )
 );
+
+ALTER TABLE sales_order_fee_changes
+  ADD COLUMN IF NOT EXISTS fee_project_id bigint,
+  ADD COLUMN IF NOT EXISTS fee_project_name varchar(120);
+
+ALTER TABLE sales_order_fee_changes
+  ALTER COLUMN status SET DEFAULT 'approved';
+
+ALTER TABLE sales_order_fee_changes
+  DROP CONSTRAINT IF EXISTS chk_sales_order_fee_changes_status;
+
+ALTER TABLE sales_order_fee_changes
+  ADD CONSTRAINT chk_sales_order_fee_changes_status CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled'));
+
+ALTER TABLE sales_order_fee_changes
+  DROP CONSTRAINT IF EXISTS chk_sales_order_fee_changes_amount;
+
+ALTER TABLE sales_order_fee_changes
+  ADD CONSTRAINT chk_sales_order_fee_changes_amount CHECK (
+    (change_type = 'increase' AND amount > 0)
+    OR (change_type = 'decrease' AND amount < 0)
+  );
 
 DROP TRIGGER IF EXISTS trg_sales_order_fee_changes_updated_at ON sales_order_fee_changes;
 CREATE TRIGGER trg_sales_order_fee_changes_updated_at
@@ -241,6 +280,209 @@ CREATE INDEX IF NOT EXISTS idx_sales_order_fee_changes_tenant_order
 CREATE INDEX IF NOT EXISTS idx_sales_order_fee_changes_tenant_team
   ON sales_order_fee_changes (tenant_id, is_deleted, team_id, status);
 
+CREATE INDEX IF NOT EXISTS idx_sales_order_fee_changes_tenant_project_time
+  ON sales_order_fee_changes (tenant_id, is_deleted, fee_project_id, registered_at DESC);
+
+CREATE TABLE IF NOT EXISTS sales_order_charge_lines (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  order_id bigint NOT NULL,
+  team_id bigint NOT NULL,
+  line_kind varchar(20) NOT NULL,
+  line_type varchar(40) NOT NULL,
+  item_name varchar(120) NOT NULL,
+  unit_price numeric(14,2) NOT NULL DEFAULT 0,
+  quantity numeric(12,2) NOT NULL DEFAULT 0,
+  amount numeric(14,2) NOT NULL DEFAULT 0,
+  change_type varchar(20),
+  fee_project_id bigint,
+  fee_project_name varchar(120),
+  fee_description text,
+  status varchar(20) NOT NULL DEFAULT 'effective',
+  registered_by varchar(80),
+  registered_at timestamptz NOT NULL DEFAULT now(),
+  sort_order integer NOT NULL DEFAULT 0,
+  created_by varchar(80),
+  remark text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  is_deleted boolean NOT NULL DEFAULT false,
+  deleted_at timestamptz,
+  deleted_by varchar(64),
+  CONSTRAINT fk_sales_order_charge_lines_order
+    FOREIGN KEY (tenant_id, order_id) REFERENCES sales_orders (tenant_id, id),
+  CONSTRAINT fk_sales_order_charge_lines_team
+    FOREIGN KEY (tenant_id, team_id) REFERENCES sales_teams (tenant_id, id),
+  CONSTRAINT chk_sales_order_charge_lines_kind CHECK (line_kind IN ('base_price', 'adjustment')),
+  CONSTRAINT chk_sales_order_charge_lines_change_type CHECK (
+    change_type IS NULL OR change_type IN ('increase', 'decrease')
+  ),
+  CONSTRAINT chk_sales_order_charge_lines_status CHECK (
+    status IN ('effective', 'pending', 'approved', 'rejected', 'cancelled')
+  ),
+  CONSTRAINT chk_sales_order_charge_lines_base_amount CHECK (
+    line_kind <> 'base_price'
+    OR (
+      change_type IS NULL
+      AND unit_price >= 0
+      AND quantity >= 0
+      AND amount >= 0
+      AND status = 'effective'
+    )
+  ),
+  CONSTRAINT chk_sales_order_charge_lines_adjustment_amount CHECK (
+    line_kind <> 'adjustment'
+    OR (
+      change_type IS NOT NULL
+      AND status IN ('pending', 'approved', 'rejected', 'cancelled')
+      AND (
+        (change_type = 'increase' AND amount > 0)
+        OR (change_type = 'decrease' AND amount < 0)
+      )
+    )
+  )
+);
+
+DROP TRIGGER IF EXISTS trg_sales_order_charge_lines_updated_at ON sales_order_charge_lines;
+CREATE TRIGGER trg_sales_order_charge_lines_updated_at
+BEFORE UPDATE ON sales_order_charge_lines
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_sales_order_charge_lines_tenant_order_kind
+  ON sales_order_charge_lines (tenant_id, is_deleted, order_id, line_kind, sort_order);
+
+CREATE INDEX IF NOT EXISTS idx_sales_order_charge_lines_tenant_team_kind_status
+  ON sales_order_charge_lines (tenant_id, is_deleted, team_id, line_kind, status);
+
+CREATE INDEX IF NOT EXISTS idx_sales_order_charge_lines_tenant_project_time
+  ON sales_order_charge_lines (tenant_id, is_deleted, fee_project_id, registered_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_sales_order_charge_lines_tenant_registered
+  ON sales_order_charge_lines (tenant_id, is_deleted, registered_at DESC);
+
+INSERT INTO sales_order_charge_lines (
+  tenant_id,
+  order_id,
+  team_id,
+  line_kind,
+  line_type,
+  item_name,
+  unit_price,
+  quantity,
+  amount,
+  status,
+  registered_by,
+  registered_at,
+  sort_order,
+  created_by,
+  remark,
+  created_at,
+  updated_at,
+  is_deleted,
+  deleted_at,
+  deleted_by
+)
+SELECT
+  source.tenant_id,
+  source.order_id,
+  source.team_id,
+  'base_price',
+  source.line_type,
+  source.item_name,
+  source.unit_price,
+  source.quantity,
+  source.subtotal_amount,
+  'effective',
+  source.created_by,
+  source.created_at,
+  source.sort_order,
+  source.created_by,
+  source.remark,
+  source.created_at,
+  source.updated_at,
+  source.is_deleted,
+  source.deleted_at,
+  source.deleted_by
+FROM sales_order_price_lines source
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM sales_order_charge_lines target
+  WHERE target.tenant_id = source.tenant_id
+    AND target.order_id = source.order_id
+    AND target.line_kind = 'base_price'
+    AND target.sort_order = source.sort_order
+    AND target.line_type = source.line_type
+    AND target.is_deleted = source.is_deleted
+);
+
+INSERT INTO sales_order_charge_lines (
+  tenant_id,
+  order_id,
+  team_id,
+  line_kind,
+  line_type,
+  item_name,
+  unit_price,
+  quantity,
+  amount,
+  change_type,
+  fee_project_id,
+  fee_project_name,
+  fee_description,
+  status,
+  registered_by,
+  registered_at,
+  sort_order,
+  created_by,
+  remark,
+  created_at,
+  updated_at,
+  is_deleted,
+  deleted_at,
+  deleted_by
+)
+SELECT
+  source.tenant_id,
+  source.order_id,
+  source.team_id,
+  'adjustment',
+  'extra_fee',
+  COALESCE(source.fee_project_name, '费用变更'),
+  0,
+  0,
+  source.amount,
+  source.change_type,
+  source.fee_project_id,
+  source.fee_project_name,
+  source.fee_description,
+  source.status,
+  source.registered_by,
+  source.registered_at,
+  0,
+  source.created_by,
+  source.remark,
+  source.created_at,
+  source.updated_at,
+  source.is_deleted,
+  source.deleted_at,
+  source.deleted_by
+FROM sales_order_fee_changes source
+WHERE (
+    (source.change_type = 'increase' AND source.amount > 0)
+    OR (source.change_type = 'decrease' AND source.amount < 0)
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM sales_order_charge_lines target
+    WHERE target.tenant_id = source.tenant_id
+      AND target.order_id = source.order_id
+      AND target.line_kind = 'adjustment'
+      AND target.change_type = source.change_type
+      AND target.amount = source.amount
+      AND target.registered_at = source.registered_at
+      AND target.is_deleted = source.is_deleted
+  );
+
 COMMENT ON TABLE sales_orders IS '销售收客订单主表，保存团队下客户报名、接送、行程、导游、酒店、人数、应收和订单状态。';
 COMMENT ON COLUMN sales_orders.id IS '收客订单主键 ID。';
 COMMENT ON COLUMN sales_orders.tenant_id IS '租户 ID，用于隔离不同地接公司的订单数据。';
@@ -251,6 +493,11 @@ COMMENT ON COLUMN sales_orders.customer_name IS '客户单位名称快照。';
 COMMENT ON COLUMN sales_orders.contact_name IS '客户联系人姓名。';
 COMMENT ON COLUMN sales_orders.contact_phone IS '客户联系人电话。';
 COMMENT ON COLUMN sales_orders.customer_team_no IS '客户方团队编号或客户团号。';
+COMMENT ON COLUMN sales_orders.original_order_info IS '原始订单摘要，用于拼团、转团或来源订单在团队操作页追溯显示。';
+COMMENT ON COLUMN sales_orders.salesperson_employee_id IS '业务员员工 ID，用于销售归属和收款统计。';
+COMMENT ON COLUMN sales_orders.salesperson_employee_name IS '业务员姓名快照。';
+COMMENT ON COLUMN sales_orders.booking_operator_employee_id IS '收客计调员工 ID，用于收客操作归属。';
+COMMENT ON COLUMN sales_orders.booking_operator_employee_name IS '收客计调姓名快照。';
 COMMENT ON COLUMN sales_orders.source_province IS '客源地省份。';
 COMMENT ON COLUMN sales_orders.source_city IS '客源地城市。';
 COMMENT ON COLUMN sales_orders.source_district IS '客源地区县。';
@@ -337,10 +584,12 @@ COMMENT ON COLUMN sales_order_fee_changes.id IS '费用变更主键 ID。';
 COMMENT ON COLUMN sales_order_fee_changes.tenant_id IS '租户 ID，用于隔离不同地接公司的费用变更。';
 COMMENT ON COLUMN sales_order_fee_changes.order_id IS '所属订单 ID。';
 COMMENT ON COLUMN sales_order_fee_changes.team_id IS '所属销售团队 ID。';
-COMMENT ON COLUMN sales_order_fee_changes.change_type IS '变更类型：increase加收，decrease退减。';
+COMMENT ON COLUMN sales_order_fee_changes.change_type IS '变更方向：increase加收，decrease退减。';
+COMMENT ON COLUMN sales_order_fee_changes.fee_project_id IS '费用项目 ID，引用企业资料附加费用项目。';
+COMMENT ON COLUMN sales_order_fee_changes.fee_project_name IS '费用项目名称快照，用于历史展示和统计。';
 COMMENT ON COLUMN sales_order_fee_changes.fee_description IS '费用变更说明。';
-COMMENT ON COLUMN sales_order_fee_changes.amount IS '变更金额。';
-COMMENT ON COLUMN sales_order_fee_changes.status IS '变更状态：pending待处理，approved已通过，rejected已拒绝。';
+COMMENT ON COLUMN sales_order_fee_changes.amount IS '变更金额，加收为正数，退减为负数。';
+COMMENT ON COLUMN sales_order_fee_changes.status IS '变更状态：pending待处理，approved生效，rejected已拒绝，cancelled已作废。';
 COMMENT ON COLUMN sales_order_fee_changes.registered_by IS '登记人名称。';
 COMMENT ON COLUMN sales_order_fee_changes.registered_at IS '登记时间。';
 COMMENT ON COLUMN sales_order_fee_changes.created_by IS '创建人账号或名称。';
@@ -350,5 +599,32 @@ COMMENT ON COLUMN sales_order_fee_changes.updated_at IS '更新时间，由触�
 COMMENT ON COLUMN sales_order_fee_changes.is_deleted IS '是否已软删除。';
 COMMENT ON COLUMN sales_order_fee_changes.deleted_at IS '删除时间。';
 COMMENT ON COLUMN sales_order_fee_changes.deleted_by IS '删除人账号或名称。';
+
+COMMENT ON TABLE sales_order_charge_lines IS '销售收客订单应收明细表，统一保存订单原始价格和后续应收调整。';
+COMMENT ON COLUMN sales_order_charge_lines.id IS '订单应收明细主键 ID。';
+COMMENT ON COLUMN sales_order_charge_lines.tenant_id IS '租户 ID，用于隔离不同地接公司的订单应收明细。';
+COMMENT ON COLUMN sales_order_charge_lines.order_id IS '所属订单 ID。';
+COMMENT ON COLUMN sales_order_charge_lines.team_id IS '所属销售团队 ID，便于团队维度统计。';
+COMMENT ON COLUMN sales_order_charge_lines.line_kind IS '明细归类：base_price 原始订单价格，adjustment 后续应收调整。';
+COMMENT ON COLUMN sales_order_charge_lines.line_type IS '业务分项类型，例如成人、儿童、附加费、酒店附加费、门票、自费等。';
+COMMENT ON COLUMN sales_order_charge_lines.item_name IS '业务分项名称，用于页面展示和报表说明。';
+COMMENT ON COLUMN sales_order_charge_lines.unit_price IS '单价，原始价格行使用。';
+COMMENT ON COLUMN sales_order_charge_lines.quantity IS '数量，原始价格行使用。';
+COMMENT ON COLUMN sales_order_charge_lines.amount IS '金额，原始价格为非负小计，应收调整按加收正数、退减负数保存。';
+COMMENT ON COLUMN sales_order_charge_lines.change_type IS '调整方向：increase 加收，decrease 退减；原始价格行为空。';
+COMMENT ON COLUMN sales_order_charge_lines.fee_project_id IS '费用项目 ID，应收调整行引用企业资料附加费用项目。';
+COMMENT ON COLUMN sales_order_charge_lines.fee_project_name IS '费用项目名称快照，用于历史展示和统计。';
+COMMENT ON COLUMN sales_order_charge_lines.fee_description IS '费用调整说明。';
+COMMENT ON COLUMN sales_order_charge_lines.status IS '明细状态：effective 原始价格生效，pending 待处理，approved 调整生效，rejected 已拒绝，cancelled 已作废。';
+COMMENT ON COLUMN sales_order_charge_lines.registered_by IS '登记人名称。';
+COMMENT ON COLUMN sales_order_charge_lines.registered_at IS '登记时间。';
+COMMENT ON COLUMN sales_order_charge_lines.sort_order IS '显示顺序，原始价格行使用。';
+COMMENT ON COLUMN sales_order_charge_lines.created_by IS '创建人账号或名称。';
+COMMENT ON COLUMN sales_order_charge_lines.remark IS '明细备注。';
+COMMENT ON COLUMN sales_order_charge_lines.created_at IS '创建时间。';
+COMMENT ON COLUMN sales_order_charge_lines.updated_at IS '更新时间，由触发器自动维护。';
+COMMENT ON COLUMN sales_order_charge_lines.is_deleted IS '是否已软删除。';
+COMMENT ON COLUMN sales_order_charge_lines.deleted_at IS '删除时间。';
+COMMENT ON COLUMN sales_order_charge_lines.deleted_by IS '删除人账号或名称。';
 
 COMMIT;
