@@ -70,6 +70,38 @@ class BookingAiImportServiceTest {
     }
 
     @Test
+    void recognizeShouldExtractWechatTextGuestsWithoutSequenceNumber() {
+        BookingAiImportService service = new BookingAiImportService(
+                new LocalBookingImportParser(new IdCardValidator()),
+                new BailianAiModelClient(null, "qwen-plus", "qwen-vl-ocr-latest")
+        );
+        String text = """
+                越游越幸福 一行四人
+                27号济南-南京南G75 (08.15-10.21)
+                1号  南京南-济南西G804(16.34-19.13)
+
+                杜玉珍372430196606060044 15006519663
+                温明华372430196503050011
+                温天琪370125201407310164
+                温昊泽370125201705230138
+                """;
+
+        var response = service.recognize(new BookingAiImportRequest(text, null, null), 1L, "admin");
+
+        assertThat(response.travelInfo().outboundTrafficNo()).isEqualTo("G75");
+        assertThat(response.travelInfo().returnTrafficNo()).isEqualTo("G804");
+        assertThat(response.guests()).hasSize(4);
+        assertThat(response.guests()).extracting("name")
+                .containsExactly("杜玉珍", "温明华", "温天琪", "温昊泽");
+        assertThat(response.guests()).extracting("certificateNo")
+                .containsExactly("372430196606060044", "372430196503050011", "370125201407310164", "370125201705230138");
+        assertThat(response.guests().get(0).phone()).isEqualTo("15006519663");
+        assertThat(response.guests()).allSatisfy(guest -> assertThat(guest.idCardValid()).isTrue());
+        assertThat(response.guestSummary().guestCount()).isEqualTo(4);
+        assertThat(response.guestSummary().suspectedMissingCount()).isZero();
+    }
+
+    @Test
     void recognizeShouldRejectEmptyInput() {
         BookingAiImportService service = new BookingAiImportService(
                 new LocalBookingImportParser(new IdCardValidator()),

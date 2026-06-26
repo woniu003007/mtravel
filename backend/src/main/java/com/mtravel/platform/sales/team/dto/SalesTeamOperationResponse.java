@@ -120,10 +120,14 @@ public record SalesTeamOperationResponse(
     public record OrderRow(
             Long id,
             String orderNo,
+            String orderRole,
+            String orderRoleLabel,
             String orderInfo,
             String pickupInfo,
             String dropoffInfo,
             String originalOrderInfo,
+            List<OrderRelationInfo> mergeOrderInfos,
+            List<OrderRelationInfo> sourceOrderInfos,
             String pickupRemark,
             String sourcePlace,
             String guestName,
@@ -137,6 +141,18 @@ public record SalesTeamOperationResponse(
             String orderRemark,
             String bookingInfo,
             String status
+    ) {
+    }
+
+    /**
+     * 订单拼团关系展示信息。
+     *
+     * <p>目标团拼入订单使用 originalOrderInfo 回链来源订单；来源订单使用本结构展示已拼到哪些目标团。</p>
+     */
+    public record OrderRelationInfo(
+            Long orderId,
+            Long teamId,
+            String summary
     ) {
     }
 

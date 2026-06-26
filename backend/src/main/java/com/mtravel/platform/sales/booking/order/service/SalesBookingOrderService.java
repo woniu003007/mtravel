@@ -23,9 +23,12 @@ import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderEntity;
 import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderGuestEntity;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderChargeLineMapper;
 import com.mtravel.platform.sales.booking.order.enums.SalesBookingGuestType;
+import com.mtravel.platform.sales.booking.order.enums.SalesBookingOrderRole;
 import com.mtravel.platform.sales.booking.order.enums.SalesBookingOrderStatus;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderGuestMapper;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderMapper;
+import com.mtravel.platform.sales.ordertransfer.entity.SalesOrderTransferLogEntity;
+import com.mtravel.platform.sales.ordertransfer.mapper.SalesOrderTransferLogMapper;
 import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
 import com.mtravel.platform.sales.team.enums.SalesTeamStatus;
 import com.mtravel.platform.sales.team.mapper.SalesTeamMapper;
@@ -82,6 +85,7 @@ public class SalesBookingOrderService {
     private final IdCardValidator idCardValidator;
     private final EnterpriseExpenseItemMapper expenseItemMapper;
     private final CustomerRiskApprovalService riskApprovalService;
+    private final SalesOrderTransferLogMapper transferLogMapper;
 
     /**
      * 单元测试兼容构造器。测试只验证主链路，可不显式传身份证校验器。
@@ -92,7 +96,7 @@ public class SalesBookingOrderService {
             SalesBookingOrderGuestMapper guestMapper,
             SalesTeamMapper teamMapper
     ) {
-        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), null, null);
+        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), null, null, null);
     }
 
     /**
@@ -105,7 +109,7 @@ public class SalesBookingOrderService {
             SalesTeamMapper teamMapper,
             CustomerRiskApprovalService riskApprovalService
     ) {
-        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), null, riskApprovalService);
+        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), null, riskApprovalService, null);
     }
 
     /**
@@ -118,7 +122,7 @@ public class SalesBookingOrderService {
             SalesTeamMapper teamMapper,
             EnterpriseExpenseItemMapper expenseItemMapper
     ) {
-        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), expenseItemMapper, null);
+        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), expenseItemMapper, null, null);
     }
 
     /**
@@ -132,15 +136,17 @@ public class SalesBookingOrderService {
             SalesTeamMapper teamMapper,
             IdCardValidator idCardValidator,
             EnterpriseExpenseItemMapper expenseItemMapper,
-            CustomerRiskApprovalService riskApprovalService
+            CustomerRiskApprovalService riskApprovalService,
+            SalesOrderTransferLogMapper transferLogMapper
     ) {
         this.orderMapper = orderMapper;
         this.chargeLineMapper = chargeLineMapper;
         this.guestMapper = guestMapper;
         this.teamMapper = teamMapper;
-        this.idCardValidator = idCardValidator;
+        this.idCardValidator = idCardValidator == null ? new IdCardValidator() : idCardValidator;
         this.expenseItemMapper = expenseItemMapper;
         this.riskApprovalService = riskApprovalService;
+        this.transferLogMapper = transferLogMapper;
     }
 
     /**
@@ -159,6 +165,7 @@ public class SalesBookingOrderService {
         SalesTeamEntity team = requireTeam(request.teamId(), tenantId);
         SalesBookingOrderStatus status = parseStatus(request.status());
         SalesBookingOrderEntity current = request.id() == null ? null : requireOrder(request.id(), tenantId);
+        assertOrderEditable(current);
         assertTeamCanReceive(team, status, current == null);
         BigDecimal requestedReceivable = sumReceivable(request.priceLines());
         if (current != null && current.getId() != null) {
@@ -363,6 +370,7 @@ public class SalesBookingOrderService {
             String operator
     ) {
         SalesBookingOrderEntity order = requireOrder(orderId, tenantId);
+        assertOrderEditable(order);
         EnterpriseExpenseItemEntity project = requireExtraFeeProject(request.feeProjectId(), tenantId);
         SalesBookingOrderChargeLineEntity entity = new SalesBookingOrderChargeLineEntity();
         entity.setTenantId(tenantId);
@@ -400,6 +408,8 @@ public class SalesBookingOrderService {
         if (current == null) {
             throw new BizException("费用变更不存在或已删除");
         }
+        SalesBookingOrderEntity order = requireOrder(current.getOrderId(), tenantId);
+        assertOrderEditable(order);
         SalesBookingOrderChargeLineEntity update = new SalesBookingOrderChargeLineEntity();
         update.setStatus("cancelled");
         update.setRemark(joinCancelRemark(current.getRemark(), operator));
@@ -409,7 +419,7 @@ public class SalesBookingOrderService {
         if (updated == 0) {
             throw new BizException("费用变更不存在或已删除");
         }
-        applyOrderReceivableDelta(requireOrder(current.getOrderId(), tenantId), money(current.getAmount()).negate(), tenantId);
+        applyOrderReceivableDelta(order, money(current.getAmount()).negate(), tenantId);
     }
 
     /**
@@ -712,6 +722,18 @@ public class SalesBookingOrderService {
             throw new BizException("收客订单不存在或已删除");
         }
         return order;
+    }
+
+    /**
+     * 校验当前订单是否允许在收客页继续修改。
+     *
+     * <p>拼团来源订单只是来源团队的留痕，不再参与来源团队人数、收入和毛利统计；继续修改价格、
+     * 游客或费用变更会造成来源团留痕和目标团拼入订单不一致，因此必须到目标团队处理拼入订单。</p>
+     */
+    private void assertOrderEditable(SalesBookingOrderEntity order) {
+        if (order != null && SalesBookingOrderRole.MERGE_SOURCE.value().equals(orderRole(order))) {
+            throw new BizException("已拼出的来源订单不能修改，请到目标团队处理拼入订单");
+        }
     }
 
     private EnterpriseExpenseItemEntity requireExtraFeeProject(Long projectId, Long tenantId) {
@@ -1227,15 +1249,24 @@ public class SalesBookingOrderService {
             return List.of();
         }
         Map<Long, List<SalesBookingOrderChargeLineEntity>> priceLinesByOrderId = loadBasePriceLinesByOrderId(orders);
+        Map<Long, List<com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse.OrderRelationInfo>> mergeInfosBySourceOrderId =
+                loadMergeInfosBySourceOrderId(orders);
+        Map<Long, List<com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse.OrderRelationInfo>> sourceInfosByChildOrderId =
+                loadSourceInfosByChildOrderId(orders);
         List<com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse.OrderRow> rows = new ArrayList<>();
         for (SalesBookingOrderEntity order : orders) {
+            String orderRole = orderRole(order);
             rows.add(new com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse.OrderRow(
                     order.getId(),
                     order.getOrderNo(),
+                    orderRole,
+                    orderRoleLabel(orderRole),
                     joinNonBlank(order.getCustomerName(), order.getCustomerTeamNo()),
                     order.getPickupInfo(),
                     order.getDropoffInfo(),
                     order.getOriginalOrderInfo(),
+                    mergeInfosBySourceOrderId.getOrDefault(order.getId(), List.of()),
+                    sourceInfosByChildOrderId.getOrDefault(order.getId(), List.of()),
                     order.getPickupRemark(),
                     joinNonBlank(order.getSourceProvince(), order.getSourceCity(), order.getSourceDistrict()),
                     firstLeaderOrCustomer(order),
@@ -1252,6 +1283,128 @@ public class SalesBookingOrderService {
             ));
         }
         return rows;
+    }
+
+    private Map<Long, List<com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse.OrderRelationInfo>> loadSourceInfosByChildOrderId(
+            List<SalesBookingOrderEntity> orders
+    ) {
+        if (transferLogMapper == null) {
+            return Map.of();
+        }
+        Map<Long, List<com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse.OrderRelationInfo>> result = new HashMap<>();
+        Map<Long, List<SalesBookingOrderEntity>> ordersByTenantId = orders.stream()
+                .filter(order -> SalesBookingOrderRole.MERGE_CHILD.value().equals(orderRole(order)))
+                .filter(order -> order.getTenantId() != null && order.getId() != null)
+                .collect(Collectors.groupingBy(SalesBookingOrderEntity::getTenantId));
+        for (Map.Entry<Long, List<SalesBookingOrderEntity>> entry : ordersByTenantId.entrySet()) {
+            Long tenantId = entry.getKey();
+            List<Long> childOrderIds = entry.getValue().stream()
+                    .map(SalesBookingOrderEntity::getId)
+                    .toList();
+            if (childOrderIds.isEmpty()) {
+                continue;
+            }
+            List<SalesOrderTransferLogEntity> logs = Objects.requireNonNullElse(
+                    transferLogMapper.selectCompletedMergeByChildOrders(tenantId, childOrderIds),
+                    List.of()
+            );
+            Map<Long, SalesTeamEntity> teamsById = loadTeamsById(tenantId, logs.stream()
+                    .map(SalesOrderTransferLogEntity::getSourceTeamId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList());
+            for (SalesOrderTransferLogEntity log : logs) {
+                result.computeIfAbsent(log.getChildOrderId(), key -> new ArrayList<>())
+                        .add(new com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse.OrderRelationInfo(
+                                log.getSourceOrderId(),
+                                log.getSourceTeamId(),
+                                sourceOrderSummary(teamsById.get(log.getSourceTeamId()), log)
+                        ));
+            }
+        }
+        return result;
+    }
+
+    private Map<Long, List<com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse.OrderRelationInfo>> loadMergeInfosBySourceOrderId(
+            List<SalesBookingOrderEntity> orders
+    ) {
+        if (transferLogMapper == null) {
+            return Map.of();
+        }
+        Map<Long, List<com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse.OrderRelationInfo>> result = new HashMap<>();
+        Map<Long, List<SalesBookingOrderEntity>> ordersByTenantId = orders.stream()
+                .filter(order -> SalesBookingOrderRole.MERGE_SOURCE.value().equals(orderRole(order)))
+                .filter(order -> order.getTenantId() != null && order.getId() != null)
+                .collect(Collectors.groupingBy(SalesBookingOrderEntity::getTenantId));
+        for (Map.Entry<Long, List<SalesBookingOrderEntity>> entry : ordersByTenantId.entrySet()) {
+            Long tenantId = entry.getKey();
+            List<Long> sourceOrderIds = entry.getValue().stream()
+                    .map(SalesBookingOrderEntity::getId)
+                    .toList();
+            if (sourceOrderIds.isEmpty()) {
+                continue;
+            }
+            List<SalesOrderTransferLogEntity> logs = Objects.requireNonNullElse(
+                    transferLogMapper.selectCompletedMergeBySourceOrders(tenantId, sourceOrderIds),
+                    List.of()
+            );
+            Map<Long, SalesTeamEntity> teamsById = loadTeamsById(tenantId, logs.stream()
+                    .map(SalesOrderTransferLogEntity::getTargetTeamId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList());
+            for (SalesOrderTransferLogEntity log : logs) {
+                result.computeIfAbsent(log.getSourceOrderId(), key -> new ArrayList<>())
+                        .add(new com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse.OrderRelationInfo(
+                                log.getChildOrderId(),
+                                log.getTargetTeamId(),
+                                mergeTargetSummary(teamsById.get(log.getTargetTeamId()), log)
+                        ));
+            }
+        }
+        return result;
+    }
+
+    private Map<Long, SalesTeamEntity> loadTeamsById(Long tenantId, List<Long> teamIds) {
+        if (teamIds.isEmpty()) {
+            return Map.of();
+        }
+        return Objects.requireNonNullElse(teamMapper.selectList(baseTeamQuery(tenantId).in("id", teamIds)), List.<SalesTeamEntity>of())
+                .stream()
+                .filter(team -> team.getId() != null)
+                .collect(Collectors.toMap(SalesTeamEntity::getId, team -> team, (left, right) -> left));
+    }
+
+    private String mergeTargetSummary(SalesTeamEntity team, SalesOrderTransferLogEntity log) {
+        if (team == null) {
+            return "目标团队：" + log.getTargetTeamId();
+        }
+        return joinNonBlank(
+                team.getDepartureDate() == null ? null : team.getDepartureDate().toString(),
+                team.getTeamNo()
+        );
+    }
+
+    private String sourceOrderSummary(SalesTeamEntity team, SalesOrderTransferLogEntity log) {
+        if (team == null) {
+            return "来源团队：" + log.getSourceTeamId();
+        }
+        return joinNonBlank(
+                team.getDepartureDate() == null ? null : team.getDepartureDate().toString(),
+                team.getTeamNo()
+        );
+    }
+
+    private String orderRole(SalesBookingOrderEntity order) {
+        return StringUtils.hasText(order.getOrderRole()) ? order.getOrderRole() : SalesBookingOrderRole.NORMAL.value();
+    }
+
+    private String orderRoleLabel(String orderRole) {
+        return java.util.Arrays.stream(SalesBookingOrderRole.values())
+                .filter(item -> item.value().equals(orderRole))
+                .map(SalesBookingOrderRole::label)
+                .findFirst()
+                .orElse(orderRole);
     }
 
     private String operationGuestCountText(SalesBookingOrderEntity order) {

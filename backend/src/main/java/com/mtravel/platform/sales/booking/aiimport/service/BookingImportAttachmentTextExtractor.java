@@ -101,10 +101,10 @@ public class BookingImportAttachmentTextExtractor {
 
     private String extractByVision(InputStream inputStream, String sourceType, Long tenantId) throws IOException {
         if (aiModelClient == null) {
-            throw new BizException("当前文件需要AI视觉/OCR识别服务，请先配置百炼视觉模型后使用");
+            throw new BizException("当前文件需要AI视觉/OCR识别服务，识别服务未启用");
         }
         return aiModelClient.recognizeImageOrDocument(tenantId, sourceType, inputStream.readAllBytes())
                 .filter(StringUtils::hasText)
-                .orElseThrow(() -> new BizException("当前文件需要AI视觉/OCR识别服务，请先配置百炼视觉模型后使用"));
+                .orElseThrow(() -> new BizException("百炼视觉/OCR识别未返回内容，请检查API Key、模型名称或稍后重试"));
     }
 }

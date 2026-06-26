@@ -1,6 +1,9 @@
 package com.mtravel.platform.sales.team.controller;
 
 import com.mtravel.platform.common.PageResult;
+import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferMergeRequest;
+import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferMoveRequest;
+import com.mtravel.platform.sales.ordertransfer.service.SalesOrderTransferService;
 import com.mtravel.platform.sales.team.dto.SalesTeamListResponse;
 import com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse;
 import com.mtravel.platform.sales.team.service.SalesTeamScheduleService;
@@ -9,6 +12,7 @@ import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -26,7 +30,11 @@ class SalesTeamControllerMappingTest {
     @Test
     void shouldExposeGlobalTeamPageAndDelegateFilters() throws NoSuchMethodException {
         SalesTeamScheduleService service = mock(SalesTeamScheduleService.class);
-        SalesTeamController controller = new SalesTeamController(service, new TenantProperties());
+        SalesTeamController controller = new SalesTeamController(
+                service,
+                mock(SalesOrderTransferService.class),
+                new TenantProperties()
+        );
         LocalDate startDate = LocalDate.of(2026, 7, 1);
         LocalDate endDate = LocalDate.of(2026, 7, 31);
         PageResult<SalesTeamListResponse> expected = new PageResult<>(List.of(), 0);
@@ -95,7 +103,11 @@ class SalesTeamControllerMappingTest {
     @Test
     void shouldExposeTeamOperationDetailAndDelegateTeamId() throws NoSuchMethodException {
         SalesTeamScheduleService service = mock(SalesTeamScheduleService.class);
-        SalesTeamController controller = new SalesTeamController(service, new TenantProperties());
+        SalesTeamController controller = new SalesTeamController(
+                service,
+                mock(SalesOrderTransferService.class),
+                new TenantProperties()
+        );
         SalesTeamOperationResponse expected = new SalesTeamOperationResponse(
                 null,
                 null,
@@ -116,5 +128,21 @@ class SalesTeamControllerMappingTest {
                 Long.class
         ).getAnnotation(GetMapping.class).value()).containsExactly("/{teamId}/operation");
         verify(service).operationDetail(260561L, 1L);
+    }
+
+    @Test
+    void shouldExposeTeamOperationTransferActions() throws NoSuchMethodException {
+        assertThat(SalesTeamController.class.getMethod(
+                "mergeOrders",
+                Long.class,
+                SalesOrderTransferMergeRequest.class,
+                org.springframework.security.core.Authentication.class
+        ).getAnnotation(PostMapping.class).value()).containsExactly("/{teamId}/operation/merge");
+        assertThat(SalesTeamController.class.getMethod(
+                "moveOrders",
+                Long.class,
+                SalesOrderTransferMoveRequest.class,
+                org.springframework.security.core.Authentication.class
+        ).getAnnotation(PostMapping.class).value()).containsExactly("/{teamId}/operation/move");
     }
 }

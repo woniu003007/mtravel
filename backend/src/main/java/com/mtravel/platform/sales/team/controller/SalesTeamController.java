@@ -3,18 +3,25 @@ package com.mtravel.platform.sales.team.controller;
 import com.mtravel.platform.common.ApiResponse;
 import com.mtravel.platform.common.ControllerSupport;
 import com.mtravel.platform.common.PageResult;
+import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferMergeRequest;
+import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferMoveRequest;
+import com.mtravel.platform.sales.ordertransfer.service.SalesOrderTransferService;
 import com.mtravel.platform.sales.team.dto.SalesTeamListResponse;
 import com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse;
 import com.mtravel.platform.sales.team.service.SalesTeamScheduleService;
 import com.mtravel.platform.system.log.web.OperationLog;
 import com.mtravel.platform.tenant.TenantProperties;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import java.time.LocalDate;
+import org.springframework.security.core.Authentication;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -31,6 +38,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class SalesTeamController extends ControllerSupport {
 
     private final SalesTeamScheduleService service;
+    private final SalesOrderTransferService transferService;
 
     /**
      * 构造销售团队管理 Controller。
@@ -38,9 +46,14 @@ public class SalesTeamController extends ControllerSupport {
      * @param service 团队管理业务服务
      * @param tenantProperties 租户默认配置，用于未登录或测试请求兜底
      */
-    public SalesTeamController(SalesTeamScheduleService service, TenantProperties tenantProperties) {
+    public SalesTeamController(
+            SalesTeamScheduleService service,
+            SalesOrderTransferService transferService,
+            TenantProperties tenantProperties
+    ) {
         super(tenantProperties);
         this.service = service;
+        this.transferService = transferService;
     }
 
     /**
@@ -103,5 +116,43 @@ public class SalesTeamController extends ControllerSupport {
     @GetMapping("/{teamId}/operation")
     public ApiResponse<SalesTeamOperationResponse> operationDetail(@PathVariable Long teamId) {
         return ApiResponse.ok(service.operationDetail(teamId, currentTenantId()));
+    }
+
+    /**
+     * 执行团队操作页拼团。
+     *
+     * @param teamId 当前团队 ID
+     * @param request 拼团请求
+     * @param authentication 当前登录信息
+     * @return 空响应
+     */
+    @OperationLog(module = "销售管理", type = "修改")
+    @PostMapping("/{teamId}/operation/merge")
+    public ApiResponse<Void> mergeOrders(
+            @PathVariable Long teamId,
+            @Valid @RequestBody SalesOrderTransferMergeRequest request,
+            Authentication authentication
+    ) {
+        transferService.mergeOrders(teamId, request, currentTenantId(), currentOperator(authentication));
+        return ApiResponse.ok();
+    }
+
+    /**
+     * 执行团队操作页转团。
+     *
+     * @param teamId 当前团队 ID
+     * @param request 转团请求
+     * @param authentication 当前登录信息
+     * @return 空响应
+     */
+    @OperationLog(module = "销售管理", type = "修改")
+    @PostMapping("/{teamId}/operation/move")
+    public ApiResponse<Void> moveOrders(
+            @PathVariable Long teamId,
+            @Valid @RequestBody SalesOrderTransferMoveRequest request,
+            Authentication authentication
+    ) {
+        transferService.moveOrders(teamId, request, currentTenantId(), currentOperator(authentication));
+        return ApiResponse.ok();
     }
 }

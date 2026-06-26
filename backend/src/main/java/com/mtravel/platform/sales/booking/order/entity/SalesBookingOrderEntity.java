@@ -47,6 +47,10 @@ public class SalesBookingOrderEntity extends TenantSoftDeleteEntity {
     @TableField("original_order_info")
     private String originalOrderInfo;
 
+    /** 订单角色：normal 普通订单，merge_source 拼团来源留痕订单，merge_child 拼团目标子订单。 */
+    @TableField("order_role")
+    private String orderRole;
+
     /** 业务员员工 ID。 */
     @TableField("salesperson_employee_id")
     private Long salespersonEmployeeId;
@@ -229,6 +233,14 @@ public class SalesBookingOrderEntity extends TenantSoftDeleteEntity {
 
     public void setOriginalOrderInfo(String originalOrderInfo) {
         this.originalOrderInfo = originalOrderInfo;
+    }
+
+    public String getOrderRole() {
+        return orderRole;
+    }
+
+    public void setOrderRole(String orderRole) {
+        this.orderRole = orderRole;
     }
 
     public Long getSalespersonEmployeeId() {

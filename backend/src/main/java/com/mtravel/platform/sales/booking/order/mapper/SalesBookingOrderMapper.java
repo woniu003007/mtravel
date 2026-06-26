@@ -30,6 +30,7 @@ public interface SalesBookingOrderMapper extends BaseMapper<SalesBookingOrderEnt
              AND o.id = g.order_id
              AND o.is_deleted = false
              AND o.status = 'confirmed'
+             AND COALESCE(o.order_role, 'normal') IN ('normal', 'merge_child')
             WHERE g.tenant_id = #{tenantId}
               AND g.team_id = #{teamId}
               AND g.is_deleted = false
@@ -37,7 +38,10 @@ public interface SalesBookingOrderMapper extends BaseMapper<SalesBookingOrderEnt
     Integer sumGuestCountByTeam(@Param("tenantId") Long tenantId, @Param("teamId") Long teamId);
 
     /**
-     * 查询团队下订单列表，供团队操作页批量展示。
+     * 查询团队操作页可见订单列表。
+     *
+     * <p>列表要显示拼团来源留痕订单，方便按旧系统追溯“拼团订单信息”；人数和收入统计仍由
+     * sumGuestCountByTeam 等统计查询过滤 merge_source，避免重复计入来源团。</p>
      */
     @Select("""
             SELECT *
@@ -45,6 +49,7 @@ public interface SalesBookingOrderMapper extends BaseMapper<SalesBookingOrderEnt
             WHERE tenant_id = #{tenantId}
               AND team_id = #{teamId}
               AND is_deleted = false
+              AND COALESCE(order_role, 'normal') IN ('normal', 'merge_child', 'merge_source')
             ORDER BY booked_at DESC, id DESC
             """)
     List<SalesBookingOrderEntity> selectActiveByTeam(@Param("tenantId") Long tenantId, @Param("teamId") Long teamId);

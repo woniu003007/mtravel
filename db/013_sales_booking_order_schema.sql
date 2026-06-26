@@ -109,13 +109,28 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_sales_orders_tenant_order_no_active
 
 ALTER TABLE sales_orders
   ADD COLUMN IF NOT EXISTS original_order_info text,
+  ADD COLUMN IF NOT EXISTS order_role varchar(20) NOT NULL DEFAULT 'normal',
   ADD COLUMN IF NOT EXISTS salesperson_employee_id bigint,
   ADD COLUMN IF NOT EXISTS salesperson_employee_name varchar(100),
   ADD COLUMN IF NOT EXISTS booking_operator_employee_id bigint,
   ADD COLUMN IF NOT EXISTS booking_operator_employee_name varchar(100);
 
+UPDATE sales_orders
+SET order_role = 'normal'
+WHERE order_role IS NULL;
+
+ALTER TABLE sales_orders
+  ALTER COLUMN order_role SET DEFAULT 'normal',
+  ALTER COLUMN order_role SET NOT NULL;
+
+ALTER TABLE sales_orders
+  DROP CONSTRAINT IF EXISTS chk_sales_orders_order_role;
+
+ALTER TABLE sales_orders
+  ADD CONSTRAINT chk_sales_orders_order_role CHECK (order_role IN ('normal', 'merge_source', 'merge_child'));
+
 CREATE INDEX IF NOT EXISTS idx_sales_orders_tenant_deleted_team
-  ON sales_orders (tenant_id, is_deleted, team_id, status);
+  ON sales_orders (tenant_id, is_deleted, team_id, status, order_role);
 
 CREATE INDEX IF NOT EXISTS idx_sales_orders_tenant_deleted_customer
   ON sales_orders (tenant_id, is_deleted, customer_id, booked_at DESC);
@@ -360,6 +375,51 @@ CREATE INDEX IF NOT EXISTS idx_sales_order_charge_lines_tenant_project_time
 CREATE INDEX IF NOT EXISTS idx_sales_order_charge_lines_tenant_registered
   ON sales_order_charge_lines (tenant_id, is_deleted, registered_at DESC);
 
+CREATE TABLE IF NOT EXISTS sales_order_transfer_logs (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  source_order_id bigint NOT NULL,
+  source_team_id bigint,
+  target_team_id bigint,
+  child_order_id bigint,
+  transfer_type varchar(20) NOT NULL,
+  transfer_status varchar(20) NOT NULL DEFAULT 'completed',
+  tag_flag boolean NOT NULL DEFAULT false,
+  operator varchar(80),
+  operated_at timestamptz NOT NULL DEFAULT now(),
+  created_by varchar(80),
+  remark text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  is_deleted boolean NOT NULL DEFAULT false,
+  deleted_at timestamptz,
+  deleted_by varchar(64),
+  CONSTRAINT fk_sales_order_transfer_logs_source_order
+    FOREIGN KEY (tenant_id, source_order_id) REFERENCES sales_orders (tenant_id, id),
+  CONSTRAINT fk_sales_order_transfer_logs_source_team
+    FOREIGN KEY (tenant_id, source_team_id) REFERENCES sales_teams (tenant_id, id),
+  CONSTRAINT fk_sales_order_transfer_logs_target_team
+    FOREIGN KEY (tenant_id, target_team_id) REFERENCES sales_teams (tenant_id, id),
+  CONSTRAINT fk_sales_order_transfer_logs_child_order
+    FOREIGN KEY (tenant_id, child_order_id) REFERENCES sales_orders (tenant_id, id),
+  CONSTRAINT chk_sales_order_transfer_logs_type CHECK (transfer_type IN ('merge', 'move')),
+  CONSTRAINT chk_sales_order_transfer_logs_status CHECK (transfer_status IN ('pending', 'completed', 'cancelled'))
+);
+
+DROP TRIGGER IF EXISTS trg_sales_order_transfer_logs_updated_at ON sales_order_transfer_logs;
+CREATE TRIGGER trg_sales_order_transfer_logs_updated_at
+BEFORE UPDATE ON sales_order_transfer_logs
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_sales_order_transfer_logs_tenant_source
+  ON sales_order_transfer_logs (tenant_id, is_deleted, source_order_id, operated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_sales_order_transfer_logs_tenant_target
+  ON sales_order_transfer_logs (tenant_id, is_deleted, target_team_id, operated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_sales_order_transfer_logs_tenant_child
+  ON sales_order_transfer_logs (tenant_id, is_deleted, child_order_id);
+
 INSERT INTO sales_order_charge_lines (
   tenant_id,
   order_id,
@@ -494,6 +554,7 @@ COMMENT ON COLUMN sales_orders.contact_name IS '客户联系人姓名。';
 COMMENT ON COLUMN sales_orders.contact_phone IS '客户联系人电话。';
 COMMENT ON COLUMN sales_orders.customer_team_no IS '客户方团队编号或客户团号。';
 COMMENT ON COLUMN sales_orders.original_order_info IS '原始订单摘要，用于拼团、转团或来源订单在团队操作页追溯显示。';
+COMMENT ON COLUMN sales_orders.order_role IS '订单业务角色：normal普通订单，merge_source拼团来源留痕订单，merge_child拼团目标子订单。';
 COMMENT ON COLUMN sales_orders.salesperson_employee_id IS '业务员员工 ID，用于销售归属和收款统计。';
 COMMENT ON COLUMN sales_orders.salesperson_employee_name IS '业务员姓名快照。';
 COMMENT ON COLUMN sales_orders.booking_operator_employee_id IS '收客计调员工 ID，用于收客操作归属。';
@@ -626,5 +687,25 @@ COMMENT ON COLUMN sales_order_charge_lines.updated_at IS '更新时间，由触�
 COMMENT ON COLUMN sales_order_charge_lines.is_deleted IS '是否已软删除。';
 COMMENT ON COLUMN sales_order_charge_lines.deleted_at IS '删除时间。';
 COMMENT ON COLUMN sales_order_charge_lines.deleted_by IS '删除人账号或名称。';
+
+COMMENT ON TABLE sales_order_transfer_logs IS '销售订单团队流转日志表，保存拼团、转团产生的来源订单、原团队、目标团队和目标订单关系。';
+COMMENT ON COLUMN sales_order_transfer_logs.id IS '订单流转日志主键 ID。';
+COMMENT ON COLUMN sales_order_transfer_logs.tenant_id IS '租户 ID，用于隔离不同地接公司的订单流转数据。';
+COMMENT ON COLUMN sales_order_transfer_logs.source_order_id IS '来源订单 ID。';
+COMMENT ON COLUMN sales_order_transfer_logs.source_team_id IS '来源团队 ID。';
+COMMENT ON COLUMN sales_order_transfer_logs.target_team_id IS '目标团队 ID。';
+COMMENT ON COLUMN sales_order_transfer_logs.child_order_id IS '目标团队下生成或迁入的订单 ID。';
+COMMENT ON COLUMN sales_order_transfer_logs.transfer_type IS '流转类型：merge 拼团，move 转团。';
+COMMENT ON COLUMN sales_order_transfer_logs.transfer_status IS '流转状态：pending 待处理，completed 已完成，cancelled 已取消。';
+COMMENT ON COLUMN sales_order_transfer_logs.tag_flag IS '是否按拼团操作打标。';
+COMMENT ON COLUMN sales_order_transfer_logs.operator IS '操作人账号或名称。';
+COMMENT ON COLUMN sales_order_transfer_logs.operated_at IS '操作时间。';
+COMMENT ON COLUMN sales_order_transfer_logs.created_by IS '创建人账号或名称。';
+COMMENT ON COLUMN sales_order_transfer_logs.remark IS '流转备注。';
+COMMENT ON COLUMN sales_order_transfer_logs.created_at IS '创建时间。';
+COMMENT ON COLUMN sales_order_transfer_logs.updated_at IS '更新时间，由触发器自动维护。';
+COMMENT ON COLUMN sales_order_transfer_logs.is_deleted IS '是否已软删除。';
+COMMENT ON COLUMN sales_order_transfer_logs.deleted_at IS '删除时间。';
+COMMENT ON COLUMN sales_order_transfer_logs.deleted_by IS '删除人账号或名称。';
 
 COMMIT;

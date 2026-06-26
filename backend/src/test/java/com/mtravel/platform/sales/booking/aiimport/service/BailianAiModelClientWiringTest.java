@@ -1,5 +1,6 @@
 package com.mtravel.platform.sales.booking.aiimport.service;
 
+import com.mtravel.platform.common.BizException;
 import com.mtravel.platform.system.config.service.AiConfigService;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -10,6 +11,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -19,6 +21,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
@@ -69,6 +72,57 @@ class BailianAiModelClientWiringTest {
         var response = client.recognizeImageOrDocument(1L, "png", new byte[]{1, 2, 3});
 
         assertThat(response).contains("游客名单：张三 210204198206214832");
+        server.verify();
+    }
+
+    @Test
+    void recognizeImageOrDocumentShouldRejectMissingApiKeyWithClearMessage() {
+        RestTemplateBuilder builder = mock(RestTemplateBuilder.class);
+        AiConfigService aiConfigService = mock(AiConfigService.class);
+        when(builder.build()).thenReturn(new RestTemplate());
+        when(aiConfigService.rawValue(anyLong(), eq(AiConfigService.BAILIAN_API_KEY))).thenReturn("");
+        BailianAiModelClient client = new BailianAiModelClient("", "qwen-plus", "", aiConfigService, builder);
+
+        assertThatThrownBy(() -> client.recognizeImageOrDocument(1L, "png", new byte[]{1, 2, 3}))
+                .isInstanceOf(BizException.class)
+                .hasMessage("当前未配置百炼 API Key，请到系统配置保存百炼配置后再识别图片/PDF");
+    }
+
+    @Test
+    void recognizeImageOrDocumentShouldReportEmptyBailianContentWithClearMessage() {
+        RestTemplate restTemplate = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
+        RestTemplateBuilder builder = mock(RestTemplateBuilder.class);
+        AiConfigService aiConfigService = mock(AiConfigService.class);
+        when(builder.build()).thenReturn(restTemplate);
+        when(aiConfigService.rawValue(anyLong(), eq(AiConfigService.BAILIAN_API_KEY))).thenReturn("sk-test");
+        when(aiConfigService.rawValue(anyLong(), eq(AiConfigService.BAILIAN_VISION_MODEL))).thenReturn("qwen-vl-ocr-latest");
+        BailianAiModelClient client = new BailianAiModelClient("", "qwen-plus", "", aiConfigService, builder);
+        server.expect(requestTo("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"))
+                .andRespond(withSuccess("{\"choices\":[{\"message\":{\"content\":\"\"}}]}", MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.recognizeImageOrDocument(1L, "png", new byte[]{1, 2, 3}))
+                .isInstanceOf(BizException.class)
+                .hasMessage("百炼视觉/OCR识别未返回内容，请检查API Key、模型名称或稍后重试");
+        server.verify();
+    }
+
+    @Test
+    void recognizeImageOrDocumentShouldReportBailianRequestFailureWithClearMessage() {
+        RestTemplate restTemplate = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
+        RestTemplateBuilder builder = mock(RestTemplateBuilder.class);
+        AiConfigService aiConfigService = mock(AiConfigService.class);
+        when(builder.build()).thenReturn(restTemplate);
+        when(aiConfigService.rawValue(anyLong(), eq(AiConfigService.BAILIAN_API_KEY))).thenReturn("sk-test");
+        when(aiConfigService.rawValue(anyLong(), eq(AiConfigService.BAILIAN_VISION_MODEL))).thenReturn("qwen-vl-ocr-latest");
+        BailianAiModelClient client = new BailianAiModelClient("", "qwen-plus", "", aiConfigService, builder);
+        server.expect(requestTo("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> client.recognizeImageOrDocument(1L, "png", new byte[]{1, 2, 3}))
+                .isInstanceOf(BizException.class)
+                .hasMessage("百炼视觉/OCR识别调用失败，请检查API Key、模型名称或稍后重试");
         server.verify();
     }
 }

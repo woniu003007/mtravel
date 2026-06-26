@@ -2,6 +2,7 @@ package com.mtravel.platform.sales.booking.aiimport.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mtravel.platform.common.BizException;
 import com.mtravel.platform.system.config.service.AiConfigService;
 import java.util.Base64;
 import java.util.List;
@@ -21,8 +22,8 @@ import org.springframework.web.client.RestTemplate;
 /**
  * 阿里云百炼模型客户端。
  *
- * <p>当前类先集中管理百炼配置和调用边界。为了避免开发环境因未配置 Key 直接失败，未配置时返回空，
- * 由本地规则解析器生成草稿。真实 HTTP 调用后续只需要在本类内补齐，不影响 Controller 和前端协议。</p>
+ * <p>当前类集中管理百炼配置和调用边界。文本识别未配置 Key 时返回空，让本地规则解析器继续工作；
+ * 图片/PDF 只能依赖视觉/OCR，缺少 Key 或外部接口异常时必须抛出清晰业务提示。</p>
  */
 @Component
 public class BailianAiModelClient implements AiModelClient {
@@ -83,8 +84,11 @@ public class BailianAiModelClient implements AiModelClient {
     @Override
     public Optional<String> recognizeImageOrDocument(Long tenantId, String sourceType, byte[] content) {
         String resolvedKey = resolveApiKey(tenantId);
-        if (!StringUtils.hasText(resolvedKey) || content == null || content.length == 0) {
-            return Optional.empty();
+        if (!StringUtils.hasText(resolvedKey)) {
+            throw new BizException("当前未配置百炼 API Key，请到系统配置保存百炼配置后再识别图片/PDF");
+        }
+        if (content == null || content.length == 0) {
+            throw new BizException("确认单图片/PDF内容为空，请重新上传文件");
         }
         try {
             HttpHeaders headers = new HttpHeaders();
@@ -106,9 +110,15 @@ public class BailianAiModelClient implements AiModelClient {
                     new HttpEntity<>(request, headers),
                     String.class
             );
-            return parseContent(response);
+            Optional<String> parsedContent = parseContent(response);
+            if (parsedContent.isEmpty()) {
+                throw new BizException("百炼视觉/OCR识别未返回内容，请检查API Key、模型名称或稍后重试");
+            }
+            return parsedContent;
+        } catch (BizException ex) {
+            throw ex;
         } catch (RuntimeException ex) {
-            return Optional.empty();
+            throw new BizException("百炼视觉/OCR识别调用失败，请检查API Key、模型名称或稍后重试");
         }
     }
 

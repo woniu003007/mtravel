@@ -17,6 +17,8 @@ import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderGuestEnt
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderChargeLineMapper;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderGuestMapper;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderMapper;
+import com.mtravel.platform.sales.ordertransfer.entity.SalesOrderTransferLogEntity;
+import com.mtravel.platform.sales.ordertransfer.mapper.SalesOrderTransferLogMapper;
 import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
 import com.mtravel.platform.sales.team.mapper.SalesTeamMapper;
 import java.math.BigDecimal;
@@ -155,6 +157,89 @@ class SalesBookingOrderServiceTest {
         verify(teamMapper).update(teamCaptor.capture(), any(UpdateWrapper.class));
         assertThat(teamCaptor.getValue().getUsedSeats()).isZero();
         assertThat(teamCaptor.getValue().getRemainingSeats()).isEqualTo(20);
+    }
+
+    @Test
+    void saveOrderShouldRejectMergeSourceOrderModification() {
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesBookingOrderService service = new SalesBookingOrderService(
+                orderMapper,
+                mock(SalesBookingOrderChargeLineMapper.class),
+                mock(SalesBookingOrderGuestMapper.class),
+                teamMapper
+        );
+        SalesBookingOrderEntity order = existingOrder(2001L);
+        order.setOrderRole("merge_source");
+        when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(team(1001L, 20, 3, 17));
+        when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(order);
+
+        assertThatThrownBy(() -> service.save(request(2001L, "confirmed"), 1L, "admin"))
+                .isInstanceOf(BizException.class)
+                .hasMessage("已拼出的来源订单不能修改，请到目标团队处理拼入订单");
+
+        verify(orderMapper, never()).update(any(SalesBookingOrderEntity.class), any(UpdateWrapper.class));
+    }
+
+    @Test
+    void createFeeChangeShouldRejectMergeSourceOrder() {
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
+        EnterpriseExpenseItemMapper expenseItemMapper = mock(EnterpriseExpenseItemMapper.class);
+        SalesBookingOrderService service = new SalesBookingOrderService(
+                orderMapper,
+                chargeLineMapper,
+                mock(SalesBookingOrderGuestMapper.class),
+                mock(SalesTeamMapper.class),
+                expenseItemMapper
+        );
+        SalesBookingOrderEntity order = existingOrder(2001L);
+        order.setOrderRole("merge_source");
+        when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(order);
+
+        assertThatThrownBy(() -> service.createFeeChange(
+                2001L,
+                new SalesBookingFeeChangeCreateRequest(
+                        "increase",
+                        501L,
+                        "补费用",
+                        new BigDecimal("100.00"),
+                        null
+                ),
+                1L,
+                "admin"
+        ))
+                .isInstanceOf(BizException.class)
+                .hasMessage("已拼出的来源订单不能修改，请到目标团队处理拼入订单");
+
+        verify(expenseItemMapper, never()).selectOne(any(Wrapper.class));
+        verify(chargeLineMapper, never()).insert(any(SalesBookingOrderChargeLineEntity.class));
+    }
+
+    @Test
+    void cancelFeeChangeShouldRejectMergeSourceOrder() {
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
+        SalesBookingOrderService service = new SalesBookingOrderService(
+                orderMapper,
+                chargeLineMapper,
+                mock(SalesBookingOrderGuestMapper.class),
+                mock(SalesTeamMapper.class)
+        );
+        SalesBookingOrderChargeLineEntity feeChange = new SalesBookingOrderChargeLineEntity();
+        feeChange.setId(801L);
+        feeChange.setOrderId(2001L);
+        feeChange.setAmount(new BigDecimal("100.00"));
+        SalesBookingOrderEntity order = existingOrder(2001L);
+        order.setOrderRole("merge_source");
+        when(chargeLineMapper.selectOne(any(Wrapper.class))).thenReturn(feeChange);
+        when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(order);
+
+        assertThatThrownBy(() -> service.cancelFeeChange(801L, 1L, "admin"))
+                .isInstanceOf(BizException.class)
+                .hasMessage("已拼出的来源订单不能修改，请到目标团队处理拼入订单");
+
+        verify(chargeLineMapper, never()).update(any(SalesBookingOrderChargeLineEntity.class), any(UpdateWrapper.class));
     }
 
     @Test
@@ -331,6 +416,93 @@ class SalesBookingOrderServiceTest {
         assertThat(rows.get(0).feeRemark()).isEqualTo("费用说明");
         assertThat(rows.get(0).orderRemark()).isEqualTo("订单备注");
         verify(chargeLineMapper).selectList(any(Wrapper.class));
+    }
+
+    @Test
+    void operationRowsShouldShowMergeTargetInfoForSourceOrder() {
+        SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesOrderTransferLogMapper transferLogMapper = mock(SalesOrderTransferLogMapper.class);
+        SalesBookingOrderService service = new SalesBookingOrderService(
+                mock(SalesBookingOrderMapper.class),
+                chargeLineMapper,
+                mock(SalesBookingOrderGuestMapper.class),
+                teamMapper,
+                new com.mtravel.platform.sales.booking.aiimport.service.IdCardValidator(),
+                null,
+                null,
+                transferLogMapper
+        );
+        SalesBookingOrderEntity sourceOrder = existingOrder(2001L);
+        sourceOrder.setOrderRole("merge_source");
+        sourceOrder.setOrderNo("SO-260625-0001");
+        SalesOrderTransferLogEntity log = new SalesOrderTransferLogEntity();
+        log.setTenantId(1L);
+        log.setSourceOrderId(2001L);
+        log.setSourceTeamId(1001L);
+        log.setTargetTeamId(1002L);
+        log.setChildOrderId(3001L);
+        SalesBookingOrderEntity childOrder = existingOrder(3001L);
+        childOrder.setTeamId(1002L);
+        childOrder.setOrderNo("SO-260625-0001-PT-CS-SP-BK-260626A");
+        childOrder.setOrderRole("merge_child");
+        childOrder.setCustomerName("无锡新旅程旅行社");
+        SalesTeamEntity targetTeam = team(1002L, 30, 3, 27);
+        targetTeam.setTeamNo("CS-SP-BK-260626A");
+        when(chargeLineMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(transferLogMapper.selectCompletedMergeBySourceOrders(1L, List.of(2001L))).thenReturn(List.of(log));
+        when(teamMapper.selectList(any(Wrapper.class))).thenReturn(List.of(targetTeam));
+
+        var rows = service.toOperationRows(List.of(sourceOrder));
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).orderRole()).isEqualTo("merge_source");
+        assertThat(rows.get(0).orderRoleLabel()).isEqualTo("已拼出");
+        assertThat(rows.get(0).mergeOrderInfos()).hasSize(1);
+        assertThat(rows.get(0).mergeOrderInfos().get(0).orderId()).isEqualTo(3001L);
+        assertThat(rows.get(0).mergeOrderInfos().get(0).teamId()).isEqualTo(1002L);
+        assertThat(rows.get(0).mergeOrderInfos().get(0).summary()).contains("CS-SP-BK-260626A");
+    }
+
+    @Test
+    void operationRowsShouldShowSourceInfoForMergeChildOrder() {
+        SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesOrderTransferLogMapper transferLogMapper = mock(SalesOrderTransferLogMapper.class);
+        SalesBookingOrderService service = new SalesBookingOrderService(
+                mock(SalesBookingOrderMapper.class),
+                chargeLineMapper,
+                mock(SalesBookingOrderGuestMapper.class),
+                teamMapper,
+                new com.mtravel.platform.sales.booking.aiimport.service.IdCardValidator(),
+                null,
+                null,
+                transferLogMapper
+        );
+        SalesBookingOrderEntity childOrder = existingOrder(3001L);
+        childOrder.setOrderRole("merge_child");
+        childOrder.setOrderNo("SO-260625-0001-PT-CS-SP-BK-260626A");
+        SalesOrderTransferLogEntity log = new SalesOrderTransferLogEntity();
+        log.setTenantId(1L);
+        log.setSourceOrderId(2001L);
+        log.setSourceTeamId(1001L);
+        log.setTargetTeamId(1002L);
+        log.setChildOrderId(3001L);
+        SalesTeamEntity sourceTeam = team(1001L, 30, 3, 27);
+        sourceTeam.setTeamNo("CS-SP-BK-260625A");
+        when(chargeLineMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(transferLogMapper.selectCompletedMergeByChildOrders(1L, List.of(3001L))).thenReturn(List.of(log));
+        when(teamMapper.selectList(any(Wrapper.class))).thenReturn(List.of(sourceTeam));
+
+        var rows = service.toOperationRows(List.of(childOrder));
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).orderRole()).isEqualTo("merge_child");
+        assertThat(rows.get(0).orderRoleLabel()).isEqualTo("拼入订单");
+        assertThat(rows.get(0).sourceOrderInfos()).hasSize(1);
+        assertThat(rows.get(0).sourceOrderInfos().get(0).orderId()).isEqualTo(2001L);
+        assertThat(rows.get(0).sourceOrderInfos().get(0).teamId()).isEqualTo(1001L);
+        assertThat(rows.get(0).sourceOrderInfos().get(0).summary()).contains("CS-SP-BK-260625A");
     }
 
     @Test

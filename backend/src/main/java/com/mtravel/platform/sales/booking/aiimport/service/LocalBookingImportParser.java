@@ -2,7 +2,9 @@ package com.mtravel.platform.sales.booking.aiimport.service;
 
 import com.mtravel.platform.sales.booking.aiimport.dto.BookingAiImportResponse;
 import java.util.ArrayList;
+import java.time.LocalDate;
 import java.time.Year;
+import java.time.ZoneId;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
@@ -27,6 +29,9 @@ public class LocalBookingImportParser {
     private static final Pattern SHORT_FLIGHT_LINE = Pattern.compile(
             "(\\d{1,2})[./-](\\d{1,2})\\s*([\\p{IsHan}A-Za-z]+?)\\s*[-—→到至]\\s*([\\p{IsHan}A-Za-z]+?)\\s*([A-Z]{2}(?:\\d{3}\\s+\\d{1,2}|\\d{3,5})|[GDCKZT]\\d{1,5})\\s*[（(]?\\s*(\\d{1,2}:?\\d{2})\\s*[-—]\\s*(\\d{1,2}:?\\d{2})[）)]?"
     );
+    private static final Pattern DAY_ONLY_TRAFFIC_LINE = Pattern.compile(
+            "(\\d{1,2})\\s*号\\s*([\\p{IsHan}A-Za-z]+?)\\s*[-—→到至]\\s*([\\p{IsHan}A-Za-z]+?)\\s*([A-Z]{2}(?:\\d{3}\\s+\\d{1,2}|\\d{3,5})|[GDCKZT]\\d{1,5})\\s*[（(]?\\s*(\\d{1,2}[:：.]?\\d{2})\\s*[-—]\\s*(\\d{1,2}[:：.]?\\d{2})[）)]?"
+    );
     private static final Pattern PHONE = Pattern.compile("1[3-9]\\d{9}");
     private static final Pattern GUIDE = Pattern.compile("导游[:：\\s]*([\\p{IsHan}A-Za-z]{2,8})\\s*(1[3-9]\\d{9})?");
     private static final Pattern CUSTOMER = Pattern.compile("(?:客户|ATTN|联系人)[:：\\s]*([\\p{IsHan}A-Za-z0-9（）()·]{2,20})\\s*([\\p{IsHan}A-Za-z]{2,8})?\\s*(1[3-9]\\d{9})?");
@@ -41,6 +46,9 @@ public class LocalBookingImportParser {
     );
     private static final Pattern GROUPED_COMPACT_GUEST_LINE = Pattern.compile(
             "^\\s*\\d{1,3}\\s+(\\d{1,3})\\s+([\\p{IsHan}A-Za-z·]{2,20})\\s+(\\d{17}[0-9Xx])(?:\\s+(1[3-9]\\d{9}))?(?:\\s+(\\d{1,3}))?(?:\\s+([^\\s]+))?(?:\\s+(.+))?\\s*$"
+    );
+    private static final Pattern NAME_ID_GUEST_LINE = Pattern.compile(
+            "^\\s*([\\p{IsHan}A-Za-z·]{2,20})\\s*(\\d{17}[0-9Xx])(?:\\s+(1[3-9]\\d{9}))?(?:\\s+(.+))?\\s*$"
     );
     private static final Pattern INDEX_ONLY = Pattern.compile("^(\\d{1,3})$");
     private static final Pattern AGE_ONLY = Pattern.compile("^\\d{1,3}$");
@@ -126,6 +134,7 @@ public class LocalBookingImportParser {
                     time(defaultYear, shortMatcher.group(1), shortMatcher.group(2), normalizeTimePart(shortMatcher.group(7), 0), normalizeTimePart(shortMatcher.group(7), 1))
             ));
         }
+        flights.addAll(dayOnlyTrafficLines(text));
         flights = flights.stream()
                 .sorted(Comparator.comparing(FlightLine::date)
                         .thenComparing(FlightLine::departureTime)
@@ -159,6 +168,39 @@ public class LocalBookingImportParser {
                 returnTrip == null ? null : returnTrip.arrivalTime(),
                 List.copyOf(warnings)
         );
+    }
+
+    /**
+     * 解析微信确认文本中常见的“27号济南-南京南G75 (08.15-10.21)”交通行。
+     *
+     * <p>这类文本没有年份和月份，只能按当前月份并结合行内顺序保守推断；如果后续日期号小于前一条，
+     * 认为进入下一个月，避免 27 号去程、1 号返程被排序反转。</p>
+     */
+    private List<FlightLine> dayOnlyTrafficLines(String text) {
+        List<FlightLine> flights = new ArrayList<>();
+        LocalDate current = LocalDate.now(ZoneId.of("Asia/Shanghai"));
+        int year = current.getYear();
+        int month = current.getMonthValue();
+        Integer previousDay = null;
+        Matcher matcher = DAY_ONLY_TRAFFIC_LINE.matcher(text);
+        while (matcher.find()) {
+            int day = Integer.parseInt(matcher.group(1));
+            if (previousDay != null && day < previousDay) {
+                LocalDate nextMonth = LocalDate.of(year, month, 1).plusMonths(1);
+                year = nextMonth.getYear();
+                month = nextMonth.getMonthValue();
+            }
+            previousDay = day;
+            flights.add(new FlightLine(
+                    date(String.valueOf(year), String.valueOf(month), matcher.group(1)),
+                    matcher.group(2),
+                    matcher.group(3),
+                    normalizeTrafficNo(matcher.group(4)),
+                    time(String.valueOf(year), String.valueOf(month), matcher.group(1), normalizeTimePart(matcher.group(5), 0), normalizeTimePart(matcher.group(5), 1)),
+                    time(String.valueOf(year), String.valueOf(month), matcher.group(1), normalizeTimePart(matcher.group(6), 0), normalizeTimePart(matcher.group(6), 1))
+            ));
+        }
+        return flights;
     }
 
     private BookingAiImportResponse.GuideInfo guideInfo(String text) {
@@ -358,10 +400,33 @@ public class LocalBookingImportParser {
                         false
                 ));
             }
+            Matcher nameIdMatcher = NAME_ID_GUEST_LINE.matcher(line.trim());
+            if (nameIdMatcher.matches()) {
+                parsedGuests.add(new ParsedGuest(
+                        nextGuestIndex(parsedGuests),
+                        nameIdMatcher.group(1),
+                        nameIdMatcher.group(2),
+                        null,
+                        null,
+                        nameIdMatcher.group(3),
+                        null,
+                        nameIdMatcher.group(4),
+                        false,
+                        false
+                ));
+            }
         }
         List<BookingAiImportResponse.GuestInfo> guests = buildGuestsWithRoomGroups(parsedGuests);
         guests.addAll(columnarGuests(lines, guests.size()));
         return guests;
+    }
+
+    private int nextGuestIndex(List<ParsedGuest> parsedGuests) {
+        return parsedGuests.stream()
+                .map(ParsedGuest::indexNo)
+                .filter(Objects::nonNull)
+                .max(Integer::compareTo)
+                .orElse(0) + 1;
     }
 
     private List<BookingAiImportResponse.GuestInfo> buildGuestsWithRoomGroups(List<ParsedGuest> parsedGuests) {
@@ -610,7 +675,7 @@ public class LocalBookingImportParser {
     }
 
     private String normalizeTimePart(String value, int index) {
-        String digits = value == null ? "" : value.replace(":", "");
+        String digits = value == null ? "" : value.replaceAll("[:：.]", "");
         if (digits.length() == 3) {
             digits = "0" + digits;
         }

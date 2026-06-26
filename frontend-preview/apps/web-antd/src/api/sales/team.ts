@@ -253,8 +253,11 @@ export namespace SalesTeamApi {
     guestCountText?: string;
     guestName?: string;
     id: number;
+    mergeOrderInfos?: OperationOrderRelationInfo[];
     orderInfo?: string;
     orderNo?: string;
+    orderRole?: 'merge_child' | 'merge_source' | 'normal' | string;
+    orderRoleLabel?: string;
     orderRemark?: string;
     originalOrderInfo?: string;
     pickupInfo?: string;
@@ -263,7 +266,14 @@ export namespace SalesTeamApi {
     receivableAmount?: string;
     receivedAmount?: string;
     sourcePlace?: string;
+    sourceOrderInfos?: OperationOrderRelationInfo[];
     status?: string;
+  }
+
+  export interface OperationOrderRelationInfo {
+    orderId?: number;
+    summary?: string;
+    teamId?: number;
   }
 
   export interface OperationActionInfo {
@@ -285,6 +295,32 @@ export namespace SalesTeamApi {
     routeSummary?: OperationRouteSummary;
     team: OperationTeamInfo;
   }
+
+  export interface TransferRemarkParams {
+    orderId: number;
+    remark?: string;
+    targetTeamId: number;
+  }
+
+  export interface MergeOrderParams {
+    orderIds: number[];
+    remark?: string;
+    remarks?: TransferRemarkParams[];
+    tagFlag: boolean;
+    targetTeamId: number;
+  }
+
+  export interface MoveOrderParams {
+    allNum?: number;
+    createNewTeam: boolean;
+    lineName?: string;
+    lineType?: TeamType;
+    memo?: string;
+    orderIds: number[];
+    remark?: string;
+    targetTeamId?: number;
+    tourDate?: string;
+  }
 }
 
 /** 分页查询销售团队管理全局列表。 */
@@ -300,6 +336,16 @@ export function getSalesTeamOperationDetail(teamId: number) {
   return requestClient.get<SalesTeamApi.OperationDetail>(
     `/sales/team/${teamId}/operation`,
   );
+}
+
+/** 执行团队操作页拼团。 */
+export function mergeSalesTeamOrders(teamId: number, data: SalesTeamApi.MergeOrderParams) {
+  return requestClient.post<void>(`/sales/team/${teamId}/operation/merge`, data);
+}
+
+/** 执行团队操作页转团。 */
+export function moveSalesTeamOrders(teamId: number, data: SalesTeamApi.MoveOrderParams) {
+  return requestClient.post<void>(`/sales/team/${teamId}/operation/move`, data);
 }
 
 /** 分页查询产品团期。 */
