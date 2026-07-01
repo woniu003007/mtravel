@@ -84,9 +84,10 @@ public class VehicleQuoteRuleController extends ControllerSupport {
     @PostMapping("/update")
     public ApiResponse<VehicleQuoteRuleResponse> update(
             @RequestParam Long id,
-            @Valid @RequestBody VehicleQuoteRuleSaveRequest request
+            @Valid @RequestBody VehicleQuoteRuleSaveRequest request,
+            Authentication authentication
     ) {
-        return ApiResponse.ok(service.update(id, request, currentTenantId()));
+        return ApiResponse.ok(service.update(id, request, currentTenantId(), currentOperator(authentication)));
     }
 
     /**

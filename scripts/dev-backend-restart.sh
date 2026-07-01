@@ -11,6 +11,28 @@ TMUX_SESSION="mtravel-backend-${PORT}"
 
 mkdir -p "${LOG_DIR}"
 
+load_local_env() {
+  local env_file="${ROOT_DIR}/.env.local"
+  local env_name env_value
+  if [[ ! -f "${env_file}" ]]; then
+    return 0
+  fi
+
+  # 允许直接执行 scripts/dev-backend-restart.sh 时复用项目本地配置。
+  # 已由调用方显式传入的环境变量优先级更高，避免覆盖临时联调目标。
+  while IFS='=' read -r env_name env_value; do
+    if [[ -n "${env_name}" && -z "${!env_name:-}" ]]; then
+      export "${env_name}=${env_value}"
+    fi
+  done < <(
+    set -a
+    # shellcheck disable=SC1090
+    source "${env_file}"
+    env |
+      grep -E '^(SERVER_PORT|DB_HOST|DB_PORT|DB_NAME|DB_USER|DB_PASSWORD|REDIS_HOST|REDIS_PORT|REDIS_PASSWORD|REDIS_DATABASE|REDIS_TIMEOUT|FLYWAY_ENABLED|DEFAULT_TENANT_ID|JWT_SECRET|ACCESS_TOKEN_MINUTES|IDLE_TIMEOUT_MINUTES|DEMO_USERNAME|DEMO_PASSWORD|BAILIAN_API_KEY|BAILIAN_TEXT_MODEL|BAILIAN_VISION_MODEL)=' || true
+  )
+}
+
 inherit_running_env() {
   local current_pid env_name env_value
   current_pid="$(lsof -tiTCP:"${PORT}" -sTCP:LISTEN | head -1 || true)"
@@ -30,6 +52,20 @@ inherit_running_env() {
       tr ' ' '\n' |
       grep -E '^(DB_HOST|DB_PORT|DB_NAME|DB_USER|DB_PASSWORD|REDIS_HOST|REDIS_PORT|REDIS_PASSWORD|REDIS_DATABASE|REDIS_TIMEOUT|FLYWAY_ENABLED|DEFAULT_TENANT_ID|JWT_SECRET|ACCESS_TOKEN_MINUTES|IDLE_TIMEOUT_MINUTES|DEMO_USERNAME|DEMO_PASSWORD|BAILIAN_API_KEY|BAILIAN_TEXT_MODEL|BAILIAN_VISION_MODEL)=' || true
   )
+}
+
+require_connection_env() {
+  local missing=()
+  for name in DB_HOST DB_USER DB_PASSWORD REDIS_HOST REDIS_PASSWORD; do
+    if [[ -z "${!name:-}" ]]; then
+      missing+=("${name}")
+    fi
+  done
+  if (( ${#missing[@]} > 0 )); then
+    echo "Missing backend connection env: ${missing[*]}"
+    echo "Set them in ${ROOT_DIR}/.env.local or export them before running this script."
+    return 1
+  fi
 }
 
 stop_port_process() {
@@ -100,6 +136,8 @@ build_start_command() {
 }
 
 inherit_running_env
+load_local_env
+require_connection_env
 stop_port_process
 
 echo "Starting backend on ${PORT}"

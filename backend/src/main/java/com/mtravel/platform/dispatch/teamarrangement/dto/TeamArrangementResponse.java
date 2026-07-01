@@ -1,0 +1,135 @@
+package com.mtravel.platform.dispatch.teamarrangement.dto;
+
+import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementEntity;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.util.List;
+
+/**
+ * 正式团队安排响应。
+ *
+ * @param canDelete 是否允许删除
+ * @param deleteDisabledReason 删除锁定原因
+ */
+public record TeamArrangementResponse(
+        Long id,
+        Long teamId,
+        String teamNo,
+        String arrangementType,
+        String itemName,
+        String arrangementContent,
+        String allocationMode,
+        String splitMode,
+        String splitBatchNo,
+        String scheduleStartDay,
+        String scheduleEndDay,
+        LocalDate businessDate,
+        String departurePlace,
+        String arrivalPlace,
+        Integer daysCount,
+        String resourceName,
+        Long supplierId,
+        String supplierName,
+        String trafficType,
+        String vehicleType,
+        String driverName,
+        String vehiclePlate,
+        Long responsibleEmployeeId,
+        String responsibleEmployeeName,
+        String settlementType,
+        String mealType,
+        String fundIncluded,
+        Boolean confirmed,
+        String confirmationNo,
+        Long guideId,
+        String guideName,
+        BigDecimal totalAmount,
+        BigDecimal cashAmount,
+        BigDecimal creditAmount,
+        BigDecimal prepaidAmount,
+        BigDecimal saleAmount,
+        BigDecimal costAmount,
+        BigDecimal guideCommissionAmount,
+        BigDecimal companyRebateAmount,
+        BigDecimal headFeeAmount,
+        BigDecimal consumptionAmount,
+        BigDecimal peopleCount,
+        Boolean noGuideReport,
+        Boolean guideInvolved,
+        String costStage,
+        String guideReportStatus,
+        String operatorAuditStatus,
+        String financeAuditStatus,
+        String status,
+        Boolean canDelete,
+        String deleteDisabledReason,
+        OffsetDateTime createdAt,
+        List<TeamArrangementPriceLineResponse> priceLines,
+        List<TeamArrangementOrderAllocationResponse> allocations
+) {
+    /** 转换实体和子表为响应对象。 */
+    public static TeamArrangementResponse fromEntity(
+            DispatchTeamArrangementEntity entity,
+            List<TeamArrangementPriceLineResponse> priceLines,
+            List<TeamArrangementOrderAllocationResponse> allocations,
+            boolean canDelete
+    ) {
+        return new TeamArrangementResponse(
+                entity.getId(),
+                entity.getTeamId(),
+                entity.getTeamNo(),
+                entity.getArrangementType(),
+                entity.getItemName(),
+                entity.getArrangementContent(),
+                entity.getAllocationMode(),
+                entity.getSplitMode(),
+                entity.getSplitBatchNo(),
+                entity.getScheduleStartDay(),
+                entity.getScheduleEndDay(),
+                entity.getBusinessDate(),
+                entity.getDeparturePlace(),
+                entity.getArrivalPlace(),
+                entity.getDaysCount(),
+                entity.getResourceName(),
+                entity.getSupplierId(),
+                entity.getSupplierName(),
+                entity.getTrafficType(),
+                entity.getVehicleType(),
+                entity.getDriverName(),
+                entity.getVehiclePlate(),
+                entity.getResponsibleEmployeeId(),
+                entity.getResponsibleEmployeeName(),
+                entity.getSettlementType(),
+                entity.getMealType(),
+                entity.getFundIncluded(),
+                entity.getConfirmed(),
+                entity.getConfirmationNo(),
+                entity.getGuideId(),
+                entity.getGuideName(),
+                entity.getTotalAmount(),
+                entity.getCashAmount(),
+                entity.getCreditAmount(),
+                entity.getPrepaidAmount(),
+                entity.getSaleAmount(),
+                entity.getCostAmount(),
+                entity.getGuideCommissionAmount(),
+                entity.getCompanyRebateAmount(),
+                entity.getHeadFeeAmount(),
+                entity.getConsumptionAmount(),
+                entity.getPeopleCount(),
+                entity.getNoGuideReport(),
+                entity.getGuideInvolved(),
+                entity.getCostStage(),
+                entity.getGuideReportStatus(),
+                entity.getOperatorAuditStatus(),
+                entity.getFinanceAuditStatus(),
+                entity.getStatus(),
+                canDelete,
+                canDelete ? null : "已进入人工导游报账或审核流程，不能直接删除",
+                entity.getCreatedAt(),
+                priceLines,
+                allocations
+        );
+    }
+}

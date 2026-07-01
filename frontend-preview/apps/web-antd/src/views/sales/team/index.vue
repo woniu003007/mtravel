@@ -194,12 +194,20 @@ function handleTeamTypeChange() {
   loadData();
 }
 
-function handleCreateTeam(label: string) {
-  message.info(`${label}团队新增入口后续接入，当前先完成团队管理列表。`);
+function handleCreateTeam(type: SalesTeamApi.TeamType) {
+  if (type === 'single') {
+    message.info('单项业务包含订单、价格和名单，后续按独立入口接入。');
+    return;
+  }
+  router.push(`/sales/team/create/${type}`);
 }
 
 function openTeamOperation(record: TeamListItem) {
   router.push(`/sales/team/operation/${record.id}`);
+}
+
+function openTeamEdit(record: TeamListItem) {
+  router.push(`/sales/team/edit/${record.id}`);
 }
 
 function teamTypeLabel(value?: string) {
@@ -291,7 +299,7 @@ onMounted(loadData);
             :key="item.type"
             class="team-create-button"
             type="primary"
-            @click="handleCreateTeam(item.label)"
+            @click="handleCreateTeam(item.type)"
           >
             <IconifyIcon :icon="item.icon" />
             {{ item.label }}
@@ -355,7 +363,9 @@ onMounted(loadData);
             <span class="muted">{{ teamRow(record).customerSummary || '--' }}</span>
           </template>
           <template v-else-if="column.key === 'teamName'">
-            <div class="team-name">{{ teamRow(record).productName || '--' }}</div>
+            <Button type="link" size="small" class="team-name-link" @click="openTeamEdit(teamRow(record))">
+              {{ teamRow(record).productName || '--' }}
+            </Button>
             <div v-if="teamRow(record).remark" class="team-remark">{{ teamRow(record).remark }}</div>
           </template>
           <template v-else-if="column.key === 'travelDays'">

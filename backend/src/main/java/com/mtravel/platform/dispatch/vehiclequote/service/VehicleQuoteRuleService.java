@@ -1,6 +1,7 @@
 package com.mtravel.platform.dispatch.vehiclequote.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.mtravel.platform.common.BizException;
 import com.mtravel.platform.common.BusinessCrudService;
 import com.mtravel.platform.common.PageResult;
@@ -11,6 +12,8 @@ import com.mtravel.platform.dispatch.vehiclequote.dto.VehicleQuoteRuleSaveReques
 import com.mtravel.platform.dispatch.vehiclequote.dto.VehicleQuoteRuleSnapshotResponse;
 import com.mtravel.platform.dispatch.vehiclequote.entity.VehicleQuoteRuleEntity;
 import com.mtravel.platform.dispatch.vehiclequote.mapper.VehicleQuoteRuleMapper;
+import com.mtravel.platform.enterprise.expenseitem.entity.EnterpriseExpenseItemEntity;
+import com.mtravel.platform.enterprise.expenseitem.mapper.EnterpriseExpenseItemMapper;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
@@ -26,13 +29,18 @@ import org.springframework.util.StringUtils;
 @Service
 public class VehicleQuoteRuleService extends BusinessCrudService<VehicleQuoteRuleEntity, VehicleQuoteRuleResponse> {
 
+    private static final String VEHICLE_RESOURCE_TYPE = "vehicle";
+    private static final String ACTIVE_STATUS = "active";
+
     private static final BigDecimal ONE_THOUSAND = new BigDecimal("1000");
 
     private final VehicleQuoteRuleMapper mapper;
+    private final EnterpriseExpenseItemMapper expenseItemMapper;
 
-    public VehicleQuoteRuleService(VehicleQuoteRuleMapper mapper) {
+    public VehicleQuoteRuleService(VehicleQuoteRuleMapper mapper, EnterpriseExpenseItemMapper expenseItemMapper) {
         super(mapper);
         this.mapper = mapper;
+        this.expenseItemMapper = expenseItemMapper;
     }
 
     /**
@@ -104,6 +112,7 @@ public class VehicleQuoteRuleService extends BusinessCrudService<VehicleQuoteRul
         entity.setCreatedBy(operator);
         entity.setIsDeleted(false);
         mapper.insert(entity);
+        syncVehicleExpenseItemForActiveRule(request, tenantId, operator);
         return detail(entity.getId(), tenantId);
     }
 
@@ -115,7 +124,7 @@ public class VehicleQuoteRuleService extends BusinessCrudService<VehicleQuoteRul
      * @param tenantId 当前租户 ID
      * @return 修改后的规则
      */
-    public VehicleQuoteRuleResponse update(Long id, VehicleQuoteRuleSaveRequest request, Long tenantId) {
+    public VehicleQuoteRuleResponse update(Long id, VehicleQuoteRuleSaveRequest request, Long tenantId, String operator) {
         assertDuplicateRule(tenantId, request, id);
         VehicleQuoteRuleEntity entity = new VehicleQuoteRuleEntity();
         applyFields(entity, request);
@@ -123,6 +132,7 @@ public class VehicleQuoteRuleService extends BusinessCrudService<VehicleQuoteRul
         if (updated == 0) {
             throw new BizException(notFoundMessage());
         }
+        syncVehicleExpenseItemForActiveRule(request, tenantId, operator);
         return detail(id, tenantId);
     }
 
@@ -190,6 +200,62 @@ public class VehicleQuoteRuleService extends BusinessCrudService<VehicleQuoteRul
         entity.setFloatRate(defaultFloatRate(request.floatRate()));
         entity.setStatus(StringUtils.hasText(request.status()) ? clean(request.status()) : "active");
         entity.setRemark(clean(request.remark()));
+    }
+
+    /**
+     * 启用的座位数报价规则要同步生成同名车队费用项目，保证用车弹窗座位数和价格信息项目可对齐。
+     */
+    private void syncVehicleExpenseItemForActiveRule(VehicleQuoteRuleSaveRequest request, Long tenantId, String operator) {
+        if (!isActiveRule(request)) {
+            return;
+        }
+        String vehicleType = cleanRequired(request.vehicleType());
+        EnterpriseExpenseItemEntity existing = expenseItemMapper.selectOne(new QueryWrapper<EnterpriseExpenseItemEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq("resource_type", VEHICLE_RESOURCE_TYPE)
+                .eq("project_name", vehicleType)
+                .last("LIMIT 1"));
+        if (existing == null) {
+            EnterpriseExpenseItemEntity entity = new EnterpriseExpenseItemEntity();
+            entity.setTenantId(tenantId);
+            entity.setResourceType(VEHICLE_RESOURCE_TYPE);
+            entity.setProjectName(vehicleType);
+            entity.setStatisticsEnabled(Boolean.TRUE);
+            entity.setSortOrder(vehicleExpenseSortOrder(vehicleType));
+            entity.setStatus(ACTIVE_STATUS);
+            entity.setCreatedBy(StringUtils.hasText(operator) ? operator : "system");
+            entity.setIsDeleted(false);
+            entity.setRemark("由座位数报价规则自动补齐");
+            expenseItemMapper.insert(entity);
+            return;
+        }
+        if (!ACTIVE_STATUS.equals(existing.getStatus())) {
+            EnterpriseExpenseItemEntity entity = new EnterpriseExpenseItemEntity();
+            entity.setStatus(ACTIVE_STATUS);
+            expenseItemMapper.update(entity, new UpdateWrapper<EnterpriseExpenseItemEntity>()
+                    .eq("tenant_id", tenantId)
+                    .eq("id", existing.getId())
+                    .eq("is_deleted", false));
+        }
+    }
+
+    /** 报价规则状态为空时按启用处理，与保存默认值保持一致。 */
+    private boolean isActiveRule(VehicleQuoteRuleSaveRequest request) {
+        return !StringUtils.hasText(request.status()) || ACTIVE_STATUS.equals(clean(request.status()));
+    }
+
+    /** 费用项目排序按座位数字靠前排列；无法解析数字的自定义值放在末尾。 */
+    private int vehicleExpenseSortOrder(String vehicleType) {
+        String numericText = String.valueOf(vehicleType).replaceAll("\\D+", "");
+        if (!StringUtils.hasText(numericText)) {
+            return 999;
+        }
+        try {
+            return Integer.parseInt(numericText);
+        } catch (NumberFormatException ignored) {
+            return 999;
+        }
     }
 
     /** 把米转换成公里并保留两位，供前端回显和金额计算使用。 */

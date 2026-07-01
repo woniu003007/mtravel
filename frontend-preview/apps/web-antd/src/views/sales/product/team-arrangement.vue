@@ -6,18 +6,11 @@ import { Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 
 import {
-  AutoComplete,
   Button,
   Card,
-  Cascader,
-  Checkbox,
   Form,
-  Input,
-  InputNumber,
   Modal,
-  Radio,
   Select,
-  Space,
   Spin,
   Tag,
   Textarea,
@@ -55,6 +48,30 @@ import { getPurchaseResourcePage } from '#/api/purchase/resource';
 import { getSupplierAll, type SupplierApi } from '#/api/purchase/supplier';
 import { buildRegionOptions } from '#/utils/region';
 
+import ArrangementEditorModal from '../components/ArrangementEditorModal.vue';
+import { showTeamItineraryModal } from '../components/itinerary-modal';
+import {
+  arrangementEditorConfigs,
+  createGroundAgentPackagePriceLine,
+  createDefaultArrangementEditorForm,
+  createDefaultArrangementPriceLine,
+  defaultProjectName,
+  ensureSelectOption,
+  priceProjectOptionsForType as sharedPriceProjectOptionsForType,
+  resolveArrangementResourceName,
+  resolveGroundAgentPackageAmount,
+  resolveSupplierOptionsForResource,
+  routeDurationText,
+  scheduleExclusiveNightsCount,
+  scheduleInclusiveDaysCount,
+  parseScheduleDayNo,
+  vehicleDistanceText,
+  type ArrangementEditorForm,
+  type AutoCompleteOption,
+  type SelectOption,
+  type SelectOptionWithId,
+} from '../components/arrangement-editor-model';
+
 import {
   arrangementItemCash,
   arrangementItemCredit,
@@ -65,6 +82,8 @@ import {
   createDefaultProductForm,
   type ProductFormState,
 } from './product-form-utils';
+
+import '../team-arrangement-layout.css';
 
 type ArrangementCategoryShortcut = {
   icon: string;
@@ -95,6 +114,7 @@ type TeamBadgeItem = {
 };
 
 type TeamMetricItem = {
+  key: string;
   label: string;
   value: string;
 };
@@ -104,17 +124,6 @@ type ArrangementSection = ArrangementCategoryShortcut & {
   documentAction?: string;
 };
 
-type SelectOption = {
-  label: string;
-  value: string;
-};
-
-type SelectOptionWithId = {
-  id?: number;
-  label: string;
-  value: string;
-};
-type AutoCompleteOption = { label: string; value: string };
 type DictItem = ProductDictionaryNamespace.Item;
 
 type ScenicResourceRelationOption = {
@@ -158,81 +167,6 @@ type QuickProfileEditorConfig = {
   placeholder: string;
   required?: boolean;
   title: string;
-};
-
-type ArrangementEditorConfig = {
-  daysLabel?: string;
-  endLabel?: string;
-  noGuideReport: boolean;
-  peopleLabel?: string;
-  resourceLabel?: string;
-  resourceMode: 'none' | 'select';
-  responsibleLabel?: string;
-  scheduleGroupLabel: string;
-  settlement: boolean;
-  showArrivalPlace?: boolean;
-  showBreakfastFund?: boolean;
-  showConfirmed?: boolean;
-  showDaysCount?: boolean;
-  showDriver?: boolean;
-  showEndDate?: boolean;
-  showMealTime?: boolean;
-  showOptionalAmounts?: boolean;
-  showOrderInfo: boolean;
-  showPeople?: boolean;
-  showResponsible?: boolean;
-  showShoppingAmounts?: boolean;
-  showTrafficType?: boolean;
-  showVehicleType?: boolean;
-  startLabel: string;
-  title: string;
-};
-
-type ArrangementEditorForm = {
-  allocationMode: SalesProductApi.AllocationMode;
-  arrivalPlace?: string;
-  cashAmount: number;
-  companyRebateAmount: number;
-  companyRebateRate: number;
-  confirmed: boolean;
-  confirmationNo?: string;
-  consumptionAmount: number;
-  costAmount: number;
-  creditAmount: number;
-  daysCount: number;
-  departurePlace?: string;
-  driverName?: string;
-  fundIncluded?: string;
-  guideCommissionAmount: number;
-  guideCommissionRate: number;
-  guideName?: string;
-  headFeeAmount: number;
-  mealType?: string;
-  noGuideReport: boolean;
-  orderScope?: string;
-  peopleCount: number;
-  prepaidAmount: number;
-  priceLines: SalesProductApi.ArrangementPriceLine[];
-  priceRemark?: string;
-  projectId?: number;
-  projectName?: string;
-  quantity: number;
-  remark?: string;
-  resourceName?: string;
-  responsibleEmployeeId?: number;
-  responsibleEmployeeName?: string;
-  saleAmount: number;
-  scheduleEndDay?: string;
-  scheduleStartDay?: string;
-  settlementType: SalesProductApi.SettlementType;
-  supplierId?: number;
-  supplierName?: string;
-  trafficType?: string;
-  unitPrice: number;
-  vehiclePlate?: string;
-  vehicleInquiryRecords: SalesProductApi.VehicleInquiryRecord[];
-  vehicleQuoteSnapshot: SalesProductApi.VehicleQuoteSnapshot;
-  vehicleType?: string;
 };
 
 const route = useRoute();
@@ -294,7 +228,7 @@ const arrangementSections: ArrangementSection[] = [
   },
   {
     ...arrangementShortcuts[8]!,
-    columns: ['开始', '结束', '天数', '供应商', '备注', '价格信息', '成本合计', '现结', '挂账', '操作'],
+    columns: ['开始', '结束', '天数', '供应商', '备注', '成本合计', '现结', '挂账', '操作'],
     documentAction: '确认单',
   },
   {
@@ -324,35 +258,7 @@ const arrangementStages: ArrangementStage[] = [
   { label: '财务结算', state: 'pending' },
 ];
 
-const trafficTypeOptions: SelectOption[] = [
-  { label: '飞机', value: '飞机' },
-  { label: '高铁', value: '高铁' },
-  { label: '火车', value: '火车' },
-  { label: '邮轮', value: '邮轮' },
-];
-
-const mealTypeOptions: SelectOption[] = ['早餐', '中餐', '晚餐']
-  .map((item) => ({ label: item, value: item }));
-
-const breakfastOptions: SelectOption[] = ['桌早', '自助早', '打包早', '不含']
-  .map((item) => ({ label: item, value: item }));
-
-const fundOptions: SelectOption[] = ['不含', '含']
-  .map((item) => ({ label: item, value: item }));
-
-const trafficOrderOptions: SelectOption[] = [
-  { label: '=不关联订单=', value: '=不关联订单=' },
-];
-const standardMealProjectOptions: SelectOptionWithId[] = ['标准餐', '豪华餐', '餐券', '其它']
-  .map((item) => ({ label: item, value: item }));
-const otherProjectOptions: SelectOptionWithId[] = ['礼品', '特产', '预收款', '保险', '购物返佣', '购物人头', '停车费', '房租', '水电', '其它']
-  .map((item) => ({ label: item, value: item }));
-const groundAgentProjectOptions: SelectOptionWithId[] = ['成人', '儿童', '车费', '综费', '接送费', '代收团款', '定金对公', '团费', '成本', '其它']
-  .map((item) => ({ label: item, value: item }));
-const shoppingCategoryOptions: SelectOptionWithId[] = ['乳胶', '茶叶', '翡翠', '厨具', '黄金饰品', '茶多酚', '土特产', '丝绸', '珍珠', '唐卡', '藏药', '其它']
-  .map((item) => ({ label: item, value: item }));
 const regionOptions = buildRegionOptions();
-const defaultPriceQuantity = 0;
 const TEAM_PROFILE_MARKER = '[[TEAM_PROFILE_JSON]]';
 
 const quickProfileEditorConfigs: Record<QuickProfileEditorType, QuickProfileEditorConfig> = {
@@ -401,133 +307,6 @@ const quickProfileEditorConfigs: Record<QuickProfileEditorType, QuickProfileEdit
     label: '内部备注',
     placeholder: '最多输入100个汉字',
     title: '内部备注',
-  },
-};
-
-const arrangementEditorConfigs: Record<SalesProductApi.ArrangementType, ArrangementEditorConfig> = {
-  extra_fee: {
-    noGuideReport: false,
-    resourceMode: 'none',
-    scheduleGroupLabel: '日期',
-    settlement: true,
-    showOrderInfo: true,
-    startLabel: '日期',
-    title: '添加/修改附加费用',
-  },
-  ground_agent: {
-    daysLabel: '天数',
-    endLabel: '结束',
-    noGuideReport: true,
-    resourceMode: 'none',
-    scheduleGroupLabel: '拼团日期',
-    settlement: true,
-    showDaysCount: true,
-    showEndDate: true,
-    showOrderInfo: true,
-    startLabel: '开始',
-    title: '添加/修改地接信息',
-  },
-  hotel: {
-    daysLabel: '共几晚',
-    endLabel: '退房',
-    noGuideReport: true,
-    resourceLabel: '酒店名称',
-    resourceMode: 'select',
-    responsibleLabel: '责任房调',
-    scheduleGroupLabel: '入住退房',
-    settlement: true,
-    showBreakfastFund: true,
-    showConfirmed: true,
-    showDaysCount: true,
-    showEndDate: true,
-    showOrderInfo: true,
-    showResponsible: true,
-    startLabel: '入住',
-    title: '添加/修改酒店信息',
-  },
-  meal: {
-    noGuideReport: true,
-    resourceLabel: '餐厅名称',
-    resourceMode: 'select',
-    scheduleGroupLabel: '用餐日期',
-    settlement: true,
-    showMealTime: true,
-    showOrderInfo: true,
-    startLabel: '日期',
-    title: '添加/修改用餐信息',
-  },
-  optional: {
-    noGuideReport: true,
-    peopleLabel: '人数',
-    resourceLabel: '景区/项目名称',
-    resourceMode: 'select',
-    scheduleGroupLabel: '自费日期',
-    settlement: true,
-    showOptionalAmounts: true,
-    showOrderInfo: true,
-    showPeople: true,
-    startLabel: '日期',
-    title: '添加/修改自费信息',
-  },
-  other: {
-    noGuideReport: true,
-    resourceMode: 'none',
-    scheduleGroupLabel: '日期',
-    settlement: true,
-    showOrderInfo: true,
-    startLabel: '日期',
-    title: '添加/修改其它信息',
-  },
-  scenic: {
-    noGuideReport: true,
-    resourceLabel: '景区名称',
-    resourceMode: 'select',
-    scheduleGroupLabel: '游览日期',
-    settlement: true,
-    showOrderInfo: true,
-    startLabel: '日期',
-    title: '添加/修改景区信息',
-  },
-  shopping: {
-    noGuideReport: true,
-    peopleLabel: '进店人数',
-    resourceLabel: '购物店',
-    resourceMode: 'select',
-    scheduleGroupLabel: '购物日期',
-    settlement: false,
-    showOrderInfo: false,
-    showPeople: true,
-    showShoppingAmounts: true,
-    startLabel: '日期',
-    title: '添加/修改购物信息',
-  },
-  traffic: {
-    noGuideReport: true,
-    resourceMode: 'none',
-    scheduleGroupLabel: '日期行程',
-    settlement: true,
-    showArrivalPlace: true,
-    showOrderInfo: true,
-    showTrafficType: true,
-    startLabel: '日期',
-    title: '添加/修改大交通信息',
-  },
-  vehicle: {
-    daysLabel: '天数',
-    endLabel: '结束',
-    noGuideReport: true,
-    resourceMode: 'none',
-    responsibleLabel: '责任车调',
-    scheduleGroupLabel: '开始结束',
-    settlement: true,
-    showDaysCount: true,
-    showDriver: true,
-    showEndDate: true,
-    showOrderInfo: true,
-    showResponsible: true,
-    showVehicleType: true,
-    startLabel: '开始',
-    title: '添加/修改用车信息',
   },
 };
 
@@ -622,6 +401,9 @@ const activeEditorTotalAmount = computed(() => {
   if (activeEditorType.value === 'shopping') {
     return Number(arrangementForm.consumptionAmount || 0);
   }
+  if (activeEditorType.value === 'ground_agent') {
+    return Number(arrangementForm.costAmount || 0);
+  }
   return editorTotalAmount.value;
 });
 const editorCreditAmount = computed(() => Math.max(
@@ -629,8 +411,6 @@ const editorCreditAmount = computed(() => Math.max(
   0,
 ));
 const activeSection = computed(() => arrangementSections.find((item) => item.value === activeEditorType.value));
-const activeEditorConfig = computed(() => arrangementEditorConfigs[activeEditorType.value]);
-const activeEditorTitle = computed(() => activeEditorConfig.value.title);
 const scheduleDayOptions = computed<SelectOption[]>(() => {
   const travelDays = Math.max(1, Number(formState.travelDays || 1));
   return [
@@ -672,30 +452,37 @@ const teamBadges = computed<TeamBadgeItem[]>(() => [
 ]);
 const teamMetricItems = computed<TeamMetricItem[]>(() => [
   {
+    key: 'travelDays',
     label: '旅游天数',
     value: `${formState.travelDays || 1} 天`,
   },
   {
+    key: 'standard',
     label: '接待标准',
     value: teamProfile.receptionStandard || formState.receptionStandard || '未设置',
   },
   {
+    key: 'distance',
     label: '总里程数',
     value: teamProfile.totalDistanceText || `${totalRoadbookDistanceKilometers.value}公里`,
   },
   {
+    key: 'receivable',
     label: '应收/已收/余额',
     value: '0 | 0 | 0',
   },
   {
+    key: 'orderStatus',
     label: '订单已确认/未处理/已取消',
     value: '0 | 0 | 0',
   },
   {
+    key: 'paid',
     label: '已付',
     value: '--',
   },
   {
+    key: 'profit',
     label: '预算利润',
     value: `${formatPlainMoney(arrangementTotal.value)}`,
   },
@@ -829,49 +616,6 @@ function sectionItems(type: SalesProductApi.ArrangementType) {
   return (formState.arrangementItems || []).filter((item) => item.arrangementType === type);
 }
 
-function createDefaultArrangementEditorForm(type: SalesProductApi.ArrangementType): ArrangementEditorForm {
-  const projectName = defaultProjectName(type);
-  return {
-    allocationMode: 'group_order_average',
-    arrivalPlace: '',
-    cashAmount: 0,
-    companyRebateAmount: 0,
-    companyRebateRate: 0,
-    confirmed: type === 'hotel',
-    consumptionAmount: 0,
-    costAmount: 0,
-    creditAmount: 0,
-    daysCount: type === 'hotel' || type === 'vehicle' || type === 'ground_agent' ? 1 : 0,
-    departurePlace: '',
-    fundIncluded: '不含',
-    guideCommissionAmount: 0,
-    guideCommissionRate: 0,
-    headFeeAmount: 0,
-    mealType: type === 'meal' ? '中餐' : undefined,
-    noGuideReport: false,
-    orderScope: '=不关联订单=',
-    peopleCount: 0,
-    prepaidAmount: 0,
-    priceLines: [createDefaultArrangementPriceLine(projectName)],
-    projectName,
-    quantity: defaultPriceQuantity,
-    saleAmount: 0,
-    scheduleEndDay: type === 'hotel' || type === 'vehicle' || type === 'ground_agent' ? '第2天' : undefined,
-    scheduleStartDay: type === 'traffic' ? '=出发日期=' : '第1天',
-    settlementType: 'credit',
-    trafficType: type === 'traffic' ? '飞机' : undefined,
-    unitPrice: 0,
-    vehicleInquiryRecords: [],
-    vehicleQuoteSnapshot: {
-      calculatedAmount: 0,
-      confirmedAmount: 0,
-      syncedDistanceMeters: 0,
-      syncedDurationSeconds: 0,
-    },
-    vehicleType: type === 'vehicle' ? '39座' : undefined,
-  };
-}
-
 function resetArrangementForm(type: SalesProductApi.ArrangementType) {
   Object.assign(arrangementForm, createDefaultArrangementEditorForm(type));
   departureRegionPath.value = [];
@@ -880,6 +624,14 @@ function resetArrangementForm(type: SalesProductApi.ArrangementType) {
 
 /** 把表格中已有的安排记录回填到弹窗表单，用于修改已保存的产品模板安排。 */
 function hydrateArrangementFormFromItem(item: SalesProductApi.ArrangementItem) {
+  const isGroundAgent = item.arrangementType === 'ground_agent';
+  const groundAgentPackageAmount = isGroundAgent
+    ? resolveGroundAgentPackageAmount({
+      costAmount: item.costAmount,
+      priceLines: item.priceLines,
+      totalAmount: item.totalAmount,
+    })
+    : 0;
   Object.assign(arrangementForm, createDefaultArrangementEditorForm(item.arrangementType));
   Object.assign(arrangementForm, {
     allocationMode: item.allocationMode || 'group_order_average',
@@ -890,7 +642,7 @@ function hydrateArrangementFormFromItem(item: SalesProductApi.ArrangementItem) {
     confirmed: Boolean(item.confirmed),
     confirmationNo: item.confirmationNo,
     consumptionAmount: Number(item.consumptionAmount || 0),
-    costAmount: Number(item.costAmount || 0),
+    costAmount: isGroundAgent ? groundAgentPackageAmount : Number(item.costAmount || 0),
     creditAmount: Number(item.creditAmount || 0),
     daysCount: Number(item.daysCount || 0),
     departurePlace: item.departurePlace,
@@ -904,31 +656,33 @@ function hydrateArrangementFormFromItem(item: SalesProductApi.ArrangementItem) {
     orderScope: item.orderScope || '=不关联订单=',
     peopleCount: Number(item.peopleCount || 0),
     prepaidAmount: Number(item.prepaidAmount || 0),
-    priceLines: item.priceLines?.length
-      ? item.priceLines.map((line, index) => ({
-        amount: Number(line.amount || 0),
-        projectId: line.projectId,
-        projectName: line.projectName || item.projectName || defaultProjectName(item.arrangementType),
-        quantity: Number(line.quantity || 0),
-        remark: line.remark,
-        salePrice: Number(line.salePrice || 0),
-        sortOrder: line.sortOrder || index + 1,
-        unitPrice: Number(line.unitPrice || 0),
-        cashAmount: Number(line.cashAmount || 0),
-        companyRebateAmount: Number(line.companyRebateAmount || 0),
-        companyRebateRate: Number(line.companyRebateRate || 0),
-        consumptionAmount: Number(line.consumptionAmount || 0),
-        costPrice: Number(line.costPrice || 0),
-        creditAmount: Number(line.creditAmount || 0),
-        guideCommissionAmount: Number(line.guideCommissionAmount || 0),
-        guideCommissionRate: Number(line.guideCommissionRate || 0),
-        headFeeAmount: Number(line.headFeeAmount || 0),
-      }))
-      : [createDefaultArrangementPriceLine(item.projectName || defaultProjectName(item.arrangementType))],
+    priceLines: isGroundAgent
+      ? [createGroundAgentPackagePriceLine(groundAgentPackageAmount, item.priceLines?.[0]?.remark)]
+      : (item.priceLines?.length
+        ? item.priceLines.map((line, index) => ({
+          amount: Number(line.amount || 0),
+          projectId: line.projectId,
+          projectName: line.projectName || item.projectName || defaultProjectName(item.arrangementType),
+          quantity: Number(line.quantity || 0),
+          remark: line.remark,
+          salePrice: Number(line.salePrice || 0),
+          sortOrder: line.sortOrder || index + 1,
+          unitPrice: Number(line.unitPrice || 0),
+          cashAmount: Number(line.cashAmount || 0),
+          companyRebateAmount: Number(line.companyRebateAmount || 0),
+          companyRebateRate: Number(line.companyRebateRate || 0),
+          consumptionAmount: Number(line.consumptionAmount || 0),
+          costPrice: Number(line.costPrice || 0),
+          creditAmount: Number(line.creditAmount || 0),
+          guideCommissionAmount: Number(line.guideCommissionAmount || 0),
+          guideCommissionRate: Number(line.guideCommissionRate || 0),
+          headFeeAmount: Number(line.headFeeAmount || 0),
+        }))
+        : [createDefaultArrangementPriceLine(item.projectName || defaultProjectName(item.arrangementType))]),
     projectName: item.projectName,
     quantity: Number(item.quantity || 0),
     remark: manualRemarkText(item.remark),
-    resourceName: item.resourceName,
+    resourceName: resolveArrangementResourceName(item.resourceName, item.itemName),
     responsibleEmployeeId: item.responsibleEmployeeId,
     responsibleEmployeeName: item.responsibleEmployeeName,
     saleAmount: Number(item.saleAmount || 0),
@@ -963,15 +717,6 @@ function hydrateArrangementFormFromItem(item: SalesProductApi.ArrangementItem) {
     syncGroundAgentDaysCount();
   }
   normalizeArrangementPriceLines();
-}
-
-function createDefaultArrangementPriceLine(projectName = ''): SalesProductApi.ArrangementPriceLine {
-  return {
-    projectName,
-    quantity: defaultPriceQuantity,
-    sortOrder: 1,
-    unitPrice: 0,
-  };
 }
 
 function normalizeArrangementPriceLines() {
@@ -1012,62 +757,21 @@ function applySelectedPriceProject(index: number, value?: unknown) {
   syncPrimaryPriceFields();
 }
 
-/** 部分老系统弹窗的费用项目是固定选项，不依赖后台费用项目字典。 */
+function syncVehiclePriceProject(value?: unknown) {
+  const selectedValue = normalizeSelectValue(value) || arrangementForm.vehicleType;
+  if (!selectedValue) return;
+  const firstLine = arrangementForm.priceLines[0] || createDefaultArrangementPriceLine(selectedValue);
+  if (!arrangementForm.priceLines.length) {
+    arrangementForm.priceLines.push(firstLine);
+  }
+  const project = priceProjectOptionsForType('vehicle').find((item) => item.value === selectedValue);
+  firstLine.projectId = project?.id;
+  firstLine.projectName = selectedValue;
+  syncPrimaryPriceFields();
+}
+
 function priceProjectOptionsForType(type: SalesProductApi.ArrangementType) {
-  if (type === 'meal') return standardMealProjectOptions;
-  if (type === 'other') return otherProjectOptions;
-  if (type === 'ground_agent') return groundAgentProjectOptions;
-  if (type === 'shopping') return shoppingCategoryOptions;
-  return projectOptions.value;
-}
-
-function defaultProjectName(type: SalesProductApi.ArrangementType) {
-  const defaults: Record<SalesProductApi.ArrangementType, string> = {
-    extra_fee: '保险',
-    ground_agent: '成人',
-    hotel: '标间',
-    meal: '标准餐',
-    optional: '成人',
-    other: '礼品',
-    scenic: '成人',
-    shopping: '乳胶',
-    traffic: '飞机',
-    vehicle: '车费',
-  };
-  return defaults[type];
-}
-
-function parseScheduleDayNo(value?: string) {
-  if (!value) return undefined;
-  const matched = value.match(/第\s*(\d+)\s*天/);
-  return matched?.[1] ? Number(matched[1]) : undefined;
-}
-
-/** 按开始/结束天数计算跨几天，老系统口径包含首尾日期，例如第1天到第3天等于3天。 */
-function scheduleInclusiveDaysCount(startValue?: string, endValue?: string) {
-  const start = parseScheduleDayNo(startValue) || 1;
-  const end = Math.max(start, parseScheduleDayNo(endValue) || start);
-  return Math.max(1, end - start + 1);
-}
-
-/** 住宿晚数按退房日减入住日计算，例如第1天入住、第3天退房等于2晚。 */
-function scheduleExclusiveNightsCount(startValue?: string, endValue?: string) {
-  const start = parseScheduleDayNo(startValue) || 1;
-  const end = Math.max(start, parseScheduleDayNo(endValue) || start + 1);
-  return Math.max(0, end - start);
-}
-
-function routeDurationText(seconds?: number) {
-  const totalSeconds = Number(seconds || 0);
-  if (totalSeconds <= 0) return '0分钟';
-  const minutes = Math.round(totalSeconds / 60);
-  if (minutes < 60) return `${minutes}分钟`;
-  return `${Math.floor(minutes / 60)}小时${minutes % 60}分钟`;
-}
-
-function vehicleDistanceText(meters?: number) {
-  const value = Number(meters || 0);
-  return `${(value / 1000).toFixed(1)}公里`;
+  return sharedPriceProjectOptionsForType(type, projectOptions.value);
 }
 
 function selectedVehicleDayRange() {
@@ -1179,11 +883,14 @@ function applyVehicleQuoteToPriceInfo(amount?: number) {
     message.warning('没有可应用的报价金额');
     return;
   }
-  const firstLine = arrangementForm.priceLines[0] || createDefaultArrangementPriceLine('车费');
+  const selectedValue = arrangementForm.vehicleType || '车费';
+  const firstLine = arrangementForm.priceLines[0] || createDefaultArrangementPriceLine(selectedValue);
   if (!arrangementForm.priceLines.length) {
     arrangementForm.priceLines.push(firstLine);
   }
-  firstLine.projectName = '车费';
+  const project = priceProjectOptionsForType('vehicle').find((item) => item.value === selectedValue);
+  firstLine.projectId = project?.id;
+  firstLine.projectName = selectedValue;
   firstLine.quantity = 1;
   firstLine.unitPrice = finalAmount;
   arrangementForm.cashAmount = 0;
@@ -1267,6 +974,13 @@ function showStaticFeatureTip() {
   message.info('正式团队安排模块接入后可用');
 }
 
+function showItineraryModal() {
+  showTeamItineraryModal({
+    fallbackDescription: formState.productDescription,
+    itineraryDays: formState.itineraryDays,
+  });
+}
+
 /** 普通费用归属下允许继续追加价格组成，形成旧系统同款多行价格信息。 */
 function addArrangementPriceLine() {
   if (showMultiOrderAveragePriceNotice.value) return;
@@ -1298,10 +1012,6 @@ function addShoppingConsumptionLine() {
   arrangementForm.priceLines.push(line);
   normalizeArrangementPriceLines();
   syncShoppingLineToForm();
-}
-
-function optionalLineCreditAmount(line: SalesProductApi.ArrangementPriceLine) {
-  return Math.max(Number(line.costPrice || 0) - Number(line.cashAmount || 0), 0);
 }
 
 function applyShoppingPriceProject(index: number, value?: unknown) {
@@ -1496,6 +1206,9 @@ async function openArrangementEditor(
   arrangementModalOpen.value = true;
   await loadEditorOptions(type);
   if (type === 'vehicle') {
+    syncVehiclePriceProject(arrangementForm.vehicleType);
+  }
+  if (type === 'vehicle') {
     await Promise.all([
       loadVehicleHistoryOptions('driver_info'),
       loadVehicleHistoryOptions('vehicle_plate'),
@@ -1578,7 +1291,10 @@ async function loadEditorOptions(type: SalesProductApi.ArrangementType, force = 
       label: item.employeeName,
         value: item.employeeName,
       }));
-    resourceOptions.value = resources;
+    resourceOptions.value = ensureSelectOption(
+      resources,
+      arrangementForm.resourceName,
+    );
     if (type === 'scenic' || type === 'optional' || type === 'meal' || type === 'shopping') {
       loadResourceSupplierOptions(arrangementForm.resourceName);
     } else {
@@ -1800,12 +1516,14 @@ function loadResourceSupplierOptions(value?: unknown) {
     return;
   }
 
-  const nextSupplierOptions = resourceRelationSupplierOptions(selectedResourceName);
-  supplierOptions.value = nextSupplierOptions;
-  const currentSupplier = nextSupplierOptions.find((item) => item.value === arrangementForm.supplierName);
-  const defaultSupplier = currentSupplier || nextSupplierOptions[0];
-  arrangementForm.supplierId = defaultSupplier?.id;
-  arrangementForm.supplierName = defaultSupplier?.value;
+  const resolved = resolveSupplierOptionsForResource({
+    currentSupplierId: arrangementForm.supplierId,
+    currentSupplierName: arrangementForm.supplierName,
+    nextOptions: resourceRelationSupplierOptions(selectedResourceName),
+  });
+  supplierOptions.value = resolved.options;
+  arrangementForm.supplierId = resolved.selectedSupplierId;
+  arrangementForm.supplierName = resolved.selectedSupplierName;
   if (activeEditorType.value === 'scenic' || activeEditorType.value === 'optional') {
     void loadSelectedScenicTicketTemplate();
   } else {
@@ -1968,32 +1686,38 @@ async function saveArrangementEditor() {
     message.warning('请选择供应商');
     return;
   }
+  if (type === 'ground_agent' && Number(arrangementForm.costAmount || 0) <= 0) {
+    message.warning('请填写地接结算价');
+    return;
+  }
 
   normalizeArrangementPriceLines();
-  const priceLines = arrangementForm.priceLines.map((line, index) => {
-    const quantity = Number(line.quantity || 0);
-    const unitPrice = Number(line.unitPrice || 0);
-    const amount = unitPrice * quantity;
-    return {
-      amount,
-      cashAmount: Number(line.cashAmount ?? ((index === 0 ? arrangementForm.cashAmount : 0) || 0)),
-      companyRebateAmount: Number(line.companyRebateAmount ?? (arrangementForm.companyRebateAmount || 0)),
-      companyRebateRate: Number(line.companyRebateRate ?? (arrangementForm.companyRebateRate || 0)),
-      consumptionAmount: Number(line.consumptionAmount ?? (arrangementForm.consumptionAmount || 0)),
-      costPrice: Number(line.costPrice ?? (arrangementForm.costAmount || 0)),
-      creditAmount: index === 0 ? editorCreditAmount.value : 0,
-      guideCommissionAmount: Number(line.guideCommissionAmount ?? (arrangementForm.guideCommissionAmount || 0)),
-      guideCommissionRate: Number(line.guideCommissionRate ?? (arrangementForm.guideCommissionRate || 0)),
-      headFeeAmount: Number(line.headFeeAmount ?? (arrangementForm.headFeeAmount || 0)),
-      projectId: line.projectId,
-      projectName: line.projectName || defaultProjectName(type),
-      quantity,
-      remark: line.remark,
-      salePrice: Number(line.salePrice ?? (arrangementForm.saleAmount || 0)),
-      sortOrder: index + 1,
-      unitPrice,
-    };
-  });
+  const priceLines = type === 'ground_agent'
+    ? [createGroundAgentPackagePriceLine(Number(arrangementForm.costAmount || 0), arrangementForm.priceRemark)]
+    : arrangementForm.priceLines.map((line, index) => {
+      const quantity = Number(line.quantity || 0);
+      const unitPrice = Number(line.unitPrice || 0);
+      const amount = unitPrice * quantity;
+      return {
+        amount,
+        cashAmount: Number(line.cashAmount ?? ((index === 0 ? arrangementForm.cashAmount : 0) || 0)),
+        companyRebateAmount: Number(line.companyRebateAmount ?? (arrangementForm.companyRebateAmount || 0)),
+        companyRebateRate: Number(line.companyRebateRate ?? (arrangementForm.companyRebateRate || 0)),
+        consumptionAmount: Number(line.consumptionAmount ?? (arrangementForm.consumptionAmount || 0)),
+        costPrice: Number(line.costPrice ?? (arrangementForm.costAmount || 0)),
+        creditAmount: index === 0 ? editorCreditAmount.value : 0,
+        guideCommissionAmount: Number(line.guideCommissionAmount ?? (arrangementForm.guideCommissionAmount || 0)),
+        guideCommissionRate: Number(line.guideCommissionRate ?? (arrangementForm.guideCommissionRate || 0)),
+        headFeeAmount: Number(line.headFeeAmount ?? (arrangementForm.headFeeAmount || 0)),
+        projectId: line.projectId,
+        projectName: line.projectName || defaultProjectName(type),
+        quantity,
+        remark: line.remark,
+        salePrice: Number(line.salePrice ?? (arrangementForm.saleAmount || 0)),
+        sortOrder: index + 1,
+        unitPrice,
+      };
+    });
   const firstPriceLine = priceLines[0] || createDefaultArrangementPriceLine(defaultProjectName(type));
   const totalAmount = activeEditorTotalAmount.value;
   const creditAmount = editorCreditAmount.value;
@@ -2010,7 +1734,9 @@ async function saveArrangementEditor() {
     confirmed: arrangementForm.confirmed,
     confirmationNo: arrangementForm.confirmationNo,
     consumptionAmount: Number(arrangementForm.consumptionAmount || 0),
-    costAmount: Number(arrangementForm.costAmount || totalAmount),
+    costAmount: type === 'ground_agent'
+      ? totalAmount
+      : Number(arrangementForm.costAmount || totalAmount),
     creditAmount,
     daysCount: Number(arrangementForm.daysCount || 0),
     departurePlace: arrangementForm.departurePlace,
@@ -2196,13 +1922,13 @@ onMounted(loadDetail);
 <template>
   <Page :title="pageTitle">
     <Spin :spinning="loading">
-      <Card class="team-arrangement-card">
+      <Card class="team-arrangement-card formal-team-arrangement-card">
         <div class="arrangement-command-bar">
           <div class="command-main">
             <div class="form-kicker">团队安排总览 · Group Arrange</div>
-            <div class="team-title-line">
+            <div class="team-title-line formal-team-title-line">
               <div class="team-name">{{ formState.productName || '未命名产品' }}</div>
-              <div class="team-badges">
+              <div class="team-badges formal-team-badges">
                 <Tag
                   v-for="item in teamBadges"
                   :key="item.label"
@@ -2214,11 +1940,12 @@ onMounted(loadDetail);
                 </Tag>
               </div>
             </div>
-            <div class="team-metric-strip">
+            <div class="team-metric-strip formal-team-metric-strip">
               <span
                 v-for="item in teamMetricItems"
-                :key="item.label"
+                :key="item.key"
                 class="team-metric-item"
+                :class="`metric-${item.key}`"
               >
                 <em>{{ item.label }}</em>
                 <strong>{{ item.value }}</strong>
@@ -2243,7 +1970,7 @@ onMounted(loadDetail);
                 <IconifyIcon icon="lucide:clipboard-list" />
                 <span>团队管理</span>
               </button>
-              <button type="button" class="compact-action" @click="showStaticFeatureTip">
+              <button type="button" class="compact-action" @click="showItineraryModal">
                 <IconifyIcon icon="lucide:briefcase" />
                 <span>查看行程</span>
               </button>
@@ -2269,6 +1996,13 @@ onMounted(loadDetail);
           </div>
         </div>
 
+        <div class="formal-cost-overview-title">
+          <div>
+            <IconifyIcon icon="lucide:table-properties" />
+            <span>成本总览</span>
+          </div>
+          <small>现结 / 挂账 / 收入摘要</small>
+        </div>
         <div class="arrangement-overview-table">
           <table>
             <thead>
@@ -2318,30 +2052,32 @@ onMounted(loadDetail);
           </table>
         </div>
 
-        <div id="arrangement-menu" class="arrangement-overview-tabs" aria-label="团队安排总览分类">
-          <button
-            v-for="item in arrangementOverviewTabs"
-            :key="item.value"
-            type="button"
-            class="arrangement-overview-tab"
-            :class="{ active: item.value === 'overview' }"
-            @click="scrollToArrangementAnchor(item.anchor)"
-          >
-            {{ item.label }}
-          </button>
-        </div>
+        <div class="arrangement-tabs-block">
+          <div id="arrangement-menu" class="arrangement-overview-tabs" aria-label="团队安排总览分类">
+            <button
+              v-for="item in arrangementOverviewTabs"
+              :key="item.value"
+              type="button"
+              class="arrangement-overview-tab"
+              :class="{ active: item.value === 'overview' }"
+              @click="scrollToArrangementAnchor(item.anchor)"
+            >
+              {{ item.label }}
+            </button>
+          </div>
 
-        <div class="arrangement-icon-grid compact-category-strip" aria-label="团队安排分类快捷入口">
-          <button
-            v-for="item in arrangementShortcuts"
-            :key="item.value"
-            type="button"
-            class="arrangement-icon-button"
-            @click="scrollToArrangementAnchor(item.anchor)"
-          >
-            <IconifyIcon :icon="item.icon" />
-            <span>{{ item.label }}</span>
-          </button>
+          <div class="arrangement-icon-grid compact-category-strip" aria-label="团队安排分类快捷入口">
+            <button
+              v-for="item in arrangementShortcuts"
+              :key="item.value"
+              type="button"
+              class="arrangement-icon-button"
+              @click="scrollToArrangementAnchor(item.anchor)"
+            >
+              <IconifyIcon :icon="item.icon" />
+              <span>{{ item.label }}</span>
+            </button>
+          </div>
         </div>
 
         <div class="arrangement-overview-sections">
@@ -2473,1826 +2209,67 @@ onMounted(loadDetail);
         </Spin>
       </Modal>
 
-      <Modal
+      <ArrangementEditorModal
         v-model:open="arrangementModalOpen"
-        centered
-        class="traffic-arrangement-modal"
-        :footer="null"
-        :title="activeEditorTitle"
-        width="920px"
-      >
-        <Spin :spinning="optionsLoading">
-          <div class="traffic-modal-body">
-            <Radio.Group
-              v-model:value="arrangementForm.allocationMode"
-              class="traffic-cost-mode-tabs"
-              option-type="button"
-              button-style="solid"
-            >
-              <Radio.Button value="group_order_average">全团/订单均摊</Radio.Button>
-              <Radio.Button value="multi_order_average">多订单均摊成本</Radio.Button>
-            </Radio.Group>
-
-            <Form class="traffic-form" layout="vertical">
-              <template v-if="activeEditorType === 'hotel'">
-                <div class="hotel-old-system-layout">
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:database" />
-                      <span>酒店名称</span>
-                    </div>
-                    <div class="traffic-form-row hotel-name-row">
-                      <Form.Item label="酒店名称">
-                        <Select
-                          v-model:value="arrangementForm.resourceName"
-                          allow-clear
-                          show-search
-                          :options="resourceOptions"
-                          @change="applySelectedResource"
-                        />
-                      </Form.Item>
-                      <Form.Item label="添加">
-                        <Button @click="openHotelCreatePage">添加酒店</Button>
-                      </Form.Item>
-                      <Form.Item label="已确认">
-                        <Checkbox v-model:checked="arrangementForm.confirmed">已确认</Checkbox>
-                      </Form.Item>
-                      <Form.Item label="确认号">
-                        <Input v-model:value="arrangementForm.confirmationNo" placeholder="确认号" />
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:coffee" />
-                      <span>早餐基金</span>
-                    </div>
-                    <div class="traffic-form-row two-columns">
-                      <Form.Item label="早餐">
-                        <Select v-model:value="arrangementForm.mealType" :options="breakfastOptions" />
-                      </Form.Item>
-                      <Form.Item label="基金">
-                        <Select v-model:value="arrangementForm.fundIncluded" :options="fundOptions" />
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:route" />
-                      <span>入住退房</span>
-                    </div>
-                    <div class="traffic-form-row three-columns">
-                      <Form.Item label="入住" required>
-                        <Select v-model:value="arrangementForm.scheduleStartDay" :options="scheduleDayOptions" @change="syncHotelNightsCount" />
-                      </Form.Item>
-                      <Form.Item label="退房">
-                        <Select v-model:value="arrangementForm.scheduleEndDay" :options="scheduleDayOptions" @change="syncHotelNightsCount" />
-                      </Form.Item>
-                      <Form.Item label="共几晚">
-                        <InputNumber v-model:value="arrangementForm.daysCount" disabled :min="0" :precision="0" />
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:users" />
-                      <span>供应商</span>
-                    </div>
-                    <div class="traffic-form-row two-columns">
-                      <Form.Item label="供应商" required>
-                        <Select
-                          v-model:value="arrangementForm.supplierName"
-                          allow-clear
-                          show-search
-                          :options="supplierOptions"
-                          @change="applySelectedSupplier"
-                        />
-                      </Form.Item>
-                      <Form.Item label="添加">
-                        <Button @click="openSupplierCreatePage">添加供应商</Button>
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:receipt-text" />
-                      <span>价格信息</span>
-                    </div>
-                    <div class="traffic-price-list">
-                      <div
-                        v-for="(line, index) in arrangementForm.priceLines"
-                        :key="index"
-                        class="traffic-price-line"
-                      >
-                        <Select
-                          v-model:value="line.projectName"
-                          show-search
-                          :options="projectOptions"
-                          @change="(value) => applySelectedPriceProject(index, value)"
-                        />
-                        <InputNumber
-                          v-model:value="line.unitPrice"
-                          addon-before="¥"
-                          :min="0"
-                          :precision="2"
-                          @change="syncPrimaryPriceFields"
-                        />
-                        <div class="traffic-inline-number">
-                          <span>*数量:</span>
-                          <InputNumber
-                            v-model:value="line.quantity"
-                            :min="0"
-                            :precision="0"
-                            @change="syncPrimaryPriceFields"
-                          />
-                        </div>
-                        <div class="traffic-price-remark">
-                          <span>备注:</span>
-                          <Textarea
-                            v-model:value="line.remark"
-                            :auto-size="{ minRows: 1, maxRows: 2 }"
-                            placeholder="价格备注"
-                            @change="syncPrimaryPriceFields"
-                          />
-                        </div>
-                        <button
-                          class="traffic-remove-line-button"
-                          :class="{ disabled: arrangementForm.priceLines.length <= 1 }"
-                          :disabled="arrangementForm.priceLines.length <= 1"
-                          title="删除价格信息"
-                          type="button"
-                          @click="removeArrangementPriceLine(index)"
-                        >
-                          <IconifyIcon icon="lucide:minus" />
-                        </button>
-                        <button
-                          v-if="index === arrangementForm.priceLines.length - 1"
-                          class="traffic-add-line-button"
-                          :class="{ disabled: showMultiOrderAveragePriceNotice }"
-                          :disabled="showMultiOrderAveragePriceNotice"
-                          :title="showMultiOrderAveragePriceNotice ? '多订单均摊成本时只能保留一条价格信息' : '添加价格信息'"
-                          type="button"
-                          @click="addArrangementPriceLine"
-                        >
-                          <IconifyIcon icon="lucide:plus" />
-                        </button>
-                      </div>
-                    </div>
-                    <div v-if="showMultiOrderAveragePriceNotice" class="traffic-price-lock-tip">
-                      多订单均摊成本时，价格信息组成只能统一写成一条记录，点击 ⊕ 失效
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:wallet-cards" />
-                      <span>结算方式</span>
-                    </div>
-                    <div class="traffic-settlement-grid">
-                      <Form.Item label="合计">
-                        <InputNumber :value="editorTotalAmount" disabled addon-before="¥" :precision="2" />
-                      </Form.Item>
-                      <Form.Item label="现结">
-                        <InputNumber
-                          v-model:value="arrangementForm.cashAmount"
-                          addon-before="¥"
-                          :min="0"
-                          :max="editorTotalAmount"
-                          :precision="2"
-                        />
-                      </Form.Item>
-                      <Form.Item label="挂账">
-                        <InputNumber :value="editorCreditAmount" disabled addon-before="¥" :precision="2" />
-                      </Form.Item>
-                      <Form.Item label="预付款">
-                        <InputNumber
-                          v-model:value="arrangementForm.prepaidAmount"
-                          addon-before="¥"
-                          :min="0"
-                          :max="editorTotalAmount"
-                          :precision="2"
-                        />
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <Form.Item label="责任房调">
-                    <Select
-                      v-model:value="arrangementForm.responsibleEmployeeName"
-                      allow-clear
-                      show-search
-                      :options="employeeOptions"
-                      @change="applySelectedResponsible"
-                    />
-                  </Form.Item>
-
-                  <Form.Item label="订单信息">
-                    <Select v-model:value="arrangementForm.orderScope" :options="trafficOrderOptions" />
-                    <div class="traffic-field-tip">产品模板阶段默认不关联正式订单</div>
-                  </Form.Item>
-
-                  <Form.Item label="备注信息">
-                    <Textarea
-                      v-model:value="arrangementForm.remark"
-                      :auto-size="{ minRows: 2, maxRows: 4 }"
-                      placeholder="备注信息"
-                    />
-                  </Form.Item>
-                </div>
-              </template>
-
-              <template v-else-if="activeEditorType === 'vehicle'">
-                <div class="vehicle-old-system-layout">
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:car" />
-                      <span>座位数</span>
-                    </div>
-                    <div class="traffic-form-row one-column">
-                      <Form.Item label="座位数" required>
-                        <Select
-                          v-model:value="arrangementForm.vehicleType"
-                          allow-clear
-                          show-search
-                          :options="vehicleQuoteRuleOptions"
-                          placeholder="请选择座位数规则"
-                        />
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:route" />
-                      <span>用车时间</span>
-                    </div>
-                    <div class="traffic-form-row vehicle-time-row">
-                      <Form.Item label="开始" required>
-                        <Select v-model:value="arrangementForm.scheduleStartDay" :options="scheduleDayOptions" @change="syncVehicleDaysCount" />
-                      </Form.Item>
-                      <Form.Item label="结束">
-                        <Select v-model:value="arrangementForm.scheduleEndDay" :options="scheduleDayOptions" @change="syncVehicleDaysCount" />
-                      </Form.Item>
-                      <Form.Item label="共几天">
-                        <InputNumber v-model:value="arrangementForm.daysCount" disabled :min="0" :precision="0" />
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group vehicle-quote-panel">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:map" />
-                      <span>路书公里</span>
-                    </div>
-                    <div class="vehicle-roadbook-summary">
-                      <div>
-                        <span>同步公里</span>
-                        <strong>{{ vehicleDistanceText(arrangementForm.vehicleQuoteSnapshot?.syncedDistanceMeters) }}</strong>
-                      </div>
-                      <div>
-                        <span>预计车程</span>
-                        <strong>{{ routeDurationText(arrangementForm.vehicleQuoteSnapshot?.syncedDurationSeconds) }}</strong>
-                      </div>
-                      <div class="vehicle-roadbook-actions">
-                        <Space>
-                          <Button @click="syncVehicleRoadbookDistance">同步路书公里</Button>
-                          <Button type="primary" ghost @click="openProductRoadbookEditor">编辑路书地图</Button>
-                        </Space>
-                      </div>
-                    </div>
-                    <div class="vehicle-route-summary">
-                      {{ arrangementForm.vehicleQuoteSnapshot?.routeSummary || '先在产品行程里维护每天路书，再同步到用车报价。' }}
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group vehicle-quote-panel">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:calculator" />
-                      <span>报价测算</span>
-                    </div>
-                    <div class="traffic-form-row three-columns">
-                      <Form.Item label="规则座位数">
-                        <Input :value="arrangementForm.vehicleType || '未选择'" disabled />
-                      </Form.Item>
-                      <Form.Item label="测算参考价">
-                        <InputNumber
-                          v-model:value="arrangementForm.vehicleQuoteSnapshot.confirmedAmount"
-                          addon-before="¥"
-                          :min="0"
-                          :precision="2"
-                        />
-                      </Form.Item>
-                      <Form.Item label="操作">
-                        <Space>
-                          <Button :loading="vehicleQuoteCalculating" @click="calculateVehicleReferencePrice">测算报价</Button>
-                          <Button type="primary" ghost @click="applyVehicleQuoteToPriceInfo()">应用到价格信息</Button>
-                        </Space>
-                      </Form.Item>
-                    </div>
-                    <div class="traffic-field-tip">
-                      {{ lastVehicleQuoteResult ? `命中规则：${lastVehicleQuoteResult.ruleName}，距离 ${vehicleDistanceText(lastVehicleQuoteResult.distanceMeters)}` : '测算价只是询价参考，正式派车成本以后按实际确认。' }}
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:id-card" />
-                      <span>司机车号</span>
-                    </div>
-                    <div class="traffic-form-row two-columns">
-                      <Form.Item label="司机信息">
-                        <AutoComplete
-                          v-model:value="arrangementForm.driverName"
-                          allow-clear
-                          :options="driverHistoryOptions"
-                          placeholder="手动输入司机姓名/电话"
-                          @search="(value) => loadVehicleHistoryOptions('driver_info', value)"
-                        />
-                      </Form.Item>
-                      <Form.Item label="车牌号">
-                        <AutoComplete
-                          v-model:value="arrangementForm.vehiclePlate"
-                          allow-clear
-                          :options="vehiclePlateHistoryOptions"
-                          placeholder="手动输入车牌号"
-                          @search="(value) => loadVehicleHistoryOptions('vehicle_plate', value)"
-                        />
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:users" />
-                      <span>供应商</span>
-                    </div>
-                    <div class="traffic-form-row two-columns">
-                      <Form.Item label="供应商" required>
-                        <Select
-                          v-model:value="arrangementForm.supplierName"
-                          allow-clear
-                          show-search
-                          :options="supplierOptions"
-                          @change="applySelectedSupplier"
-                        />
-                      </Form.Item>
-                      <Form.Item label="添加">
-                        <Button @click="openSupplierCreatePage">添加供应商</Button>
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:receipt-text" />
-                      <span>价格信息</span>
-                    </div>
-                    <div class="traffic-price-list">
-                      <div
-                        v-for="(line, index) in arrangementForm.priceLines"
-                        :key="index"
-                        class="traffic-price-line"
-                      >
-                        <Select
-                          v-model:value="line.projectName"
-                          show-search
-                          :options="projectOptions"
-                          @change="(value) => applySelectedPriceProject(index, value)"
-                        />
-                        <InputNumber
-                          v-model:value="line.unitPrice"
-                          addon-before="¥"
-                          :min="0"
-                          :precision="2"
-                          @change="syncPrimaryPriceFields"
-                        />
-                        <div class="traffic-inline-number">
-                          <span>*数量:</span>
-                          <InputNumber
-                            v-model:value="line.quantity"
-                            :min="0"
-                            :precision="0"
-                            @change="syncPrimaryPriceFields"
-                          />
-                        </div>
-                        <div class="traffic-price-remark">
-                          <span>备注:</span>
-                          <Textarea
-                            v-model:value="line.remark"
-                            :auto-size="{ minRows: 1, maxRows: 2 }"
-                            placeholder="价格备注"
-                            @change="syncPrimaryPriceFields"
-                          />
-                        </div>
-                        <button
-                          class="traffic-remove-line-button"
-                          :class="{ disabled: arrangementForm.priceLines.length <= 1 }"
-                          :disabled="arrangementForm.priceLines.length <= 1"
-                          title="删除价格信息"
-                          type="button"
-                          @click="removeArrangementPriceLine(index)"
-                        >
-                          <IconifyIcon icon="lucide:minus" />
-                        </button>
-                        <button
-                          v-if="index === arrangementForm.priceLines.length - 1"
-                          class="traffic-add-line-button"
-                          :class="{ disabled: showMultiOrderAveragePriceNotice }"
-                          :disabled="showMultiOrderAveragePriceNotice"
-                          :title="showMultiOrderAveragePriceNotice ? '多订单均摊成本时只能保留一条价格信息' : '添加价格信息'"
-                          type="button"
-                          @click="addArrangementPriceLine"
-                        >
-                          <IconifyIcon icon="lucide:plus" />
-                        </button>
-                      </div>
-                    </div>
-                    <div v-if="showMultiOrderAveragePriceNotice" class="traffic-price-lock-tip">
-                      多订单均摊成本时，价格信息组成只能统一写成一条记录，点击 ⊕ 失效
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:wallet-cards" />
-                      <span>结算方式</span>
-                    </div>
-                    <div class="traffic-settlement-grid">
-                      <Form.Item label="合计">
-                        <InputNumber :value="editorTotalAmount" disabled addon-before="¥" :precision="2" />
-                      </Form.Item>
-                      <Form.Item label="现结">
-                        <InputNumber
-                          v-model:value="arrangementForm.cashAmount"
-                          addon-before="¥"
-                          :min="0"
-                          :max="editorTotalAmount"
-                          :precision="2"
-                        />
-                      </Form.Item>
-                      <Form.Item label="挂账">
-                        <InputNumber :value="editorCreditAmount" disabled addon-before="¥" :precision="2" />
-                      </Form.Item>
-                      <Form.Item label="预付款">
-                        <InputNumber
-                          v-model:value="arrangementForm.prepaidAmount"
-                          addon-before="¥"
-                          :min="0"
-                          :max="editorTotalAmount"
-                          :precision="2"
-                        />
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <Form.Item label="责任车调">
-                    <Select
-                      v-model:value="arrangementForm.responsibleEmployeeName"
-                      allow-clear
-                      show-search
-                      :options="employeeOptions"
-                      @change="applySelectedResponsible"
-                    />
-                  </Form.Item>
-
-                  <Form.Item label="订单信息">
-                    <Select v-model:value="arrangementForm.orderScope" :options="trafficOrderOptions" />
-                    <div class="traffic-field-tip">将此项成本归于关联订单</div>
-                  </Form.Item>
-
-                  <Form.Item label="备注信息">
-                    <Textarea
-                      v-model:value="arrangementForm.remark"
-                      :auto-size="{ minRows: 2, maxRows: 4 }"
-                      placeholder="备注信息"
-                    />
-                  </Form.Item>
-                </div>
-              </template>
-
-              <template v-else-if="activeEditorType === 'meal'">
-                <div class="meal-old-system-layout">
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:utensils" />
-                      <span>餐厅名称</span>
-                    </div>
-                    <div class="traffic-form-row two-columns">
-                      <Form.Item label="餐厅名称">
-                        <Select
-                          v-model:value="arrangementForm.resourceName"
-                          allow-clear
-                          show-search
-                          :options="resourceOptions"
-                          @change="applySelectedResource"
-                        />
-                      </Form.Item>
-                      <Form.Item label="添加">
-                        <Button @click="openSupplierCreatePage">添加供应商</Button>
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:calendar-days" />
-                      <span>用餐日期</span>
-                    </div>
-                    <div class="traffic-form-row two-columns">
-                      <Form.Item label="用餐日期" required>
-                        <Select v-model:value="arrangementForm.scheduleStartDay" :options="scheduleDayOptions" />
-                      </Form.Item>
-                      <Form.Item label="时间">
-                        <Select v-model:value="arrangementForm.mealType" :options="mealTypeOptions" />
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:users" />
-                      <span>供应商</span>
-                    </div>
-                    <div class="traffic-form-row two-columns">
-                      <Form.Item label="供应商" required>
-                        <Select
-                          v-model:value="arrangementForm.supplierName"
-                          allow-clear
-                          show-search
-                          :options="supplierOptions"
-                          @change="applySelectedSupplier"
-                        />
-                      </Form.Item>
-                      <Form.Item label="添加">
-                        <Button @click="openSupplierCreatePage">添加供应商</Button>
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:receipt-text" />
-                      <span>价格信息</span>
-                    </div>
-                    <div class="traffic-price-list">
-                      <div
-                        v-for="(line, index) in arrangementForm.priceLines"
-                        :key="index"
-                        class="traffic-price-line"
-                      >
-                        <Select
-                          v-model:value="line.projectName"
-                          show-search
-                          :options="priceProjectOptionsForType(activeEditorType)"
-                          @change="(value) => applySelectedPriceProject(index, value)"
-                        />
-                        <InputNumber
-                          v-model:value="line.unitPrice"
-                          addon-before="¥"
-                          :min="0"
-                          :precision="2"
-                          @change="syncPrimaryPriceFields"
-                        />
-                        <div class="traffic-inline-number">
-                          <span>*数量:</span>
-                          <InputNumber
-                            v-model:value="line.quantity"
-                            :min="0"
-                            :precision="0"
-                            @change="syncPrimaryPriceFields"
-                          />
-                        </div>
-                        <div class="traffic-price-remark">
-                          <span>备注:</span>
-                          <Textarea
-                            v-model:value="line.remark"
-                            :auto-size="{ minRows: 1, maxRows: 2 }"
-                            placeholder="价格备注"
-                            @change="syncPrimaryPriceFields"
-                          />
-                        </div>
-                        <button
-                          class="traffic-remove-line-button"
-                          :class="{ disabled: arrangementForm.priceLines.length <= 1 }"
-                          :disabled="arrangementForm.priceLines.length <= 1"
-                          title="删除价格信息"
-                          type="button"
-                          @click="removeArrangementPriceLine(index)"
-                        >
-                          <IconifyIcon icon="lucide:minus" />
-                        </button>
-                        <button
-                          v-if="index === arrangementForm.priceLines.length - 1"
-                          class="traffic-add-line-button"
-                          :class="{ disabled: showMultiOrderAveragePriceNotice }"
-                          :disabled="showMultiOrderAveragePriceNotice"
-                          :title="showMultiOrderAveragePriceNotice ? '多订单均摊成本时只能保留一条价格信息' : '添加价格信息'"
-                          type="button"
-                          @click="addArrangementPriceLine"
-                        >
-                          <IconifyIcon icon="lucide:plus" />
-                        </button>
-                      </div>
-                    </div>
-                    <div v-if="showMultiOrderAveragePriceNotice" class="traffic-price-lock-tip">
-                      多订单均摊成本时，价格信息组成只能统一写成一条记录，点击 ⊕ 失效
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:wallet-cards" />
-                      <span>结算方式</span>
-                    </div>
-                    <div class="traffic-settlement-grid">
-                      <Form.Item label="合计">
-                        <InputNumber :value="editorTotalAmount" disabled addon-before="¥" :precision="2" />
-                      </Form.Item>
-                      <Form.Item label="现结">
-                        <InputNumber
-                          v-model:value="arrangementForm.cashAmount"
-                          addon-before="¥"
-                          :min="0"
-                          :max="editorTotalAmount"
-                          :precision="2"
-                        />
-                      </Form.Item>
-                      <Form.Item label="挂账">
-                        <InputNumber :value="editorCreditAmount" disabled addon-before="¥" :precision="2" />
-                      </Form.Item>
-                      <Form.Item label="预付款">
-                        <InputNumber
-                          v-model:value="arrangementForm.prepaidAmount"
-                          addon-before="¥"
-                          :min="0"
-                          :max="editorTotalAmount"
-                          :precision="2"
-                        />
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <Form.Item label="订单信息">
-                    <Select v-model:value="arrangementForm.orderScope" :options="trafficOrderOptions" />
-                    <div class="traffic-field-tip">将此项成本归于关联订单</div>
-                  </Form.Item>
-
-                  <Form.Item label="备注信息">
-                    <Textarea
-                      v-model:value="arrangementForm.remark"
-                      :auto-size="{ minRows: 2, maxRows: 4 }"
-                      placeholder="备注信息"
-                    />
-                  </Form.Item>
-                </div>
-              </template>
-
-              <template v-else-if="activeEditorType === 'other'">
-                <div class="other-old-system-layout">
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:calendar-days" />
-                      <span>使用日期</span>
-                    </div>
-                    <div class="traffic-form-row one-column">
-                      <Form.Item label="使用日期" required>
-                        <Select v-model:value="arrangementForm.scheduleStartDay" :options="scheduleDayOptions" />
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:users" />
-                      <span>供应商</span>
-                    </div>
-                    <div class="traffic-form-row two-columns">
-                      <Form.Item label="供应商" required>
-                        <Select
-                          v-model:value="arrangementForm.supplierName"
-                          allow-clear
-                          show-search
-                          :options="supplierOptions"
-                          @change="applySelectedSupplier"
-                        />
-                      </Form.Item>
-                      <Form.Item label="添加">
-                        <Button @click="openSupplierCreatePage">添加供应商</Button>
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:receipt-text" />
-                      <span>价格信息</span>
-                    </div>
-                    <div class="traffic-price-list">
-                      <div
-                        v-for="(line, index) in arrangementForm.priceLines"
-                        :key="index"
-                        class="traffic-price-line"
-                      >
-                        <Select
-                          v-model:value="line.projectName"
-                          show-search
-                          :options="priceProjectOptionsForType(activeEditorType)"
-                          @change="(value) => applySelectedPriceProject(index, value)"
-                        />
-                        <InputNumber
-                          v-model:value="line.unitPrice"
-                          addon-before="¥"
-                          :min="0"
-                          :precision="2"
-                          @change="syncPrimaryPriceFields"
-                        />
-                        <div class="traffic-inline-number">
-                          <span>*数量:</span>
-                          <InputNumber
-                            v-model:value="line.quantity"
-                            :min="0"
-                            :precision="0"
-                            @change="syncPrimaryPriceFields"
-                          />
-                        </div>
-                        <div class="traffic-price-remark">
-                          <span>备注:</span>
-                          <Textarea
-                            v-model:value="line.remark"
-                            :auto-size="{ minRows: 1, maxRows: 2 }"
-                            placeholder="价格备注"
-                            @change="syncPrimaryPriceFields"
-                          />
-                        </div>
-                        <button
-                          class="traffic-remove-line-button"
-                          :class="{ disabled: arrangementForm.priceLines.length <= 1 }"
-                          :disabled="arrangementForm.priceLines.length <= 1"
-                          title="删除价格信息"
-                          type="button"
-                          @click="removeArrangementPriceLine(index)"
-                        >
-                          <IconifyIcon icon="lucide:minus" />
-                        </button>
-                        <button
-                          v-if="index === arrangementForm.priceLines.length - 1"
-                          class="traffic-add-line-button"
-                          :class="{ disabled: showMultiOrderAveragePriceNotice }"
-                          :disabled="showMultiOrderAveragePriceNotice"
-                          :title="showMultiOrderAveragePriceNotice ? '多订单均摊成本时只能保留一条价格信息' : '添加价格信息'"
-                          type="button"
-                          @click="addArrangementPriceLine"
-                        >
-                          <IconifyIcon icon="lucide:plus" />
-                        </button>
-                      </div>
-                    </div>
-                    <div v-if="showMultiOrderAveragePriceNotice" class="traffic-price-lock-tip">
-                      多订单均摊成本时，价格信息组成只能统一写成一条记录，点击 ⊕ 失效
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:wallet-cards" />
-                      <span>结算方式</span>
-                    </div>
-                    <div class="traffic-settlement-grid">
-                      <Form.Item label="合计">
-                        <InputNumber :value="editorTotalAmount" disabled addon-before="¥" :precision="2" />
-                      </Form.Item>
-                      <Form.Item label="现结">
-                        <InputNumber
-                          v-model:value="arrangementForm.cashAmount"
-                          addon-before="¥"
-                          :min="0"
-                          :max="editorTotalAmount"
-                          :precision="2"
-                        />
-                      </Form.Item>
-                      <Form.Item label="挂账">
-                        <InputNumber :value="editorCreditAmount" disabled addon-before="¥" :precision="2" />
-                      </Form.Item>
-                      <Form.Item label="预付款">
-                        <InputNumber
-                          v-model:value="arrangementForm.prepaidAmount"
-                          addon-before="¥"
-                          :min="0"
-                          :max="editorTotalAmount"
-                          :precision="2"
-                        />
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <Form.Item label="订单信息">
-                    <Select v-model:value="arrangementForm.orderScope" :options="trafficOrderOptions" />
-                    <div class="traffic-field-tip">将此项成本归于关联订单</div>
-                  </Form.Item>
-
-                  <Form.Item label="备注信息">
-                    <Textarea
-                      v-model:value="arrangementForm.remark"
-                      :auto-size="{ minRows: 2, maxRows: 4 }"
-                      placeholder="备注信息"
-                    />
-                  </Form.Item>
-                </div>
-              </template>
-
-              <template v-else-if="activeEditorType === 'optional'">
-                <div class="optional-old-system-layout">
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:landmark" />
-                      <span>景区名称</span>
-                    </div>
-                    <div class="traffic-form-row two-columns">
-                      <Form.Item label="景区名称">
-                        <Select
-                          v-model:value="arrangementForm.resourceName"
-                          allow-clear
-                          show-search
-                          :options="resourceOptions"
-                          @change="applySelectedResource"
-                        />
-                      </Form.Item>
-                      <Form.Item label="游玩日期" required>
-                        <Select v-model:value="arrangementForm.scheduleStartDay" :options="scheduleDayOptions" />
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:users" />
-                      <span>供应商</span>
-                    </div>
-                    <div class="traffic-form-row two-columns">
-                      <Form.Item label="供应商" required>
-                        <Select
-                          v-model:value="arrangementForm.supplierName"
-                          allow-clear
-                          show-search
-                          :options="supplierOptions"
-                          @change="applySelectedSupplier"
-                        />
-                      </Form.Item>
-                      <Form.Item label="添加">
-                        <Button @click="openSupplierCreatePage">添加供应商</Button>
-                      </Form.Item>
-                    </div>
-                    <div class="scenic-template-status">
-                      <div>
-                        <span>游客名单模板：</span>
-                        <Tag v-if="scenicTicketTemplateLoading" color="blue">读取中</Tag>
-                        <Tag v-else-if="scenicTicketTemplate" color="green">已配置</Tag>
-                        <Tag v-else color="orange">未配置</Tag>
-                        <strong v-if="scenicTicketTemplate">{{ scenicTicketTemplate.templateName }}</strong>
-                      </div>
-                      <Button size="small" @click="openScenicTemplateConfigPage">配置模板</Button>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:receipt-text" />
-                      <span>价格信息</span>
-                    </div>
-                    <div class="traffic-form-row three-columns">
-                      <Form.Item label="销售价">
-                        <InputNumber v-model:value="arrangementForm.saleAmount" addon-before="¥" :min="0" :precision="2" />
-                      </Form.Item>
-                      <Form.Item label="成本价">
-                        <InputNumber v-model:value="arrangementForm.costAmount" addon-before="¥" :min="0" :precision="2" />
-                      </Form.Item>
-                      <div class="old-system-combined-field">
-                        <div class="old-system-combined-title">导游提成</div>
-                        <div class="old-system-combined-controls optional-commission-controls">
-                          <InputNumber v-model:value="arrangementForm.guideCommissionAmount" :min="0" :precision="2" />
-                          <span>元/人</span>
-                          <span>或</span>
-                          <InputNumber v-model:value="arrangementForm.guideCommissionRate" :min="0" :precision="2" />
-                          <span>%</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="optional-fee-summary">
-                      <div class="optional-fee-summary-title">费用合计</div>
-                      <div
-                        v-for="(line, index) in arrangementForm.priceLines"
-                        :key="`optional-${index}`"
-                        class="optional-fee-summary-line optional-fee-summary-row"
-                      >
-                        <label>人数：</label>
-                        <InputNumber v-model:value="line.quantity" :min="0" :precision="0" @change="syncOptionalLineToForm" />
-                        <label>收入：</label>
-                        <InputNumber v-model:value="line.salePrice" :min="0" :precision="2" @change="syncOptionalLineToForm" />
-                        <label>成本：</label>
-                        <InputNumber v-model:value="line.costPrice" :min="0" :precision="2" @change="syncOptionalLineToForm" />
-                        <label>现结：</label>
-                        <InputNumber
-                          v-model:value="line.cashAmount"
-                          :min="0"
-                          :precision="2"
-                          @change="syncOptionalLineToForm"
-                        />
-                        <label>挂账：</label>
-                        <InputNumber :value="optionalLineCreditAmount(line)" disabled :precision="2" />
-                        <label>提成：</label>
-                        <InputNumber v-model:value="line.guideCommissionAmount" :min="0" :precision="2" @change="syncOptionalLineToForm" />
-                        <button
-                          class="traffic-remove-line-button"
-                          :class="{ disabled: arrangementForm.priceLines.length <= 1 }"
-                          :disabled="arrangementForm.priceLines.length <= 1"
-                          title="删除费用合计"
-                          type="button"
-                          @click="removeOptionalSummaryLine(index)"
-                        >
-                          <IconifyIcon icon="lucide:minus" />
-                        </button>
-                        <button
-                          v-if="index === arrangementForm.priceLines.length - 1"
-                          class="optional-add-summary-button"
-                          title="添加费用合计"
-                          type="button"
-                          @click="addOptionalSummaryLine"
-                        >
-                          <IconifyIcon icon="lucide:plus" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <Form.Item label="订单信息">
-                    <Select v-model:value="arrangementForm.orderScope" :options="trafficOrderOptions" />
-                    <div class="traffic-field-tip">将此项成本归于关联订单</div>
-                  </Form.Item>
-
-                  <Form.Item label="备注信息">
-                    <Textarea
-                      v-model:value="arrangementForm.remark"
-                      :auto-size="{ minRows: 2, maxRows: 4 }"
-                      placeholder="备注信息"
-                    />
-                  </Form.Item>
-                </div>
-              </template>
-
-              <template v-else-if="activeEditorType === 'shopping'">
-                <div class="shopping-old-system-layout">
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:store" />
-                      <span>购物店</span>
-                    </div>
-                    <div class="shopping-compact-grid shopping-shop-row">
-                      <Form.Item label="购物店">
-                        <Select
-                          v-model:value="arrangementForm.resourceName"
-                          allow-clear
-                          show-search
-                          :options="resourceOptions"
-                          @change="applySelectedResource"
-                        />
-                      </Form.Item>
-                      <Form.Item label="购物日期" required>
-                        <Select v-model:value="arrangementForm.scheduleStartDay" :options="scheduleDayOptions" />
-                      </Form.Item>
-                      <Form.Item label="添加">
-                        <Button @click="openResourceCreatePage">添加购物店</Button>
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:users" />
-                      <span>供应商</span>
-                    </div>
-                    <div class="shopping-compact-grid shopping-supplier-row">
-                      <Form.Item label="供应商" required>
-                        <Select
-                          v-model:value="arrangementForm.supplierName"
-                          allow-clear
-                          show-search
-                          :options="supplierOptions"
-                          @change="applySelectedSupplier"
-                        />
-                      </Form.Item>
-                      <Form.Item label="添加">
-                        <Button @click="openSupplierCreatePage">添加供应商</Button>
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:settings-2" />
-                      <span>费用设置</span>
-                    </div>
-                    <div class="shopping-fee-row">
-                      <Form.Item label="人数">
-                        <InputNumber v-model:value="arrangementForm.peopleCount" :min="0" :precision="0" />
-                      </Form.Item>
-                      <Form.Item label="人头费">
-                        <InputNumber v-model:value="arrangementForm.headFeeAmount" addon-before="¥" :min="0" :precision="2" />
-                      </Form.Item>
-                      <Form.Item label="公司返佣">
-                        <InputNumber v-model:value="arrangementForm.companyRebateAmount" addon-before="¥" :min="0" :precision="2" />
-                      </Form.Item>
-                      <Form.Item label="导游提成">
-                        <InputNumber v-model:value="arrangementForm.guideCommissionAmount" addon-before="¥" :min="0" :precision="2" />
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:receipt-text" />
-                      <span>消费详情</span>
-                    </div>
-                    <div
-                      v-for="(line, index) in arrangementForm.priceLines"
-                      :key="`shopping-${index}`"
-                      class="shopping-consumption-line"
-                    >
-                      <div class="shopping-consumption-main-row">
-                        <Form.Item label="品类">
-                          <Select
-                            v-model:value="line.projectName"
-                            show-search
-                            :options="shoppingCategoryOptions"
-                            @change="(value) => applyShoppingPriceProject(index, value)"
-                          />
-                        </Form.Item>
-                        <Form.Item label="消费金额">
-                          <InputNumber v-model:value="line.consumptionAmount" addon-before="¥" :min="0" :precision="2" @change="syncShoppingLineToForm" />
-                        </Form.Item>
-                        <div class="shopping-formula-field">
-                          <div class="shopping-formula-label">公司返佣</div>
-                          <div class="shopping-formula-controls">
-                            <InputNumber v-model:value="line.companyRebateRate" :min="0" :precision="2" @change="syncShoppingLineToForm" />
-                            <span>% =</span>
-                            <InputNumber v-model:value="line.companyRebateAmount" addon-before="¥" :min="0" :precision="2" @change="syncShoppingLineToForm" />
-                          </div>
-                        </div>
-                        <div class="shopping-formula-field">
-                          <div class="shopping-formula-label">导游提成</div>
-                          <div class="shopping-formula-controls">
-                            <InputNumber v-model:value="line.guideCommissionRate" :min="0" :precision="2" @change="syncShoppingLineToForm" />
-                            <span>%销售额 =</span>
-                            <InputNumber v-model:value="line.guideCommissionAmount" addon-before="¥" :min="0" :precision="2" @change="syncShoppingLineToForm" />
-                          </div>
-                        </div>
-                      </div>
-                      <div class="shopping-consumption-extra-row">
-                        <Form.Item label="现结">
-                          <InputNumber
-                            v-model:value="line.cashAmount"
-                            addon-before="¥"
-                            :min="0"
-                            :precision="2"
-                            @change="syncShoppingLineToForm"
-                          />
-                        </Form.Item>
-                        <Form.Item label="备注">
-                          <Input v-model:value="line.remark" placeholder="消费备注" @change="syncShoppingLineToForm" />
-                        </Form.Item>
-                        <button
-                          class="traffic-remove-line-button"
-                          :class="{ disabled: arrangementForm.priceLines.length <= 1 }"
-                          :disabled="arrangementForm.priceLines.length <= 1"
-                          title="删除消费详情"
-                          type="button"
-                          @click="removeShoppingConsumptionLine(index)"
-                        >
-                          <IconifyIcon icon="lucide:minus" />
-                        </button>
-                        <button
-                          v-if="index === arrangementForm.priceLines.length - 1"
-                          class="shopping-add-detail-button"
-                          title="添加消费详情"
-                          type="button"
-                          @click="addShoppingConsumptionLine"
-                        >
-                          <IconifyIcon icon="lucide:plus" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <Form.Item label="备注信息">
-                    <Textarea
-                      v-model:value="arrangementForm.remark"
-                      :auto-size="{ minRows: 2, maxRows: 4 }"
-                      placeholder="备注信息"
-                    />
-                  </Form.Item>
-                </div>
-              </template>
-
-              <template v-else-if="activeEditorType === 'ground_agent'">
-                <div class="ground-agent-old-system-layout">
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:calendar-days" />
-                      <span>拼团日期</span>
-                    </div>
-                    <div class="traffic-form-row three-columns">
-                      <Form.Item label="开始" required>
-                        <Select v-model:value="arrangementForm.scheduleStartDay" :options="scheduleDayOptions" @change="syncGroundAgentDaysCount" />
-                      </Form.Item>
-                      <Form.Item label="结束">
-                        <Select v-model:value="arrangementForm.scheduleEndDay" :options="scheduleDayOptions" @change="syncGroundAgentDaysCount" />
-                      </Form.Item>
-                      <Form.Item label="共几天">
-                        <InputNumber v-model:value="arrangementForm.daysCount" disabled :min="0" :precision="0" />
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:users" />
-                      <span>供应商</span>
-                    </div>
-                    <div class="traffic-form-row two-columns">
-                      <Form.Item label="供应商" required>
-                        <Select
-                          v-model:value="arrangementForm.supplierName"
-                          allow-clear
-                          show-search
-                          :options="supplierOptions"
-                          @change="applySelectedSupplier"
-                        />
-                      </Form.Item>
-                      <Form.Item label="添加">
-                        <Button @click="openSupplierCreatePage">添加供应商</Button>
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:receipt-text" />
-                      <span>价格信息</span>
-                    </div>
-                    <div class="traffic-price-list">
-                      <div
-                        v-for="(line, index) in arrangementForm.priceLines"
-                        :key="index"
-                        class="traffic-price-line"
-                      >
-                        <Select
-                          v-model:value="line.projectName"
-                          show-search
-                          :options="priceProjectOptionsForType(activeEditorType)"
-                          @change="(value) => applySelectedPriceProject(index, value)"
-                        />
-                        <InputNumber
-                          v-model:value="line.unitPrice"
-                          addon-before="¥"
-                          :min="0"
-                          :precision="2"
-                          @change="syncPrimaryPriceFields"
-                        />
-                        <div class="traffic-inline-number">
-                          <span>*数量:</span>
-                          <InputNumber
-                            v-model:value="line.quantity"
-                            :min="0"
-                            :precision="0"
-                            @change="syncPrimaryPriceFields"
-                          />
-                        </div>
-                        <div class="traffic-price-remark">
-                          <span>备注:</span>
-                          <Textarea
-                            v-model:value="line.remark"
-                            :auto-size="{ minRows: 1, maxRows: 2 }"
-                            placeholder="价格备注"
-                            @change="syncPrimaryPriceFields"
-                          />
-                        </div>
-                        <button
-                          class="traffic-remove-line-button"
-                          :class="{ disabled: arrangementForm.priceLines.length <= 1 }"
-                          :disabled="arrangementForm.priceLines.length <= 1"
-                          title="删除价格信息"
-                          type="button"
-                          @click="removeArrangementPriceLine(index)"
-                        >
-                          <IconifyIcon icon="lucide:minus" />
-                        </button>
-                        <button
-                          v-if="index === arrangementForm.priceLines.length - 1"
-                          class="traffic-add-line-button"
-                          :class="{ disabled: showMultiOrderAveragePriceNotice }"
-                          :disabled="showMultiOrderAveragePriceNotice"
-                          :title="showMultiOrderAveragePriceNotice ? '多订单均摊成本时只能保留一条价格信息' : '添加价格信息'"
-                          type="button"
-                          @click="addArrangementPriceLine"
-                        >
-                          <IconifyIcon icon="lucide:plus" />
-                        </button>
-                      </div>
-                    </div>
-                    <div v-if="showMultiOrderAveragePriceNotice" class="traffic-price-lock-tip">
-                      多订单均摊成本时，价格信息组成只能统一写成一条记录，点击 ⊕ 失效
-                    </div>
-                  </div>
-
-                  <div class="traffic-field-group">
-                    <div class="traffic-group-title">
-                      <IconifyIcon icon="lucide:wallet-cards" />
-                      <span>结算方式</span>
-                    </div>
-                    <div class="traffic-settlement-grid">
-                      <Form.Item label="合计">
-                        <InputNumber :value="editorTotalAmount" disabled addon-before="¥" :precision="2" />
-                      </Form.Item>
-                      <Form.Item label="现结">
-                        <InputNumber
-                          v-model:value="arrangementForm.cashAmount"
-                          addon-before="¥"
-                          :min="0"
-                          :max="editorTotalAmount"
-                          :precision="2"
-                        />
-                      </Form.Item>
-                      <Form.Item label="挂账">
-                        <InputNumber :value="editorCreditAmount" disabled addon-before="¥" :precision="2" />
-                      </Form.Item>
-                      <Form.Item label="预付款">
-                        <InputNumber
-                          v-model:value="arrangementForm.prepaidAmount"
-                          addon-before="¥"
-                          :min="0"
-                          :max="editorTotalAmount"
-                          :precision="2"
-                        />
-                      </Form.Item>
-                    </div>
-                  </div>
-
-                  <Form.Item label="订单信息">
-                    <Select v-model:value="arrangementForm.orderScope" :options="trafficOrderOptions" />
-                    <div class="traffic-field-tip">将此项成本归于关联订单</div>
-                  </Form.Item>
-
-                  <Form.Item label="备注信息">
-                    <Textarea
-                      v-model:value="arrangementForm.remark"
-                      :auto-size="{ minRows: 2, maxRows: 4 }"
-                      placeholder="备注信息"
-                    />
-                  </Form.Item>
-                </div>
-              </template>
-
-              <template v-else>
-              <div v-if="activeEditorConfig.showTrafficType" class="traffic-form-row one-column">
-                <Form.Item label="交通类型" required>
-                  <Select v-model:value="arrangementForm.trafficType" :options="trafficTypeOptions" />
-                </Form.Item>
-              </div>
-
-              <div class="traffic-field-group">
-                <div class="traffic-group-title">
-                  <IconifyIcon icon="lucide:route" />
-                  <span>{{ activeEditorConfig.scheduleGroupLabel }}</span>
-                </div>
-                <div class="traffic-form-row three-columns">
-                  <Form.Item :label="activeEditorConfig.startLabel" required>
-                    <Select v-model:value="arrangementForm.scheduleStartDay" :options="scheduleDayOptions" />
-                  </Form.Item>
-                  <Form.Item v-if="activeEditorConfig.showEndDate" :label="activeEditorConfig.endLabel">
-                    <Select v-model:value="arrangementForm.scheduleEndDay" :options="scheduleDayOptions" />
-                  </Form.Item>
-                  <Form.Item v-if="activeEditorConfig.showArrivalPlace" label="出发地" required>
-                    <Cascader
-                      v-model:value="departureRegionPath"
-                      allow-clear
-                      change-on-select
-                      :options="regionOptions"
-                      placeholder="请选择出发地"
-                      show-search
-                    />
-                  </Form.Item>
-                  <Form.Item v-if="activeEditorConfig.showArrivalPlace" label="抵达地" required>
-                    <Cascader
-                      v-model:value="arrivalRegionPath"
-                      allow-clear
-                      change-on-select
-                      :options="regionOptions"
-                      placeholder="请选择抵达地"
-                      show-search
-                    />
-                  </Form.Item>
-                  <Form.Item v-if="activeEditorConfig.showDaysCount" :label="activeEditorConfig.daysLabel">
-                    <InputNumber v-model:value="arrangementForm.daysCount" :min="0" :precision="0" />
-                  </Form.Item>
-                </div>
-              </div>
-
-              <div v-if="activeEditorConfig.resourceMode === 'select' || activeEditorConfig.showVehicleType || activeEditorConfig.showDriver || activeEditorConfig.showMealTime || activeEditorConfig.showBreakfastFund || activeEditorConfig.showResponsible || activeEditorConfig.showConfirmed" class="traffic-field-group">
-                <div class="traffic-group-title">
-                  <IconifyIcon icon="lucide:database" />
-                  <span>{{ activeEditorConfig.resourceLabel || activeSection?.label || '安排信息' }}</span>
-                </div>
-                <div class="traffic-form-row three-columns">
-                  <Form.Item v-if="activeEditorConfig.resourceMode === 'select'" :label="activeEditorConfig.resourceLabel">
-                    <Select
-                      v-model:value="arrangementForm.resourceName"
-                      allow-clear
-                      show-search
-                      :options="resourceOptions"
-                      @change="applySelectedResource"
-                    />
-                  </Form.Item>
-                  <Form.Item v-if="activeEditorConfig.showConfirmed" label="已确认">
-                    <Checkbox v-model:checked="arrangementForm.confirmed">已确认</Checkbox>
-                  </Form.Item>
-                  <Form.Item v-if="activeEditorConfig.showConfirmed" label="确认号">
-                    <Input v-model:value="arrangementForm.confirmationNo" placeholder="确认号" />
-                  </Form.Item>
-                  <Form.Item v-if="activeEditorConfig.showVehicleType" label="座位数">
-                    <Select
-                      v-model:value="arrangementForm.vehicleType"
-                      allow-clear
-                      show-search
-                      :options="vehicleQuoteRuleOptions"
-                      placeholder="请选择座位数规则"
-                    />
-                  </Form.Item>
-                  <Form.Item v-if="activeEditorConfig.showDriver" label="司机">
-                    <Input v-model:value="arrangementForm.driverName" placeholder="司机姓名/电话" />
-                  </Form.Item>
-                  <Form.Item v-if="activeEditorConfig.showDriver" label="车牌">
-                    <Input v-model:value="arrangementForm.vehiclePlate" placeholder="车牌号" />
-                  </Form.Item>
-                  <Form.Item v-if="activeEditorConfig.showMealTime" label="时间">
-                    <Select v-model:value="arrangementForm.mealType" :options="mealTypeOptions" />
-                  </Form.Item>
-                  <template v-if="activeEditorConfig.showBreakfastFund">
-                    <div class="old-system-combined-field">
-                      <div class="old-system-combined-title">早餐基金</div>
-                      <div class="old-system-combined-controls">
-                        <span>早餐：</span>
-                        <Select v-model:value="arrangementForm.mealType" :options="breakfastOptions" />
-                        <span>基金：</span>
-                        <Select v-model:value="arrangementForm.fundIncluded" :options="fundOptions" />
-                      </div>
-                    </div>
-                  </template>
-                  <Form.Item v-if="activeEditorConfig.showResponsible" :label="activeEditorConfig.responsibleLabel">
-                    <Select
-                      v-model:value="arrangementForm.responsibleEmployeeName"
-                      allow-clear
-                      show-search
-                      :options="employeeOptions"
-                      @change="applySelectedResponsible"
-                    />
-                  </Form.Item>
-                </div>
-              </div>
-
-              <div class="traffic-field-group">
-                <div class="traffic-group-title">
-                  <IconifyIcon icon="lucide:users" />
-                  <span>供应商</span>
-                </div>
-                <div class="traffic-form-row two-columns">
-                  <Form.Item label="供应商" required>
-                    <Select
-                      v-model:value="arrangementForm.supplierName"
-                      allow-clear
-                      show-search
-                      :options="supplierOptions"
-                      @change="applySelectedSupplier"
-                    />
-                  </Form.Item>
-                  <Form.Item label="添加">
-                    <Button @click="openSupplierCreatePage">添加供应商</Button>
-                  </Form.Item>
-                </div>
-                <div
-                  v-if="activeEditorType === 'scenic'"
-                  class="scenic-template-status"
-                >
-                  <div>
-                    <span>游客名单模板：</span>
-                    <Tag v-if="scenicTicketTemplateLoading" color="blue">读取中</Tag>
-                    <Tag v-else-if="scenicTicketTemplate" color="green">已配置</Tag>
-                    <Tag v-else color="orange">未配置</Tag>
-                    <strong v-if="scenicTicketTemplate">{{ scenicTicketTemplate.templateName }}</strong>
-                  </div>
-                  <Button size="small" @click="openScenicTemplateConfigPage">配置模板</Button>
-                </div>
-              </div>
-
-              <div class="traffic-field-group">
-                <div class="traffic-group-title">
-                  <IconifyIcon icon="lucide:receipt-text" />
-                  <span>价格信息</span>
-                </div>
-                <div class="traffic-price-list">
-                  <div
-                    v-for="(line, index) in arrangementForm.priceLines"
-                    :key="index"
-                    class="traffic-price-line"
-                  >
-                    <Select
-                      v-model:value="line.projectName"
-                      show-search
-                      :options="projectOptions"
-                      @change="(value) => applySelectedPriceProject(index, value)"
-                    />
-                    <InputNumber
-                      v-model:value="line.unitPrice"
-                      addon-before="¥"
-                      :min="0"
-                      :precision="2"
-                      @change="syncPrimaryPriceFields"
-                    />
-                    <div class="traffic-inline-number">
-                      <span>*数量:</span>
-                      <InputNumber
-                        v-model:value="line.quantity"
-                        :min="0"
-                        :precision="0"
-                        @change="syncPrimaryPriceFields"
-                      />
-                    </div>
-                    <div class="traffic-price-remark">
-                      <span>备注:</span>
-                      <Textarea
-                        v-model:value="line.remark"
-                        :auto-size="{ minRows: 1, maxRows: 2 }"
-                        placeholder="价格备注"
-                        @change="syncPrimaryPriceFields"
-                      />
-                    </div>
-                    <button
-                      class="traffic-remove-line-button"
-                      :class="{ disabled: arrangementForm.priceLines.length <= 1 }"
-                      :disabled="arrangementForm.priceLines.length <= 1"
-                      title="删除价格信息"
-                      type="button"
-                      @click="removeArrangementPriceLine(index)"
-                    >
-                      <IconifyIcon icon="lucide:minus" />
-                    </button>
-                    <button
-                      v-if="index === arrangementForm.priceLines.length - 1"
-                      class="traffic-add-line-button"
-                      :class="{ disabled: showMultiOrderAveragePriceNotice }"
-                      :disabled="showMultiOrderAveragePriceNotice"
-                      :title="showMultiOrderAveragePriceNotice ? '多订单均摊成本时只能保留一条价格信息' : '添加价格信息'"
-                      type="button"
-                      @click="addArrangementPriceLine"
-                    >
-                      <IconifyIcon icon="lucide:plus" />
-                    </button>
-                  </div>
-                </div>
-                <div v-if="showMultiOrderAveragePriceNotice" class="traffic-price-lock-tip">
-                  多订单均摊成本时，价格信息组成只能统一写成一条记录，点击 ⊕ 失效
-                </div>
-                <div v-if="activeEditorConfig.showPeople || activeEditorConfig.showOptionalAmounts || activeEditorConfig.showShoppingAmounts" class="traffic-form-row three-columns extra-amount-row">
-                  <Form.Item v-if="activeEditorConfig.showPeople" :label="activeEditorConfig.peopleLabel">
-                    <InputNumber v-model:value="arrangementForm.peopleCount" :min="0" :precision="0" />
-                  </Form.Item>
-                  <Form.Item v-if="activeEditorConfig.showOptionalAmounts" label="销售价">
-                    <InputNumber v-model:value="arrangementForm.saleAmount" addon-before="¥" :min="0" :precision="2" />
-                  </Form.Item>
-                  <Form.Item v-if="activeEditorConfig.showOptionalAmounts" label="成本价">
-                    <InputNumber v-model:value="arrangementForm.costAmount" addon-before="¥" :min="0" :precision="2" />
-                  </Form.Item>
-                  <Form.Item v-if="activeEditorConfig.showShoppingAmounts" label="人头费">
-                    <InputNumber v-model:value="arrangementForm.headFeeAmount" addon-before="¥" :min="0" :precision="2" />
-                  </Form.Item>
-                  <Form.Item v-if="activeEditorConfig.showShoppingAmounts" label="消费总额">
-                    <InputNumber v-model:value="arrangementForm.consumptionAmount" addon-before="¥" :min="0" :precision="2" />
-                  </Form.Item>
-                  <Form.Item v-if="activeEditorConfig.showOptionalAmounts || activeEditorConfig.showShoppingAmounts" label="导游提成">
-                    <InputNumber v-model:value="arrangementForm.guideCommissionAmount" addon-before="¥" :min="0" :precision="2" />
-                  </Form.Item>
-                </div>
-              </div>
-
-              <div v-if="activeEditorConfig.settlement" class="traffic-field-group">
-                <div class="traffic-group-title">
-                  <IconifyIcon icon="lucide:wallet-cards" />
-                  <span>结算方式</span>
-                </div>
-                <div class="traffic-settlement-grid">
-                  <Form.Item label="合计">
-                    <InputNumber :value="editorTotalAmount" disabled addon-before="¥" :precision="2" />
-                  </Form.Item>
-                  <Form.Item label="现结">
-                    <InputNumber
-                      v-model:value="arrangementForm.cashAmount"
-                      addon-before="¥"
-                      :min="0"
-                      :max="editorTotalAmount"
-                      :precision="2"
-                    />
-                  </Form.Item>
-                  <Form.Item label="挂账">
-                    <InputNumber :value="editorCreditAmount" disabled addon-before="¥" :precision="2" />
-                  </Form.Item>
-                  <Form.Item label="预付款">
-                    <InputNumber
-                      v-model:value="arrangementForm.prepaidAmount"
-                      addon-before="¥"
-                      :min="0"
-                      :max="editorTotalAmount"
-                      :precision="2"
-                    />
-                  </Form.Item>
-                </div>
-              </div>
-
-              <Form.Item v-if="activeEditorConfig.showOrderInfo" label="订单信息">
-                <Select v-model:value="arrangementForm.orderScope" :options="trafficOrderOptions" />
-                <div class="traffic-field-tip">产品模板阶段默认不关联正式订单</div>
-              </Form.Item>
-
-              <Form.Item label="备注信息">
-                <Textarea
-                  v-model:value="arrangementForm.remark"
-                  :auto-size="{ minRows: 2, maxRows: 4 }"
-                  placeholder="备注信息"
-                />
-              </Form.Item>
-              </template>
-            </Form>
-
-            <div class="traffic-modal-footer">
-              <Button @click="closeArrangementEditor">取消</Button>
-              <Checkbox v-if="activeEditorConfig.noGuideReport" v-model:checked="arrangementForm.noGuideReport" class="traffic-sync-checkbox">
-                无需导游报账，同步更新导游报账和计调审核数据
-              </Checkbox>
-              <Button type="primary" :loading="saving" @click="saveArrangementEditor">
-                {{ activeEditorType === 'optional' ? '提交保存' : (editingArrangementIndex >= 0 ? '保存修改' : '新增安排') }}
-              </Button>
-            </div>
-          </div>
-        </Spin>
-      </Modal>
+        v-model:arrival-region-path="arrivalRegionPath"
+        v-model:departure-region-path="departureRegionPath"
+        :active-editor-type="activeEditorType"
+        :driver-history-options="driverHistoryOptions"
+        :editor-credit-amount="editorCreditAmount"
+        editorMode="product"
+        :editor-total-amount="activeEditorTotalAmount"
+        :editing-arrangement-index="editingArrangementIndex"
+        :employee-options="employeeOptions"
+        :form="arrangementForm"
+        :last-vehicle-quote-result="lastVehicleQuoteResult"
+        :options-loading="optionsLoading"
+        :project-options="projectOptions"
+        :region-options="regionOptions"
+        :resource-options="resourceOptions"
+        :saving="saving"
+        :schedule-day-options="scheduleDayOptions"
+        :scenic-ticket-template="scenicTicketTemplate"
+        :scenic-ticket-template-loading="scenicTicketTemplateLoading"
+        :show-multi-order-average-price-notice="showMultiOrderAveragePriceNotice"
+        :supplier-options="supplierOptions"
+        :vehicle-plate-history-options="vehiclePlateHistoryOptions"
+        :vehicle-quote-calculating="vehicleQuoteCalculating"
+        :vehicle-quote-rule-options="vehicleQuoteRuleOptions"
+        @add-arrangement-price-line="addArrangementPriceLine"
+        @add-optional-summary-line="addOptionalSummaryLine"
+        @add-shopping-consumption-line="addShoppingConsumptionLine"
+        @apply-selected-price-project="applySelectedPriceProject"
+        @apply-selected-resource="applySelectedResource"
+        @apply-selected-responsible="applySelectedResponsible"
+        @apply-selected-supplier="applySelectedSupplier"
+        @apply-shopping-price-project="applyShoppingPriceProject"
+        @apply-vehicle-quote-to-price-info="applyVehicleQuoteToPriceInfo"
+        @calculate-vehicle-reference-price="calculateVehicleReferencePrice"
+        @close="closeArrangementEditor"
+        @open-hotel-create-page="openHotelCreatePage"
+        @open-product-roadbook-editor="openProductRoadbookEditor"
+        @open-resource-create-page="openResourceCreatePage"
+        @open-scenic-template-config-page="openScenicTemplateConfigPage"
+        @open-supplier-create-page="openSupplierCreatePage"
+        @remove-arrangement-price-line="removeArrangementPriceLine"
+        @remove-optional-summary-line="removeOptionalSummaryLine"
+        @remove-shopping-consumption-line="removeShoppingConsumptionLine"
+        @save="saveArrangementEditor"
+        @sync-ground-agent-days-count="syncGroundAgentDaysCount"
+        @sync-hotel-nights-count="syncHotelNightsCount"
+        @sync-optional-line-to-form="syncOptionalLineToForm"
+        @sync-primary-price-fields="syncPrimaryPriceFields"
+        @sync-shopping-line-to-form="syncShoppingLineToForm"
+        @sync-vehicle-days-count="syncVehicleDaysCount"
+        @sync-vehicle-price-project="syncVehiclePriceProject"
+        @sync-vehicle-roadbook-distance="syncVehicleRoadbookDistance"
+        @vehicle-history-search="loadVehicleHistoryOptions"
+      />
     </Spin>
   </Page>
 </template>
 
 <style scoped>
-.team-arrangement-card {
-  margin-bottom: 56px;
-  overflow: hidden;
-  color: #0f172a;
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 8px 22px rgb(15 23 42 / 5%);
-}
-
-.team-arrangement-card :deep(.ant-card-body) {
-  padding: 16px;
-  background: #fff;
-}
-
-.team-arrangement-card :deep(.ant-btn-default) {
-  color: #334155;
-  background: #fff;
-  border-color: #dbe4f0;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
-}
-
-.team-arrangement-card :deep(.ant-btn-default:hover) {
-  color: #1677ff;
-  border-color: #91caff;
-}
-
-.form-kicker {
-  margin-bottom: 6px;
-  font-size: 12px;
-  font-weight: 700;
-  color: #1677ff;
-  letter-spacing: 0;
-}
-
-.arrangement-command-bar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 520px;
-  gap: 14px;
-  align-items: stretch;
-  padding: 14px 16px;
-  margin-bottom: 10px;
-  background: linear-gradient(180deg, #f8fbff 0%, #fff 100%);
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-}
-
-.command-main,
-.command-side {
-  min-width: 0;
-}
-
-.command-side {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  justify-content: space-between;
-}
-
-.team-title-line {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.team-name {
-  flex: 0 0 auto;
-  max-width: 360px;
-  overflow: hidden;
-  font-size: 22px;
-  font-weight: 800;
-  line-height: 1.2;
-  color: #0f172a;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.team-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  min-width: 0;
-}
-
-.team-badges :deep(.ant-tag) {
-  margin-inline-end: 0;
-  font-weight: 600;
-  border-radius: 4px;
-}
-
-.team-badges :deep(.ant-tag.editable) {
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.team-badges :deep(.ant-tag.editable:hover) {
-  color: #0958d9;
-  border-color: #91caff;
-}
-
-.team-metric-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0;
-  overflow: hidden;
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 4px;
-}
-
-.team-metric-item {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  min-height: 30px;
-  padding: 4px 9px;
-  border-right: 1px solid #e2e8f0;
-}
-
-.team-metric-item:last-child {
-  border-right: 0;
-}
-
-.team-metric-item em,
-.team-metric-item strong {
-  overflow: hidden;
-  font-style: normal;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.team-metric-item em {
-  font-size: 11.5px;
-  font-weight: 700;
-  color: #64748b;
-}
-
-.team-metric-item strong {
-  font-size: 12.5px;
-  font-weight: 800;
-  color: #0f172a;
-}
-
-.team-profile-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: flex-end;
-}
-
-.compact-action {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  justify-content: center;
-  min-width: 92px;
-  height: 34px;
-  padding: 0 10px;
-  color: #1554ad;
-  cursor: pointer;
-  background: #eef6ff;
-  border: 1px solid #b7d7ff;
-  border-radius: 5px;
-  transition:
-    color 0.18s ease,
-    background-color 0.18s ease,
-    border-color 0.18s ease;
-}
-
-.compact-action:hover,
-.compact-action:focus {
-  color: #0958d9;
-  background: #e6f4ff;
-  border-color: #69b1ff;
-}
-
-.compact-action svg {
-  width: 16px;
-  height: 16px;
-}
-
-.compact-action span {
-  font-size: 12.5px;
-  font-weight: 800;
-}
-
-.team-note-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 42px;
-  padding: 6px 12px;
-  margin-bottom: 10px;
-  background: #fbfdff;
-  border: 1px solid #e2e8f0;
-  border-left: 3px solid #91caff;
-  border-radius: 6px;
-}
-
-.internal-note-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 0;
-}
-
-.internal-note-title > div,
-.internal-note-title :deep(.ant-btn) {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.internal-note-title > div {
-  font-size: 12.5px;
-  font-weight: 800;
-  color: #334155;
-}
-
-.internal-note-title svg {
-  width: 15px;
-  height: 15px;
-}
-
-.internal-note-metrics {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.internal-note-metrics span {
-  padding: 3px 8px;
-  font-size: 11.5px;
-  font-weight: 700;
-  color: #475569;
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 999px;
-}
-
 .quick-profile-form :deep(.ant-form-item) {
   margin-bottom: 0;
 }
@@ -4307,345 +2284,6 @@ onMounted(loadDetail);
 .quick-profile-form :deep(.ant-input) {
   border-color: #dbe4f0;
   border-radius: 5px;
-}
-
-.workflow-rail {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
-  align-items: center;
-}
-
-.stage-flow-item {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  justify-content: center;
-  min-height: 32px;
-  padding: 5px 8px;
-  color: #64748b;
-  background: #fff;
-  border: 1px solid #dbe4f0;
-  border-radius: 5px;
-}
-
-.stage-flow-item.done {
-  color: #0958d9;
-  background: #e6f4ff;
-  border-color: #91caff;
-}
-
-.stage-flow-item.template {
-  color: #fff;
-  background: #1677ff;
-  border-color: #1677ff;
-  box-shadow: 0 4px 10px rgb(22 119 255 / 18%);
-}
-
-.stage-flow-item.pending {
-  color: #475569;
-  background: linear-gradient(180deg, #fff 0%, #f1f5f9 100%);
-  border-color: #d7dee8;
-}
-
-.stage-index {
-  display: flex;
-  flex: 0 0 18px;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  font-size: 11px;
-  font-weight: 800;
-  color: currentcolor;
-  background: rgb(255 255 255 / 78%);
-  border: 1px solid currentcolor;
-  border-radius: 50%;
-}
-
-.stage-flow-item.done .stage-index {
-  color: #fff;
-  background: rgb(255 255 255 / 18%);
-  border-color: rgb(255 255 255 / 70%);
-}
-
-.stage-flow-item.template .stage-index {
-  color: #fff;
-  background: rgb(255 255 255 / 18%);
-  border-color: rgb(255 255 255 / 70%);
-}
-
-.stage-label {
-  font-size: 12.5px;
-  font-weight: 800;
-  color: currentcolor;
-}
-
-.arrangement-overview-table {
-  margin-bottom: 10px;
-  overflow-x: auto;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
-}
-
-.arrangement-overview-table table {
-  width: 100%;
-  min-width: 1320px;
-  border-collapse: collapse;
-  background: #fff;
-}
-
-.arrangement-overview-table th,
-.arrangement-overview-table td {
-  height: 34px;
-  padding: 0 6px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #334155;
-  text-align: center;
-  border-right: 1px solid #e5e7eb;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.arrangement-overview-table th {
-  color: #52657a;
-  background: #f6f8fb;
-}
-
-.arrangement-overview-table td {
-  color: #0f172a;
-}
-
-.arrangement-overview-tabs {
-  display: flex;
-  gap: 2px;
-  align-items: flex-end;
-  padding-left: 1px;
-  margin-bottom: 0;
-  overflow-x: auto;
-  background: #fff;
-  border-bottom: 1px solid #91caff;
-}
-
-.arrangement-overview-tab {
-  flex: 0 0 auto;
-  min-width: 78px;
-  height: 32px;
-  padding: 0 14px;
-  margin-bottom: -1px;
-  font-size: 13px;
-  font-weight: 800;
-  color: #475569;
-  cursor: pointer;
-  background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
-  border: 1px solid #d9e2ec;
-  border-bottom-color: #91caff;
-  border-radius: 4px 4px 0 0;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 80%);
-}
-
-.arrangement-overview-tab.active {
-  color: #0958d9;
-  background: #fff;
-  border-color: #91caff;
-  border-bottom-color: #fff;
-  box-shadow:
-    inset 0 3px 0 #1677ff,
-    0 -1px 0 rgb(22 119 255 / 8%);
-}
-
-.arrangement-overview-tab:hover {
-  color: #0958d9;
-  background: #eef6ff;
-  border-color: #91caff;
-  border-bottom-color: #91caff;
-}
-
-.arrangement-overview-tab.active:hover {
-  color: #0958d9;
-  background: #fff;
-  border-bottom-color: #fff;
-}
-
-.arrangement-icon-grid {
-  display: grid;
-  grid-template-columns: repeat(10, minmax(82px, 1fr));
-  gap: 4px;
-  padding: 12px 6px 14px;
-  margin-bottom: 14px;
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-top: 0;
-  border-radius: 0 0 6px 6px;
-}
-
-.arrangement-icon-button {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: center;
-  justify-content: center;
-  min-height: 54px;
-  padding: 6px;
-  color: #64748b;
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  transition:
-    color 0.18s ease,
-    background-color 0.18s ease,
-    border-color 0.18s ease;
-}
-
-.arrangement-icon-button:hover {
-  color: #0958d9;
-  background: #eef6ff;
-  border-color: #91caff;
-}
-
-.arrangement-icon-button svg {
-  width: 24px;
-  height: 24px;
-}
-
-.arrangement-icon-button span {
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.arrangement-overview-sections {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.arrangement-section-card {
-  scroll-margin-top: 88px;
-  background: #fff;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.arrangement-section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 38px;
-  margin-bottom: 4px;
-}
-
-.arrangement-section-title {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  min-width: 0;
-  font-size: 18px;
-  font-weight: 900;
-  color: #0f172a;
-}
-
-.arrangement-section-title svg {
-  width: 21px;
-  height: 21px;
-  color: #1677ff;
-}
-
-.arrangement-document-button {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  margin-left: 4px;
-  font-weight: 800;
-  background: #1677ff;
-  border-color: #1677ff;
-}
-
-.arrangement-document-button svg {
-  width: 14px;
-  height: 14px;
-  color: #fff;
-}
-
-.arrangement-section-actions {
-  display: flex;
-  flex-shrink: 0;
-  gap: 6px;
-  align-items: center;
-}
-
-.arrangement-section-actions :deep(.ant-btn) {
-  min-width: 48px;
-  color: #64748b;
-  background: #f8fafc;
-  border-color: #e2e8f0;
-}
-
-.arrangement-add-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  color: #1677ff;
-  cursor: pointer;
-  background: #fff;
-  border: 1px solid #91caff;
-  border-radius: 50%;
-}
-
-.arrangement-add-button svg {
-  width: 18px;
-  height: 18px;
-}
-
-.arrangement-section-table-wrap {
-  overflow-x: auto;
-  border-top: 1px solid #eef2f7;
-}
-
-.arrangement-section-table {
-  width: 100%;
-  min-width: 980px;
-  border-collapse: collapse;
-  table-layout: fixed;
-}
-
-.arrangement-section-table th,
-.arrangement-section-table td {
-  height: 38px;
-  padding: 7px 9px;
-  font-size: 12.5px;
-  color: #334155;
-  text-align: center;
-  border-bottom: 1px solid #eef2f7;
-}
-
-.arrangement-section-table th {
-  font-weight: 800;
-  color: #52657a;
-  background: #f6f8fb;
-}
-
-.arrangement-section-table td {
-  color: #0f172a;
-  background: #fff;
-}
-
-.arrangement-empty-cell {
-  height: 60px;
-  font-weight: 700;
-  color: #64748b !important;
-}
-
-.arrangement-footer-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding-top: 12px;
-  margin-top: 12px;
-  border-top: 1px solid #e2e8f0;
 }
 
 .traffic-modal-body {
@@ -5143,28 +2781,6 @@ onMounted(loadDetail);
 }
 
 @media (max-width: 900px) {
-  .arrangement-command-bar {
-    grid-template-columns: 1fr;
-  }
-
-  .team-title-line {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .team-profile-actions {
-    align-items: stretch;
-    justify-content: flex-start;
-  }
-
-  .arrangement-icon-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .workflow-rail {
-    grid-template-columns: repeat(5, minmax(72px, 1fr));
-  }
-
   .traffic-form-row.two-columns,
   .traffic-form-row.three-columns,
   .traffic-form-row.four-columns,
@@ -5192,29 +2808,6 @@ onMounted(loadDetail);
 
   .traffic-sync-checkbox {
     margin-right: 0;
-  }
-}
-
-@media (max-width: 640px) {
-  .team-arrangement-card :deep(.ant-card-body) {
-    padding: 14px;
-  }
-
-  .workflow-rail {
-    align-items: stretch;
-    overflow-x: auto;
-  }
-
-  .stage-flow-item {
-    flex: 0 0 92px;
-  }
-
-  .team-profile-actions {
-    flex-direction: column;
-  }
-
-  .compact-action {
-    min-height: 40px;
   }
 }
 </style>

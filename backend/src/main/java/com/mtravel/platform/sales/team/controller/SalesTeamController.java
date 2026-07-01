@@ -6,8 +6,11 @@ import com.mtravel.platform.common.PageResult;
 import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferMergeRequest;
 import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferMoveRequest;
 import com.mtravel.platform.sales.ordertransfer.service.SalesOrderTransferService;
+import com.mtravel.platform.sales.team.dto.SalesTeamDirectCreateRequest;
+import com.mtravel.platform.sales.team.dto.SalesTeamDirectEditResponse;
 import com.mtravel.platform.sales.team.dto.SalesTeamListResponse;
 import com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse;
+import com.mtravel.platform.sales.team.dto.SalesTeamResponse;
 import com.mtravel.platform.sales.team.service.SalesTeamScheduleService;
 import com.mtravel.platform.system.log.web.OperationLog;
 import com.mtravel.platform.tenant.TenantProperties;
@@ -101,6 +104,59 @@ public class SalesTeamController extends ControllerSupport {
                 page,
                 pageSize
         ));
+    }
+
+    /**
+     * 团队管理页直接新增散拼、整团或散团。
+     *
+     * <p>该接口对应老系统团队管理顶部三个新增入口。单项业务包含订单和名单链路，
+     * 不走本接口，后续单独接入。</p>
+     *
+     * @param request 团队基础信息和默认价格
+     * @param authentication 当前登录信息
+     * @return 新增后的团队记录
+     */
+    @OperationLog(module = "销售管理", type = "新增")
+    @PostMapping("/create")
+    public ApiResponse<SalesTeamResponse> createTeam(
+            @Valid @RequestBody SalesTeamDirectCreateRequest request,
+            Authentication authentication
+    ) {
+        return ApiResponse.ok(service.directCreate(request, currentTenantId(), currentOperator(authentication)));
+    }
+
+    /**
+     * 查询团队直接编辑页详情。
+     *
+     * <p>对应老系统团队操作页“修改团队”入口，回显基础信息、行程内容和产品说明。</p>
+     *
+     * @param teamId 团队 ID
+     * @return 团队编辑页详情
+     */
+    @OperationLog(module = "销售管理", type = "查询")
+    @GetMapping("/{teamId}/edit")
+    public ApiResponse<SalesTeamDirectEditResponse> editDetail(@PathVariable Long teamId) {
+        return ApiResponse.ok(service.directEditDetail(teamId, currentTenantId()));
+    }
+
+    /**
+     * 保存团队直接编辑页。
+     *
+     * <p>保存时更新原团队和原产品快照，不重新生成团号、不新建产品快照。</p>
+     *
+     * @param teamId 团队 ID
+     * @param request 编辑页提交内容
+     * @param authentication 当前登录信息
+     * @return 修改后的团队记录
+     */
+    @OperationLog(module = "销售管理", type = "修改")
+    @PostMapping("/{teamId}/edit")
+    public ApiResponse<SalesTeamResponse> updateTeam(
+            @PathVariable Long teamId,
+            @Valid @RequestBody SalesTeamDirectCreateRequest request,
+            Authentication authentication
+    ) {
+        return ApiResponse.ok(service.directUpdate(teamId, request, currentTenantId(), currentOperator(authentication)));
     }
 
     /**

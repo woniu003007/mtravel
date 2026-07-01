@@ -1,6 +1,8 @@
 package com.mtravel.platform.sales.team.enums;
 
+import com.mtravel.platform.common.BizException;
 import java.util.Arrays;
+import org.springframework.util.StringUtils;
 
 /**
  * 销售团队类型枚举。
@@ -41,5 +43,20 @@ public enum SalesTeamType {
                 .filter(item -> item.value.equals(value))
                 .findFirst()
                 .orElse(SANPIN);
+    }
+
+    /**
+     * 将接口传入值严格转换为团队类型。
+     *
+     * <p>直接创建团队、修改团队等正式写入场景不能静默兜底，避免把整团、散团误保存为散拼。</p>
+     */
+    public static SalesTeamType fromValue(String value) {
+        if (!StringUtils.hasText(value)) {
+            throw new BizException("团队类型不能为空");
+        }
+        return Arrays.stream(values())
+                .filter(item -> item.value.equals(value))
+                .findFirst()
+                .orElseThrow(() -> new BizException("团队类型不合法"));
     }
 }

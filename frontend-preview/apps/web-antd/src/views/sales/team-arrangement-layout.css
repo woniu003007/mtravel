@@ -1,0 +1,1032 @@
+.team-arrangement-card {
+  margin-bottom: 56px;
+  overflow: hidden;
+  color: #0f172a;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 8px 22px rgb(15 23 42 / 5%);
+}
+
+.team-arrangement-card .ant-card-body {
+  padding: 16px;
+  background: #fff;
+}
+
+.team-arrangement-card .ant-btn-default {
+  color: #334155;
+  background: #fff;
+  border-color: #dbe4f0;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+}
+
+.team-arrangement-card .ant-btn-default:hover {
+  color: #1677ff;
+  border-color: #91caff;
+}
+
+.formal-team-arrangement-card {
+  --formal-blue: #1677ff;
+  --formal-blue-strong: #0958d9;
+  --formal-border: #dbe5f2;
+  --formal-border-soft: #edf2f7;
+  --formal-muted: #64748b;
+}
+
+.formal-team-arrangement-card .ant-card-body {
+  padding: 12px;
+}
+
+.form-kicker {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1677ff;
+  letter-spacing: 0;
+}
+
+.arrangement-command-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 520px;
+  gap: 10px 14px;
+  align-items: start;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  background: linear-gradient(180deg, #f8fbff 0%, #fff 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.command-main,
+.command-side {
+  min-width: 0;
+}
+
+.command-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.team-title-line {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.team-name {
+  flex: 0 0 auto;
+  max-width: 360px;
+  overflow: hidden;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: #0f172a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.team-badges .ant-tag {
+  margin-inline-end: 0;
+  font-weight: 600;
+  border-radius: 4px;
+}
+
+.team-badges .ant-tag.editable {
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.team-badges .ant-tag.editable:hover {
+  color: #0958d9;
+  border-color: #91caff;
+}
+
+.formal-team-badges .ant-tag {
+  min-height: 23px;
+  padding-inline: 8px;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 21px;
+  color: #31516f;
+  background: #f7fbff;
+  border-color: #d6e5f6;
+  border-radius: 4px;
+}
+
+.formal-team-badges .ant-tag-orange {
+  color: #b45309;
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.formal-team-badges .ant-tag-green {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.formal-team-badges .ant-tag-blue {
+  color: #1554ad;
+  background: #f3f8ff;
+  border-color: #c9defb;
+}
+
+.formal-team-badges .ant-tag-default {
+  color: #475569;
+  background: #f8fafc;
+  border-color: #dbe5f2;
+}
+
+.formal-team-arrangement-card .formal-team-title-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+  margin-bottom: 8px;
+}
+
+.formal-team-arrangement-card .formal-team-title-line .team-name {
+  max-width: 100%;
+  overflow: hidden;
+  line-height: 1.24;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.formal-team-title-line .formal-team-badges {
+  row-gap: 5px;
+  max-width: 100%;
+}
+
+.team-metric-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+}
+
+.team-metric-item {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  min-height: 30px;
+  padding: 4px 9px;
+  border-right: 1px solid #e2e8f0;
+}
+
+.team-metric-item:last-child {
+  border-right: 0;
+}
+
+.team-metric-item em,
+.team-metric-item strong {
+  overflow: hidden;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-metric-item em {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.team-metric-item strong {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.formal-team-arrangement-card .formal-team-metric-strip {
+  display: flex;
+  flex-wrap: nowrap;
+  grid-column: 1 / -1;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.formal-team-arrangement-card .formal-team-metric-strip .team-metric-item {
+  flex: 0 0 max-content;
+  min-width: max-content;
+  padding-inline: 7px;
+}
+
+.formal-team-arrangement-card .formal-team-metric-strip .metric-travelDays {
+  flex-basis: auto;
+}
+
+.formal-team-arrangement-card .formal-team-metric-strip .metric-standard {
+  flex-basis: auto;
+}
+
+.formal-team-arrangement-card .formal-team-metric-strip .metric-distance {
+  flex-basis: auto;
+}
+
+.formal-team-arrangement-card .formal-team-metric-strip .metric-receivable {
+  flex-basis: auto;
+}
+
+.formal-team-arrangement-card .formal-team-metric-strip .metric-orderStatus {
+  flex-basis: auto;
+}
+
+.formal-team-arrangement-card .formal-team-metric-strip .metric-paid {
+  flex-basis: auto;
+}
+
+.formal-team-arrangement-card .formal-team-metric-strip .metric-profit {
+  flex-basis: auto;
+}
+
+.formal-team-arrangement-card .formal-team-metric-strip .metric-profit.clickable {
+  cursor: pointer;
+}
+
+.formal-team-arrangement-card .formal-team-metric-strip .metric-profit.clickable:hover {
+  background: #eef6ff;
+}
+
+.formal-team-arrangement-card .formal-team-metric-strip .metric-profit.clickable:hover strong {
+  color: #0958d9;
+}
+
+.formal-team-arrangement-card .formal-team-metric-strip .team-metric-item em {
+  flex: 0 0 auto;
+}
+
+.formal-team-arrangement-card .formal-team-metric-strip .team-metric-item strong {
+  min-width: max-content;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.team-profile-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.compact-action {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  height: 34px;
+  padding: 0 10px;
+  color: #1554ad;
+  cursor: pointer;
+  background: #eef6ff;
+  border: 1px solid #b7d7ff;
+  border-radius: 5px;
+  transition:
+    color 0.18s ease,
+    background-color 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.compact-action:hover,
+.compact-action:focus {
+  color: #0958d9;
+  background: #e6f4ff;
+  border-color: #69b1ff;
+}
+
+.compact-action svg {
+  width: 16px;
+  height: 16px;
+}
+
+.compact-action span {
+  font-size: 12.5px;
+  font-weight: 800;
+}
+
+.team-note-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 6px 12px;
+  margin-bottom: 10px;
+  background: #fbfdff;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid #91caff;
+  border-radius: 6px;
+}
+
+.internal-note-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 0;
+}
+
+.internal-note-title > div,
+.internal-note-title .ant-btn {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.internal-note-title > div {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #334155;
+}
+
+.internal-note-title svg {
+  width: 15px;
+  height: 15px;
+}
+
+.internal-note-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.internal-note-metrics span {
+  padding: 3px 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #475569;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+}
+
+.formal-team-arrangement-card .team-note-row {
+  min-height: 38px;
+  padding: 5px 10px;
+  margin-bottom: 8px;
+  background: #fff;
+  border-color: var(--formal-border);
+  border-left-width: 3px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 2%);
+}
+
+.formal-team-arrangement-card .internal-note-title > div {
+  max-width: 760px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.formal-team-arrangement-card .internal-note-metrics span {
+  padding: 2px 8px;
+  font-size: 11px;
+  background: #fbfdff;
+}
+
+.workflow-rail {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  align-items: center;
+}
+
+.stage-flow-item {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 5px 8px;
+  color: #64748b;
+  background: #fff;
+  border: 1px solid #dbe4f0;
+  border-radius: 5px;
+}
+
+.stage-flow-item.done {
+  color: #0958d9;
+  background: #e6f4ff;
+  border-color: #91caff;
+}
+
+.stage-flow-item.template {
+  color: #fff;
+  background: #1677ff;
+  border-color: #1677ff;
+  box-shadow: 0 4px 10px rgb(22 119 255 / 18%);
+}
+
+.stage-flow-item.pending {
+  color: #475569;
+  background: linear-gradient(180deg, #fff 0%, #f1f5f9 100%);
+  border-color: #d7dee8;
+}
+
+.stage-index {
+  display: flex;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  font-weight: 800;
+  color: currentcolor;
+  background: rgb(255 255 255 / 78%);
+  border: 1px solid currentcolor;
+  border-radius: 50%;
+}
+
+.stage-flow-item.done .stage-index,
+.stage-flow-item.template .stage-index {
+  color: #fff;
+  background: rgb(255 255 255 / 18%);
+  border-color: rgb(255 255 255 / 70%);
+}
+
+.stage-label {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: currentcolor;
+}
+
+.arrangement-overview-table {
+  margin-bottom: 10px;
+  overflow-x: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+}
+
+.arrangement-overview-table table {
+  width: 100%;
+  min-width: 1320px;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+.arrangement-overview-table th,
+.arrangement-overview-table td {
+  height: 34px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #334155;
+  text-align: center;
+  border-right: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.arrangement-overview-table th {
+  color: #52657a;
+  background: #f6f8fb;
+}
+
+.arrangement-overview-table td {
+  color: #0f172a;
+}
+
+.formal-team-arrangement-card .arrangement-overview-table {
+  margin-bottom: 8px;
+  border-color: var(--formal-border);
+  border-radius: 7px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 3%);
+}
+
+.formal-team-arrangement-card .arrangement-overview-table th,
+.formal-team-arrangement-card .arrangement-overview-table td {
+  height: 30px;
+  padding: 0 5px;
+  font-size: 10.8px;
+  border-color: var(--formal-border-soft);
+}
+
+.formal-team-arrangement-card .arrangement-overview-table th {
+  color: #52657a;
+  background: #f9fbfe;
+}
+
+.formal-team-arrangement-card .arrangement-overview-table td {
+  font-weight: 750;
+}
+
+.formal-cost-overview-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+  padding: 0 2px;
+  margin: 1px 0 5px;
+}
+
+.formal-cost-overview-title > div {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 850;
+  color: #1f2d3d;
+}
+
+.formal-cost-overview-title svg {
+  width: 16px;
+  height: 16px;
+  color: #1677ff;
+}
+
+.formal-cost-overview-title small {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--formal-muted);
+}
+
+.arrangement-overview-tabs {
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+  padding-left: 1px;
+  margin-bottom: 0;
+  overflow-x: auto;
+  background: #fff;
+  border-bottom: 1px solid #91caff;
+}
+
+.arrangement-tabs-block {
+  margin-bottom: 14px;
+}
+
+.arrangement-tabs-block .arrangement-overview-tabs {
+  margin-bottom: 0;
+}
+
+.arrangement-overview-tab {
+  flex: 0 0 auto;
+  min-width: 78px;
+  height: 32px;
+  padding: 0 14px;
+  margin-bottom: -1px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #475569;
+  cursor: pointer;
+  background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
+  border: 1px solid #d9e2ec;
+  border-bottom-color: #91caff;
+  border-radius: 4px 4px 0 0;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 80%);
+}
+
+.arrangement-overview-tab.active {
+  color: #0958d9;
+  background: #fff;
+  border-color: #91caff;
+  border-bottom-color: #fff;
+  box-shadow:
+    inset 0 3px 0 #1677ff,
+    0 -1px 0 rgb(22 119 255 / 8%);
+}
+
+.arrangement-overview-tab:hover {
+  color: #0958d9;
+  background: #eef6ff;
+  border-color: #91caff;
+  border-bottom-color: #91caff;
+}
+
+.arrangement-overview-tab.active:hover {
+  color: #0958d9;
+  background: #fff;
+  border-bottom-color: #fff;
+}
+
+.arrangement-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(82px, 1fr));
+  gap: 4px;
+  padding: 12px 6px 14px;
+  margin-bottom: 14px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-top: 0;
+  border-radius: 0 0 6px 6px;
+}
+
+.arrangement-tabs-block .arrangement-icon-grid {
+  margin-bottom: 0;
+}
+
+.arrangement-icon-button {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  min-height: 54px;
+  padding: 6px;
+  color: #64748b;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  transition:
+    color 0.18s ease,
+    background-color 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.arrangement-icon-button:hover {
+  color: #0958d9;
+  background: #eef6ff;
+  border-color: #91caff;
+}
+
+.arrangement-icon-button svg {
+  width: 24px;
+  height: 24px;
+}
+
+.arrangement-icon-button span {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.arrangement-overview-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.arrangement-section-card {
+  scroll-margin-top: 88px;
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.arrangement-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 38px;
+  margin-bottom: 4px;
+}
+
+.arrangement-section-title {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+  font-size: 18px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.arrangement-section-title svg {
+  width: 21px;
+  height: 21px;
+  color: #1677ff;
+}
+
+.arrangement-section-heading {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.arrangement-status-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 20px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  border-radius: 999px;
+}
+
+.arrangement-status-badge.status-arranged {
+  color: #1554ad;
+  background: #eef6ff;
+  border-color: #b7d7ff;
+}
+
+.arrangement-status-badge.status-done {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.arrangement-status-badge.status-none {
+  color: #475569;
+  background: #f8fafc;
+  border-color: #dbe5f2;
+}
+
+.arrangement-status-badge.status-pending {
+  color: #b45309;
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.arrangement-section-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.arrangement-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  font-weight: 750;
+  color: #475569;
+  white-space: nowrap;
+  background: #fbfdff;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+}
+
+.arrangement-document-button {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  margin-left: 4px;
+  font-weight: 800;
+  background: #1677ff;
+  border-color: #1677ff;
+}
+
+.arrangement-document-button svg {
+  width: 14px;
+  height: 14px;
+  color: #fff;
+}
+
+.arrangement-section-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+  align-items: center;
+}
+
+.arrangement-section-action-group {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+  align-items: center;
+}
+
+.arrangement-section-actions .ant-btn,
+.arrangement-section-action-group .ant-btn {
+  min-width: 48px;
+  color: #64748b;
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.arrangement-add-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  color: #1677ff;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #91caff;
+  border-radius: 50%;
+}
+
+.arrangement-add-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.arrangement-section-table-wrap {
+  overflow-x: auto;
+  border-top: 1px solid #eef2f7;
+}
+
+.arrangement-section-table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.arrangement-section-table th,
+.arrangement-section-table td {
+  height: 38px;
+  padding: 7px 9px;
+  font-size: 12.5px;
+  color: #334155;
+  text-align: center;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.arrangement-section-table th {
+  font-weight: 800;
+  color: #52657a;
+  background: #f6f8fb;
+}
+
+.arrangement-section-table td {
+  color: #0f172a;
+  background: #fff;
+}
+
+.arrangement-empty-cell {
+  height: 60px;
+  font-weight: 700;
+  color: #64748b !important;
+}
+
+.arrangement-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.formal-team-arrangement-card .arrangement-overview-sections {
+  gap: 10px;
+}
+
+.formal-team-arrangement-card .arrangement-section-header {
+  min-height: 32px;
+  align-items: flex-start;
+  padding: 6px 0 8px;
+  margin-bottom: 0;
+}
+
+.formal-team-arrangement-card .arrangement-section-title {
+  gap: 8px;
+  font-size: 16px;
+  color: #172033;
+}
+
+.formal-team-arrangement-card .arrangement-section-title svg {
+  width: 18px;
+  height: 18px;
+}
+
+.formal-team-arrangement-card .arrangement-status-badge {
+  height: 21px;
+  padding: 0 8px;
+  font-size: 11.5px;
+}
+
+.formal-team-arrangement-card .arrangement-section-summary {
+  gap: 5px;
+}
+
+.formal-team-arrangement-card .arrangement-summary-chip {
+  height: 22px;
+  padding: 0 7px;
+  font-size: 11px;
+  background: #fff;
+  border-color: var(--formal-border);
+}
+
+.formal-team-arrangement-card .arrangement-section-actions {
+  gap: 6px;
+}
+
+.formal-team-arrangement-card .arrangement-section-actions .ant-btn,
+.formal-team-arrangement-card .arrangement-section-action-group .ant-btn {
+  min-width: 46px;
+  height: 28px;
+  padding: 0 9px;
+  font-size: 12px;
+  color: #64748b;
+  background: #fff;
+  border-color: #dbe5f2;
+  border-radius: 5px;
+}
+
+.formal-team-arrangement-card .arrangement-section-action-group .ant-btn:hover {
+  color: #0958d9;
+  background: #eef6ff;
+  border-color: #91caff;
+}
+
+.formal-team-arrangement-card .arrangement-add-button {
+  width: 32px;
+  height: 28px;
+  color: #1677ff;
+  background: #f8fbff;
+  border-color: #91caff;
+  border-radius: 5px;
+}
+
+.formal-team-arrangement-card .arrangement-add-button:hover {
+  color: #0958d9;
+  background: #eef6ff;
+  border-color: #69b1ff;
+}
+
+.formal-team-arrangement-card .arrangement-add-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.formal-team-arrangement-card .arrangement-document-button {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  border-radius: 5px;
+}
+
+.formal-team-arrangement-card .arrangement-section-table th,
+.formal-team-arrangement-card .arrangement-section-table td {
+  height: 31px;
+  padding: 6px 8px;
+  font-size: 11.8px;
+  border-color: var(--formal-border-soft);
+}
+
+.formal-team-arrangement-card .arrangement-section-table th {
+  color: #52657a;
+  background: #f8fafc;
+}
+
+.formal-team-arrangement-card .arrangement-empty-cell {
+  height: 38px;
+  color: #94a3b8;
+  background: #fff;
+}
+
+.formal-team-arrangement-card .arrangement-footer-actions {
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+@media (max-width: 900px) {
+  .arrangement-command-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .team-title-line {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .team-profile-actions {
+    align-items: stretch;
+    justify-content: flex-start;
+  }
+
+  .arrangement-icon-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .workflow-rail {
+    grid-template-columns: repeat(5, minmax(72px, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .team-arrangement-card .ant-card-body {
+    padding: 14px;
+  }
+
+  .workflow-rail {
+    align-items: stretch;
+    overflow-x: auto;
+  }
+
+  .stage-flow-item {
+    flex: 0 0 92px;
+  }
+
+  .team-profile-actions {
+    flex-direction: column;
+  }
+
+  .compact-action {
+    min-height: 40px;
+  }
+}

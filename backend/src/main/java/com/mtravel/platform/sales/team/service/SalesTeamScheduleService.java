@@ -5,16 +5,35 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mtravel.platform.common.BizException;
 import com.mtravel.platform.common.PageResult;
+import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementEntity;
+import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementOrderAllocationEntity;
+import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementPriceLineEntity;
+import com.mtravel.platform.dispatch.teamarrangement.enums.DispatchArrangementSettlementType;
+import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementMapper;
+import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementOrderAllocationMapper;
+import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementPriceLineMapper;
 import com.mtravel.platform.sales.booking.order.service.SalesBookingOrderService;
+import com.mtravel.platform.sales.product.entity.SalesProductArrangementItemEntity;
+import com.mtravel.platform.sales.product.entity.SalesProductArrangementPriceLineEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductDescriptionEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductItineraryDayEntity;
+import com.mtravel.platform.sales.product.entity.SalesProductRoadbookPointEntity;
+import com.mtravel.platform.sales.product.dto.SalesProductItineraryDayResponse;
+import com.mtravel.platform.sales.product.dto.SalesProductRoadbookPointResponse;
+import com.mtravel.platform.sales.product.enums.SalesProductDomesticType;
 import com.mtravel.platform.sales.product.enums.SalesProductStatus;
+import com.mtravel.platform.sales.product.enums.SalesProductTripType;
 import com.mtravel.platform.sales.product.mapper.SalesProductDescriptionMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductItineraryDayMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductRoadbookPointMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductArrangementItemMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductArrangementPriceLineMapper;
 import com.mtravel.platform.sales.team.dto.SalesTeamBatchEditRequest;
 import com.mtravel.platform.sales.team.dto.SalesTeamBatchCreateRequest;
+import com.mtravel.platform.sales.team.dto.SalesTeamDirectEditResponse;
+import com.mtravel.platform.sales.team.dto.SalesTeamDirectCreateRequest;
 import com.mtravel.platform.sales.team.dto.SalesTeamListResponse;
 import com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse;
 import com.mtravel.platform.sales.team.dto.SalesTeamPriceResponse;
@@ -63,6 +82,7 @@ import org.springframework.util.StringUtils;
 public class SalesTeamScheduleService {
 
     private static final String DEFAULT_TEAM_NO_PREFIX = "CS-SP-BK";
+    private static final int PRODUCT_NAME_MAX_LENGTH = 200;
     private static final DateTimeFormatter TEAM_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyMMdd");
     private static final Pattern TEAM_SUFFIX_PATTERN = Pattern.compile("([A-Z](?:\\d+)?)$");
     private static final String TEAM_PROFILE_MARKER = "[[TEAM_PROFILE_JSON]]";
@@ -71,11 +91,17 @@ public class SalesTeamScheduleService {
     private final SalesProductMapper productMapper;
     private final SalesProductDescriptionMapper descriptionMapper;
     private final SalesProductItineraryDayMapper itineraryDayMapper;
+    private final SalesProductRoadbookPointMapper roadbookPointMapper;
+    private final SalesProductArrangementItemMapper productArrangementMapper;
+    private final SalesProductArrangementPriceLineMapper productArrangementPriceLineMapper;
     private final SalesTeamMapper teamMapper;
     private final SalesTeamPriceMapper priceMapper;
     private final SalesTeamStatusLogMapper statusLogMapper;
     private final SalesTeamNoLogMapper noLogMapper;
     private final SalesBookingOrderService bookingOrderService;
+    private final DispatchTeamArrangementMapper teamArrangementMapper;
+    private final DispatchTeamArrangementPriceLineMapper teamArrangementPriceLineMapper;
+    private final DispatchTeamArrangementOrderAllocationMapper teamArrangementAllocationMapper;
 
     /**
      * 测试专用兼容构造器。
@@ -88,7 +114,7 @@ public class SalesTeamScheduleService {
             SalesTeamPriceMapper priceMapper,
             SalesTeamStatusLogMapper statusLogMapper
     ) {
-        this(productMapper, null, null, teamMapper, priceMapper, statusLogMapper, null, null);
+        this(productMapper, null, null, null, null, null, teamMapper, priceMapper, statusLogMapper, null, null, null, null, null);
     }
 
     /**
@@ -101,7 +127,7 @@ public class SalesTeamScheduleService {
             SalesTeamPriceMapper priceMapper,
             SalesTeamStatusLogMapper statusLogMapper
     ) {
-        this(productMapper, descriptionMapper, null, teamMapper, priceMapper, statusLogMapper, null, null);
+        this(productMapper, descriptionMapper, null, null, null, null, teamMapper, priceMapper, statusLogMapper, null, null, null, null, null);
     }
 
     /**
@@ -115,7 +141,22 @@ public class SalesTeamScheduleService {
             SalesTeamPriceMapper priceMapper,
             SalesTeamStatusLogMapper statusLogMapper
     ) {
-        this(productMapper, descriptionMapper, itineraryDayMapper, teamMapper, priceMapper, statusLogMapper, null, null);
+        this(productMapper, descriptionMapper, itineraryDayMapper, null, null, null, teamMapper, priceMapper, statusLogMapper, null, null, null, null, null);
+    }
+
+    /**
+     * 测试专用兼容构造器，允许直接建团测试注入路书地点 Mapper。
+     */
+    public SalesTeamScheduleService(
+            SalesProductMapper productMapper,
+            SalesProductDescriptionMapper descriptionMapper,
+            SalesProductItineraryDayMapper itineraryDayMapper,
+            SalesProductRoadbookPointMapper roadbookPointMapper,
+            SalesTeamMapper teamMapper,
+            SalesTeamPriceMapper priceMapper,
+            SalesTeamStatusLogMapper statusLogMapper
+    ) {
+        this(productMapper, descriptionMapper, itineraryDayMapper, roadbookPointMapper, null, null, teamMapper, priceMapper, statusLogMapper, null, null, null, null, null);
     }
 
     /**
@@ -126,20 +167,32 @@ public class SalesTeamScheduleService {
             SalesProductMapper productMapper,
             SalesProductDescriptionMapper descriptionMapper,
             SalesProductItineraryDayMapper itineraryDayMapper,
+            SalesProductRoadbookPointMapper roadbookPointMapper,
+            SalesProductArrangementItemMapper productArrangementMapper,
+            SalesProductArrangementPriceLineMapper productArrangementPriceLineMapper,
             SalesTeamMapper teamMapper,
             SalesTeamPriceMapper priceMapper,
             SalesTeamStatusLogMapper statusLogMapper,
             SalesTeamNoLogMapper noLogMapper,
-            SalesBookingOrderService bookingOrderService
+            SalesBookingOrderService bookingOrderService,
+            DispatchTeamArrangementMapper teamArrangementMapper,
+            DispatchTeamArrangementPriceLineMapper teamArrangementPriceLineMapper,
+            DispatchTeamArrangementOrderAllocationMapper teamArrangementAllocationMapper
     ) {
         this.productMapper = productMapper;
         this.descriptionMapper = descriptionMapper;
         this.itineraryDayMapper = itineraryDayMapper;
+        this.roadbookPointMapper = roadbookPointMapper;
+        this.productArrangementMapper = productArrangementMapper;
+        this.productArrangementPriceLineMapper = productArrangementPriceLineMapper;
         this.teamMapper = teamMapper;
         this.priceMapper = priceMapper;
         this.statusLogMapper = statusLogMapper;
         this.noLogMapper = noLogMapper;
         this.bookingOrderService = bookingOrderService;
+        this.teamArrangementMapper = teamArrangementMapper;
+        this.teamArrangementPriceLineMapper = teamArrangementPriceLineMapper;
+        this.teamArrangementAllocationMapper = teamArrangementAllocationMapper;
     }
 
     /**
@@ -274,6 +327,147 @@ public class SalesTeamScheduleService {
     }
 
     /**
+     * 团队管理页直接创建散拼、整团或散团。
+     *
+     * <p>老系统这三个入口复用“产品团队”基础信息页面。新系统保持统一团队主表，同时创建一个
+     * 最小销售产品快照作为团队名称、天数、所在地和后续行程/产品说明页的承载对象。</p>
+     *
+     * @param request 直接创建团队请求
+     * @param tenantId 当前租户 ID
+     * @param operator 当前操作人
+     * @return 新增团队信息
+     */
+    @Transactional
+    public SalesTeamResponse directCreate(SalesTeamDirectCreateRequest request, Long tenantId, String operator) {
+        SalesTeamType teamType = SalesTeamType.fromValue(request.teamType());
+        if (teamType == SalesTeamType.SINGLE) {
+            throw new BizException("单项业务请使用单项创建入口");
+        }
+        String teamNo = nextTeamNo(teamType, tenantId, request.departureDate(), new HashSet<>());
+        SalesProductEntity product = buildDirectProductSnapshot(request, tenantId, operator, teamNo);
+        productMapper.insert(product);
+        saveDirectProductDescription(product.getId(), request, tenantId, operator);
+        saveDirectProductItineraryDays(product.getId(), request, tenantId, operator);
+
+        SalesTeamEntity team = buildDirectTeam(product, request, teamType, tenantId, operator, teamNo);
+        teamMapper.insert(team);
+
+        insertStatusLog(tenantId, team.getId(), null, team.getStatus(), SalesTeamStatusAction.CREATE, operator, "团队管理直接新增");
+        insertNoLog(tenantId, product.getId(), request.departureDate(), teamNo, suffixOf(teamNo), operator);
+        return SalesTeamResponse.fromEntity(team, List.of());
+    }
+
+    /**
+     * 查询团队直接编辑页详情。
+     *
+     * <p>该详情对应老系统团队操作页“修改团队”跳回的 LineAdd.aspx 页面。返回团队主表字段、
+     * 产品快照基础信息、产品说明、每日行程和路书点位，供前端复用直接建团页面回显。</p>
+     *
+     * @param teamId 团队 ID
+     * @param tenantId 当前租户 ID
+     * @return 团队编辑页详情
+     */
+    public SalesTeamDirectEditResponse directEditDetail(Long teamId, Long tenantId) {
+        SalesTeamEntity team = requireTeam(teamId, tenantId);
+        SalesProductEntity product = requireDirectProductSnapshot(team.getProductId(), tenantId);
+        SalesProductDescriptionEntity description = descriptionMapper == null
+                ? null
+                : descriptionMapper.selectOne(baseDescriptionQuery(tenantId).eq("product_id", product.getId()));
+        List<SalesProductItineraryDayResponse> itineraryDays = loadDirectEditItineraryDays(tenantId, product.getId());
+        return new SalesTeamDirectEditResponse(
+                team.getId(),
+                product.getId(),
+                team.getTeamNo(),
+                team.getTeamType(),
+                directProductDisplayName(product.getProductName(), team.getTeamNo()),
+                firstText(team.getBusinessType(), product.getBusinessType()),
+                product.getDomesticInternational(),
+                product.getProvince(),
+                product.getCity(),
+                product.getDistrict(),
+                team.getDepartureDate(),
+                product.getTripType(),
+                product.getReceptionStandard(),
+                product.getProductTheme(),
+                product.getTravelDays(),
+                team.getCloseDaysBefore(),
+                team.getSingleRoomDifference(),
+                team.getTotalSeats(),
+                itineraryDays,
+                description == null ? null : description.getBookingNotice(),
+                description == null ? null : description.getProductDescription(),
+                description == null ? null : description.getFeeIncluded(),
+                description == null ? null : description.getFeeExcluded(),
+                description == null ? null : description.getChildPolicy(),
+                description == null ? null : description.getShoppingArrangement(),
+                description == null ? null : description.getOptionalItems(),
+                description == null ? null : description.getGiftItems(),
+                description == null ? null : description.getAttentionItems(),
+                description == null ? null : description.getWarmReminder(),
+                team.getRemark()
+        );
+    }
+
+    /**
+     * 保存团队直接编辑页。
+     *
+     * <p>编辑团队不重新生成团号、不新建产品快照，也不覆盖团队安排成本明细；只更新团队主表、
+     * 团队专属产品快照基础信息、产品说明、每日行程和路书点位。</p>
+     *
+     * @param teamId 团队 ID
+     * @param request 编辑页提交内容
+     * @param tenantId 当前租户 ID
+     * @param operator 当前操作人
+     * @return 修改后的团队信息
+     */
+    @Transactional
+    public SalesTeamResponse directUpdate(
+            Long teamId,
+            SalesTeamDirectCreateRequest request,
+            Long tenantId,
+            String operator
+    ) {
+        SalesTeamEntity current = requireTeam(teamId, tenantId);
+        SalesTeamType teamType = SalesTeamType.fromValue(request.teamType());
+        if (teamType == SalesTeamType.SINGLE) {
+            throw new BizException("单项业务请使用单项创建入口");
+        }
+        SalesProductEntity product = requireDirectProductSnapshot(current.getProductId(), tenantId);
+        Integer usedSeats = number(current.getUsedSeats());
+        Integer totalSeats = number(request.totalSeats());
+        if (totalSeats < usedSeats) {
+            throw new BizException("预控人数不能小于已收客人数");
+        }
+
+        SalesProductEntity productUpdate = new SalesProductEntity();
+        applyDirectProductFields(productUpdate, request, current.getTeamNo());
+        int productUpdated = productMapper.update(productUpdate, baseProductUpdate(tenantId).eq("id", product.getId()));
+        if (productUpdated == 0) {
+            throw new BizException("产品快照不存在或已删除");
+        }
+
+        SalesTeamEntity teamUpdate = new SalesTeamEntity();
+        teamUpdate.setTeamType(teamType.getValue());
+        teamUpdate.setBusinessType(clean(request.businessType()));
+        teamUpdate.setDepartureDate(request.departureDate());
+        teamUpdate.setTotalSeats(totalSeats);
+        teamUpdate.setRemainingSeats(totalSeats - usedSeats);
+        teamUpdate.setSingleRoomDifference(money(request.singleRoomDifference()));
+        teamUpdate.setCloseDaysBefore(number(request.closeDaysBefore()));
+        teamUpdate.setRemark(clean(request.remark()));
+        int teamUpdated = teamMapper.update(teamUpdate, baseTeamUpdate(tenantId).eq("id", teamId));
+        if (teamUpdated == 0) {
+            throw new BizException("团队不存在或已删除");
+        }
+
+        softDeleteDirectProductContent(product.getId(), tenantId, operator);
+        saveDirectProductDescription(product.getId(), request, tenantId, operator);
+        saveDirectProductItineraryDays(product.getId(), request, tenantId, operator);
+        SalesTeamEntity latest = requireTeam(teamId, tenantId);
+        return SalesTeamResponse.fromEntity(latest, loadPricesForTeams(tenantId, List.of(latest)).getOrDefault(teamId, List.of()));
+    }
+
+    /**
      * 按日期范围批量生成团期。
      *
      * <p>命中星期条件的每一天都会创建一条散拼团队。创建时从产品带入截止收客天数、单房差和预控人数，
@@ -299,14 +493,18 @@ public class SalesTeamScheduleService {
         }
         List<SalesTeamResponse> created = new ArrayList<>();
         Set<String> generatedInThisBatch = new HashSet<>();
+        List<SalesProductArrangementItemEntity> productArrangements = loadProductArrangementTemplates(productId, tenantId);
+        Map<Long, List<SalesProductArrangementPriceLineEntity>> productPriceLines =
+                loadProductArrangementPriceLines(tenantId, productArrangements);
         for (LocalDate departureDate : dates) {
-            String teamNo = nextTeamNo(product, tenantId, departureDate, generatedInThisBatch);
+            String teamNo = nextTeamNo(SalesTeamType.SANPIN, tenantId, departureDate, generatedInThisBatch);
             SalesTeamEntity team = buildTeam(product, request, tenantId, operator, departureDate, teamNo);
             teamMapper.insert(team);
             SalesTeamPriceEntity price = buildPrice(team, request, tenantId, operator);
             priceMapper.insert(price);
             insertStatusLog(tenantId, team.getId(), null, team.getStatus(), SalesTeamStatusAction.CREATE, operator, "批量生成团期");
             insertNoLog(tenantId, productId, departureDate, teamNo, suffixOf(teamNo), operator);
+            copyProductArrangementsToTeam(team, productArrangements, productPriceLines, tenantId, operator);
             created.add(SalesTeamResponse.fromEntity(team, List.of(SalesTeamPriceResponse.fromEntity(price))));
         }
         return created;
@@ -534,6 +732,259 @@ public class SalesTeamScheduleService {
                 .eq("is_deleted", false);
     }
 
+    /** 批量读取产品团队安排模板，供从产品排期生成团队时复制为团队执行快照。 */
+    private List<SalesProductArrangementItemEntity> loadProductArrangementTemplates(Long productId, Long tenantId) {
+        if (productArrangementMapper == null) {
+            return List.of();
+        }
+        List<SalesProductArrangementItemEntity> items = productArrangementMapper.selectList(
+                new QueryWrapper<SalesProductArrangementItemEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("product_id", productId)
+                        .eq("is_deleted", false)
+                        .orderByAsc("arrangement_type")
+                        .orderByAsc("id")
+        );
+        return items == null ? List.of() : items;
+    }
+
+    /** 批量读取产品安排价格明细，按安排项 ID 分组，避免生成多个团期时形成 N+1 查询。 */
+    private Map<Long, List<SalesProductArrangementPriceLineEntity>> loadProductArrangementPriceLines(
+            Long tenantId,
+            List<SalesProductArrangementItemEntity> arrangements
+    ) {
+        if (productArrangementPriceLineMapper == null || CollectionUtils.isEmpty(arrangements)) {
+            return Map.of();
+        }
+        List<Long> arrangementIds = arrangements.stream()
+                .map(SalesProductArrangementItemEntity::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (arrangementIds.isEmpty()) {
+            return Map.of();
+        }
+        List<SalesProductArrangementPriceLineEntity> lines = productArrangementPriceLineMapper.selectList(
+                new QueryWrapper<SalesProductArrangementPriceLineEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .in("arrangement_item_id", arrangementIds)
+                        .orderByAsc("arrangement_item_id")
+                        .orderByAsc("sort_order")
+                        .orderByAsc("id")
+        );
+        if (CollectionUtils.isEmpty(lines)) {
+            return Map.of();
+        }
+        return lines.stream().collect(Collectors.groupingBy(
+                SalesProductArrangementPriceLineEntity::getArrangementItemId,
+                Collectors.toList()
+        ));
+    }
+
+    /**
+     * 将产品团队安排模板复制为正式团队安排快照。
+     *
+     * <p>产品阶段没有正式订单，因此复制后的成本默认是团队公共成本，不关联订单；也不在生成团期时
+     * 自动产生导游报账或计调审核流水，后续由团队安排页确认具体执行数据后再进入审核链路。</p>
+     */
+    private void copyProductArrangementsToTeam(
+            SalesTeamEntity team,
+            List<SalesProductArrangementItemEntity> productArrangements,
+            Map<Long, List<SalesProductArrangementPriceLineEntity>> productPriceLines,
+            Long tenantId,
+            String operator
+    ) {
+        if (teamArrangementMapper == null || teamArrangementPriceLineMapper == null
+                || teamArrangementAllocationMapper == null || CollectionUtils.isEmpty(productArrangements)) {
+            return;
+        }
+        for (SalesProductArrangementItemEntity template : productArrangements) {
+            DispatchTeamArrangementEntity arrangement = buildTeamArrangementSnapshot(team, template, tenantId, operator);
+            teamArrangementMapper.insert(arrangement);
+            List<SalesProductArrangementPriceLineEntity> lines =
+                    productPriceLines.getOrDefault(template.getId(), List.of());
+            if (CollectionUtils.isEmpty(lines)) {
+                insertDefaultTeamArrangementPriceLine(arrangement, tenantId, operator);
+            } else {
+                for (SalesProductArrangementPriceLineEntity line : lines) {
+                    insertTeamArrangementPriceLine(arrangement, line, tenantId, operator);
+                }
+            }
+            insertTeamPublicAllocation(arrangement, tenantId, operator);
+        }
+    }
+
+    /** 构建正式团队安排快照主记录。 */
+    private DispatchTeamArrangementEntity buildTeamArrangementSnapshot(
+            SalesTeamEntity team,
+            SalesProductArrangementItemEntity template,
+            Long tenantId,
+            String operator
+    ) {
+        BigDecimal total = arrangementTotalAmount(template);
+        BigDecimal cash = money(template.getCashAmount());
+        BigDecimal prepaid = money(template.getPrepaidAmount());
+        BigDecimal credit = money(template.getCreditAmount());
+        if (credit.compareTo(BigDecimal.ZERO) <= 0) {
+            credit = total.subtract(cash).subtract(prepaid).max(BigDecimal.ZERO).setScale(2);
+        }
+        DispatchTeamArrangementEntity entity = new DispatchTeamArrangementEntity();
+        entity.setTenantId(tenantId);
+        entity.setTeamId(team.getId());
+        entity.setTeamNo(team.getTeamNo());
+        entity.setTeamType(team.getTeamType());
+        entity.setBusinessType(team.getBusinessType());
+        entity.setDepartmentId(team.getDepartmentId());
+        entity.setDepartmentName(team.getDepartmentName());
+        entity.setOperatorEmployeeId(team.getOperatorEmployeeId());
+        entity.setOperatorEmployeeName(team.getOperatorEmployeeName());
+        entity.setArrangementType(clean(template.getArrangementType()));
+        entity.setItemName(firstText(template.getItemName(), template.getResourceName(), template.getSupplierName(), "团队安排"));
+        entity.setArrangementContent(clean(template.getArrangementContent()));
+        entity.setAllocationMode("group_order_average");
+        entity.setScheduleStartDay(clean(template.getScheduleStartDay()));
+        entity.setScheduleEndDay(clean(template.getScheduleEndDay()));
+        entity.setBusinessDate(team.getDepartureDate());
+        entity.setDeparturePlace(clean(template.getDeparturePlace()));
+        entity.setArrivalPlace(clean(template.getArrivalPlace()));
+        entity.setDaysCount(number(template.getDaysCount()));
+        entity.setResourceName(clean(template.getResourceName()));
+        entity.setSupplierId(template.getSupplierId());
+        entity.setSupplierName(clean(template.getSupplierName()));
+        entity.setTrafficType(clean(template.getTrafficType()));
+        entity.setVehicleType(clean(template.getVehicleType()));
+        entity.setDriverName(clean(template.getDriverName()));
+        entity.setVehiclePlate(clean(template.getVehiclePlate()));
+        entity.setResponsibleEmployeeId(template.getResponsibleEmployeeId());
+        entity.setResponsibleEmployeeName(clean(template.getResponsibleEmployeeName()));
+        entity.setSettlementType(DispatchArrangementSettlementType.fromValueOrDefault(template.getSettlementType()).getValue());
+        entity.setMealType(clean(template.getMealType()));
+        entity.setFundIncluded(clean(template.getFundIncluded()));
+        entity.setConfirmed(Boolean.TRUE.equals(template.getConfirmed()));
+        entity.setConfirmationNo(clean(template.getConfirmationNo()));
+        entity.setGuideId(template.getGuideId());
+        entity.setGuideName(clean(template.getGuideName()));
+        entity.setTotalAmount(total);
+        entity.setCashAmount(cash);
+        entity.setCreditAmount(credit);
+        entity.setPrepaidAmount(prepaid);
+        entity.setSaleAmount(money(template.getSaleAmount()));
+        entity.setCostAmount(money(template.getCostAmount()).compareTo(BigDecimal.ZERO) > 0 ? money(template.getCostAmount()) : total);
+        entity.setGuideCommissionAmount(money(template.getGuideCommissionAmount()));
+        entity.setCompanyRebateAmount(money(template.getCompanyRebateAmount()));
+        entity.setHeadFeeAmount(money(template.getHeadFeeAmount()));
+        entity.setConsumptionAmount(money(template.getConsumptionAmount()));
+        entity.setPeopleCount(money(template.getPeopleCount()));
+        entity.setNoGuideReport(Boolean.FALSE);
+        entity.setGuideInvolved(Boolean.TRUE);
+        entity.setCostStage("arrangement");
+        entity.setGuideReportStatus("pending");
+        entity.setOperatorAuditStatus("pending");
+        entity.setFinanceAuditStatus("pending");
+        entity.setStatus("active");
+        entity.setCreatedBy(operator);
+        entity.setIsDeleted(false);
+        return entity;
+    }
+
+    /** 复制产品安排价格明细到正式团队安排价格明细。 */
+    private void insertTeamArrangementPriceLine(
+            DispatchTeamArrangementEntity arrangement,
+            SalesProductArrangementPriceLineEntity line,
+            Long tenantId,
+            String operator
+    ) {
+        DispatchTeamArrangementPriceLineEntity entity = new DispatchTeamArrangementPriceLineEntity();
+        entity.setTenantId(tenantId);
+        entity.setArrangementId(arrangement.getId());
+        entity.setTeamId(arrangement.getTeamId());
+        entity.setProjectId(line.getProjectId());
+        entity.setProjectName(firstText(line.getProjectName(), arrangement.getItemName()));
+        entity.setUnitPrice(money(line.getUnitPrice()));
+        entity.setQuantity(money(line.getQuantity()));
+        entity.setAmount(priceLineTotal(line));
+        entity.setSalePrice(money(line.getSalePrice()));
+        entity.setCostPrice(money(line.getCostPrice()));
+        entity.setCashAmount(money(line.getCashAmount()));
+        entity.setCreditAmount(money(line.getCreditAmount()));
+        entity.setGuideCommissionAmount(money(line.getGuideCommissionAmount()));
+        entity.setGuideCommissionRate(money(line.getGuideCommissionRate()));
+        entity.setCompanyRebateAmount(money(line.getCompanyRebateAmount()));
+        entity.setCompanyRebateRate(money(line.getCompanyRebateRate()));
+        entity.setHeadFeeAmount(money(line.getHeadFeeAmount()));
+        entity.setConsumptionAmount(money(line.getConsumptionAmount()));
+        entity.setSortOrder(line.getSortOrder() == null ? 1 : line.getSortOrder());
+        entity.setCreatedBy(operator);
+        entity.setIsDeleted(false);
+        teamArrangementPriceLineMapper.insert(entity);
+    }
+
+    /** 产品模板没有价格明细时生成一条默认明细，保证团队安排页仍可展示成本。 */
+    private void insertDefaultTeamArrangementPriceLine(
+            DispatchTeamArrangementEntity arrangement,
+            Long tenantId,
+            String operator
+    ) {
+        DispatchTeamArrangementPriceLineEntity entity = new DispatchTeamArrangementPriceLineEntity();
+        entity.setTenantId(tenantId);
+        entity.setArrangementId(arrangement.getId());
+        entity.setTeamId(arrangement.getTeamId());
+        entity.setProjectName(arrangement.getItemName());
+        entity.setUnitPrice(arrangement.getTotalAmount());
+        entity.setQuantity(BigDecimal.ONE.setScale(2));
+        entity.setAmount(arrangement.getTotalAmount());
+        entity.setCashAmount(arrangement.getCashAmount());
+        entity.setCreditAmount(arrangement.getCreditAmount());
+        entity.setSortOrder(1);
+        entity.setCreatedBy(operator);
+        entity.setIsDeleted(false);
+        teamArrangementPriceLineMapper.insert(entity);
+    }
+
+    /** 产品排期创建的初始安排默认是团队公共成本，不关联正式订单。 */
+    private void insertTeamPublicAllocation(
+            DispatchTeamArrangementEntity arrangement,
+            Long tenantId,
+            String operator
+    ) {
+        DispatchTeamArrangementOrderAllocationEntity allocation = new DispatchTeamArrangementOrderAllocationEntity();
+        allocation.setTenantId(tenantId);
+        allocation.setArrangementId(arrangement.getId());
+        allocation.setTeamId(arrangement.getTeamId());
+        allocation.setTeamNo(arrangement.getTeamNo());
+        allocation.setAllocationScope("team");
+        allocation.setGuestCount(0);
+        allocation.setAllocationMode("group_order_average");
+        allocation.setOriginalAmount(arrangement.getTotalAmount());
+        allocation.setAllocationAmount(arrangement.getTotalAmount());
+        allocation.setSortOrder(1);
+        allocation.setCreatedBy(operator);
+        allocation.setIsDeleted(false);
+        teamArrangementAllocationMapper.insert(allocation);
+    }
+
+    private BigDecimal arrangementTotalAmount(SalesProductArrangementItemEntity template) {
+        BigDecimal total = money(template.getTotalAmount());
+        if (total.compareTo(BigDecimal.ZERO) > 0) {
+            return total;
+        }
+        return money(template.getUnitPrice()).multiply(money(template.getQuantity())).setScale(2);
+    }
+
+    private BigDecimal priceLineTotal(SalesProductArrangementPriceLineEntity line) {
+        BigDecimal amount = money(line.getAmount());
+        if (amount.compareTo(BigDecimal.ZERO) > 0) {
+            return amount;
+        }
+        return money(line.getUnitPrice()).multiply(money(line.getQuantity())).setScale(2);
+    }
+
+    private UpdateWrapper<SalesProductEntity> baseProductUpdate(Long tenantId) {
+        return new UpdateWrapper<SalesProductEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false);
+    }
+
     private QueryWrapper<SalesProductDescriptionEntity> baseDescriptionQuery(Long tenantId) {
         return new QueryWrapper<SalesProductDescriptionEntity>()
                 .eq("tenant_id", tenantId)
@@ -546,6 +997,12 @@ public class SalesTeamScheduleService {
                 .eq("is_deleted", false);
     }
 
+    private QueryWrapper<SalesProductRoadbookPointEntity> baseRoadbookPointQuery(Long tenantId) {
+        return new QueryWrapper<SalesProductRoadbookPointEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false);
+    }
+
     private List<SalesProductItineraryDayEntity> loadProductItineraryDays(Long tenantId, Long productId) {
         if (itineraryDayMapper == null || productId == null) {
             return List.of();
@@ -553,6 +1010,39 @@ public class SalesTeamScheduleService {
         return itineraryDayMapper.selectList(baseItineraryDayQuery(tenantId)
                 .eq("product_id", productId)
                 .orderByAsc("day_no"));
+    }
+
+    private List<SalesProductItineraryDayResponse> loadDirectEditItineraryDays(Long tenantId, Long productId) {
+        if (itineraryDayMapper == null || productId == null) {
+            return List.of();
+        }
+        Map<Integer, List<SalesProductRoadbookPointResponse>> roadbookByDay = loadDirectEditRoadbookPoints(tenantId, productId);
+        return itineraryDayMapper.selectList(baseItineraryDayQuery(tenantId)
+                        .eq("product_id", productId)
+                        .orderByAsc("day_no")
+                        .orderByAsc("id"))
+                .stream()
+                .map(item -> SalesProductItineraryDayResponse.fromEntity(
+                        item,
+                        roadbookByDay.getOrDefault(item.getDayNo(), List.of())
+                ))
+                .toList();
+    }
+
+    private Map<Integer, List<SalesProductRoadbookPointResponse>> loadDirectEditRoadbookPoints(Long tenantId, Long productId) {
+        if (roadbookPointMapper == null || productId == null) {
+            return Map.of();
+        }
+        return roadbookPointMapper.selectList(baseRoadbookPointQuery(tenantId)
+                        .eq("product_id", productId)
+                        .orderByAsc("day_no")
+                        .orderByAsc("point_order")
+                        .orderByAsc("id"))
+                .stream()
+                .collect(Collectors.groupingBy(
+                        SalesProductRoadbookPointEntity::getDayNo,
+                        Collectors.mapping(SalesProductRoadbookPointResponse::fromEntity, Collectors.toList())
+                ));
     }
 
     private void applyGlobalStatusFilter(QueryWrapper<SalesTeamEntity> wrapper, String teamStatus) {
@@ -648,6 +1138,17 @@ public class SalesTeamScheduleService {
         return product;
     }
 
+    private SalesProductEntity requireDirectProductSnapshot(Long productId, Long tenantId) {
+        if (productId == null) {
+            throw new BizException("团队产品快照不存在");
+        }
+        SalesProductEntity product = productMapper.selectOne(baseProductQuery(tenantId).eq("id", productId));
+        if (product == null) {
+            throw new BizException("产品快照不存在或已删除");
+        }
+        return product;
+    }
+
     private SalesTeamEntity requireTeam(Long teamId, Long tenantId) {
         SalesTeamEntity team = teamMapper.selectOne(baseTeamQuery(tenantId).eq("id", teamId));
         if (team == null) {
@@ -714,6 +1215,252 @@ public class SalesTeamScheduleService {
         return entity;
     }
 
+    private SalesProductEntity buildDirectProductSnapshot(
+            SalesTeamDirectCreateRequest request,
+            Long tenantId,
+            String operator,
+            String teamNo
+    ) {
+        SalesProductEntity entity = new SalesProductEntity();
+        entity.setTenantId(tenantId);
+        applyDirectProductFields(entity, request, teamNo);
+        entity.setCreatedBy(operator);
+        entity.setIsDeleted(false);
+        return entity;
+    }
+
+    /** 将直接建团或改团页面的产品快照字段写入实体。 */
+    private void applyDirectProductFields(
+            SalesProductEntity entity,
+            SalesTeamDirectCreateRequest request,
+            String teamNo
+    ) {
+        entity.setProductName(directProductSnapshotName(request.teamName(), teamNo));
+        entity.setBusinessType(clean(request.businessType()));
+        entity.setDomesticInternational(SalesProductDomesticType.fromValueOrDefault(request.domesticInternational()).getValue());
+        entity.setProvince(clean(request.province()));
+        entity.setCity(clean(request.city()));
+        entity.setDistrict(clean(request.district()));
+        entity.setTripType(SalesProductTripType.fromValueOrDefault(request.tripType()).getValue());
+        entity.setReceptionStandard(clean(request.receptionStandard()));
+        entity.setProductTheme(clean(request.productTheme()));
+        entity.setTravelDays(request.travelDays() == null ? 1 : request.travelDays());
+        entity.setCloseDaysBefore(number(request.closeDaysBefore()));
+        entity.setSingleRoomDifference(money(request.singleRoomDifference()));
+        entity.setPlannedCapacity(number(request.totalSeats()));
+        entity.setStatus(SalesProductStatus.ACTIVE.getValue());
+        entity.setRemark(clean(request.remark()));
+    }
+
+    /**
+     * 直接建团创建的是团队专属产品快照，名称追加团号，避免同一线路多次建团时撞产品名称唯一索引。
+     */
+    private String directProductSnapshotName(String teamName, String teamNo) {
+        String baseName = clean(teamName);
+        String suffix = "-" + clean(teamNo);
+        if (!StringUtils.hasText(baseName) || !StringUtils.hasText(teamNo)) {
+            return baseName;
+        }
+        int maxBaseLength = Math.max(0, PRODUCT_NAME_MAX_LENGTH - suffix.length());
+        String trimmedBase = baseName.length() > maxBaseLength ? baseName.substring(0, maxBaseLength) : baseName;
+        return trimmedBase + suffix;
+    }
+
+    /**
+     * 编辑页展示名称时移除直接建团快照为唯一性追加的团号后缀，避免用户保存后重复追加团号。
+     */
+    private String directProductDisplayName(String productName, String teamNo) {
+        String cleanName = clean(productName);
+        String cleanTeamNo = clean(teamNo);
+        if (!StringUtils.hasText(cleanName) || !StringUtils.hasText(cleanTeamNo)) {
+            return cleanName;
+        }
+        String suffix = "-" + cleanTeamNo;
+        return cleanName.endsWith(suffix) ? cleanName.substring(0, cleanName.length() - suffix.length()) : cleanName;
+    }
+
+    private SalesTeamEntity buildDirectTeam(
+            SalesProductEntity product,
+            SalesTeamDirectCreateRequest request,
+            SalesTeamType teamType,
+            Long tenantId,
+            String operator,
+            String teamNo
+    ) {
+        Integer totalSeats = number(request.totalSeats());
+        SalesTeamEntity entity = new SalesTeamEntity();
+        entity.setTenantId(tenantId);
+        entity.setProductId(product.getId());
+        entity.setTeamNo(teamNo);
+        entity.setTeamType(teamType.getValue());
+        entity.setBusinessType(clean(request.businessType()));
+        entity.setDepartureDate(request.departureDate());
+        entity.setStatus(SalesTeamStatus.NORMAL.getValue());
+        entity.setTotalSeats(totalSeats);
+        entity.setUsedSeats(0);
+        entity.setRemainingSeats(totalSeats);
+        entity.setSingleRoomDifference(money(request.singleRoomDifference()));
+        entity.setCloseDaysBefore(number(request.closeDaysBefore()));
+        entity.setCreatedBy(operator);
+        entity.setRemark(clean(request.remark()));
+        entity.setIsDeleted(false);
+        return entity;
+    }
+
+    /**
+     * 保存团队直接创建页中的产品说明页签。
+     *
+     * <p>散拼、整团、散团入口在老系统中复用产品团队编辑页，因此这些说明必须落到产品快照子表，
+     * 供后续团队操作页、行程单和收客说明读取。</p>
+     */
+    private void saveDirectProductDescription(
+            Long productId,
+            SalesTeamDirectCreateRequest request,
+            Long tenantId,
+            String operator
+    ) {
+        if (descriptionMapper == null || productId == null) {
+            return;
+        }
+        SalesProductDescriptionEntity entity = new SalesProductDescriptionEntity();
+        entity.setTenantId(tenantId);
+        entity.setProductId(productId);
+        entity.setBookingNotice(clean(request.bookingNotice()));
+        entity.setProductDescription(clean(request.productDescription()));
+        entity.setFeeIncluded(clean(request.feeIncluded()));
+        entity.setFeeExcluded(clean(request.feeExcluded()));
+        entity.setChildPolicy(clean(request.childPolicy()));
+        entity.setShoppingArrangement(clean(request.shoppingArrangement()));
+        entity.setOptionalItems(clean(request.optionalItems()));
+        entity.setGiftItems(clean(request.giftItems()));
+        entity.setAttentionItems(clean(request.attentionItems()));
+        entity.setWarmReminder(clean(request.warmReminder()));
+        entity.setCreatedBy(operator);
+        entity.setIsDeleted(false);
+        descriptionMapper.insert(entity);
+    }
+
+    /**
+     * 保存团队直接创建页中的每日行程。
+     *
+     * <p>散拼、整团、散团入口和产品页复用同一套行程录入口径，路书摘要和地图点位都落到产品快照子表，
+     * 这样后续团队操作页、行程单和计调安排读取的是同一份行程资料。</p>
+     */
+    private void saveDirectProductItineraryDays(
+            Long productId,
+            SalesTeamDirectCreateRequest request,
+            Long tenantId,
+            String operator
+    ) {
+        if (itineraryDayMapper == null || productId == null || request.itineraryDays() == null) {
+            return;
+        }
+        int index = 1;
+        for (var item : request.itineraryDays()) {
+            SalesProductItineraryDayEntity entity = new SalesProductItineraryDayEntity();
+            entity.setTenantId(tenantId);
+            entity.setProductId(productId);
+            entity.setDayNo(item.dayNo() == null ? index : item.dayNo());
+            entity.setDayTitle(clean(item.dayTitle()));
+            entity.setItineraryContent(clean(item.itineraryContent()));
+            entity.setAccommodationNote(clean(item.accommodationNote()));
+            entity.setRelatedHotel(clean(item.relatedHotel()));
+            entity.setSeasonalSurcharge(money(item.seasonalSurcharge()));
+            entity.setBreakfastIncluded(Boolean.TRUE.equals(item.breakfastIncluded()));
+            entity.setLunchIncluded(Boolean.TRUE.equals(item.lunchIncluded()));
+            entity.setDinnerIncluded(Boolean.TRUE.equals(item.dinnerIncluded()));
+            entity.setRoadbookPlace(clean(item.roadbookPlace()));
+            entity.setRoadbookSummary(clean(item.roadbookSummary()));
+            entity.setRoadbookTotalDistanceMeters(number(item.roadbookTotalDistanceMeters()));
+            entity.setRoadbookTotalDurationSeconds(number(item.roadbookTotalDurationSeconds()));
+            entity.setCreatedBy(operator);
+            entity.setIsDeleted(false);
+            itineraryDayMapper.insert(entity);
+            saveDirectRoadbookPoints(productId, entity.getDayNo(), item.roadbookPoints(), tenantId, operator);
+            index += 1;
+        }
+    }
+
+    /**
+     * 保存直接建团行程中的路书地图地点。
+     *
+     * <p>路书地点必须跟随产品快照保存，否则用户在新增团队页维护的地图路线保存后会只剩摘要，后续再编辑无法还原点位。</p>
+     */
+    private void saveDirectRoadbookPoints(
+            Long productId,
+            Integer dayNo,
+            List<com.mtravel.platform.sales.product.dto.SalesProductRoadbookPointRequest> roadbookPoints,
+            Long tenantId,
+            String operator
+    ) {
+        if (roadbookPointMapper == null || productId == null || dayNo == null || roadbookPoints == null) {
+            return;
+        }
+        int index = 1;
+        for (var item : roadbookPoints) {
+            if (!StringUtils.hasText(item.placeName())) {
+                continue;
+            }
+            SalesProductRoadbookPointEntity entity = new SalesProductRoadbookPointEntity();
+            entity.setTenantId(tenantId);
+            entity.setProductId(productId);
+            entity.setDayNo(dayNo);
+            entity.setPointOrder(item.pointOrder() == null ? index : item.pointOrder());
+            entity.setPlaceName(clean(item.placeName()));
+            entity.setAddress(clean(item.address()));
+            entity.setLongitude(clean(item.longitude()));
+            entity.setLatitude(clean(item.latitude()));
+            entity.setPointType(StringUtils.hasText(item.pointType()) ? item.pointType() : "waypoint");
+            entity.setStayMinutes(number(item.stayMinutes()));
+            entity.setDistanceToNextMeters(number(item.distanceToNextMeters()));
+            entity.setDurationToNextSeconds(number(item.durationToNextSeconds()));
+            entity.setRemark(clean(item.remark()));
+            entity.setCreatedBy(operator);
+            entity.setIsDeleted(false);
+            roadbookPointMapper.insert(entity);
+            index += 1;
+        }
+    }
+
+    /**
+     * 编辑团队时只替换产品快照的说明、行程和路书。
+     *
+     * <p>团队安排成本和供应商明细属于后续执行数据，不应因为用户修改基本信息或行程说明被清空。</p>
+     */
+    private void softDeleteDirectProductContent(Long productId, Long tenantId, String operator) {
+        OffsetDateTime now = OffsetDateTime.now();
+        if (descriptionMapper != null) {
+            SalesProductDescriptionEntity description = new SalesProductDescriptionEntity();
+            description.setIsDeleted(true);
+            description.setDeletedAt(now);
+            description.setDeletedBy(operator);
+            descriptionMapper.update(description, new UpdateWrapper<SalesProductDescriptionEntity>()
+                    .eq("tenant_id", tenantId)
+                    .eq("product_id", productId)
+                    .eq("is_deleted", false));
+        }
+        if (itineraryDayMapper != null) {
+            SalesProductItineraryDayEntity itinerary = new SalesProductItineraryDayEntity();
+            itinerary.setIsDeleted(true);
+            itinerary.setDeletedAt(now);
+            itinerary.setDeletedBy(operator);
+            itineraryDayMapper.update(itinerary, new UpdateWrapper<SalesProductItineraryDayEntity>()
+                    .eq("tenant_id", tenantId)
+                    .eq("product_id", productId)
+                    .eq("is_deleted", false));
+        }
+        if (roadbookPointMapper != null) {
+            SalesProductRoadbookPointEntity roadbook = new SalesProductRoadbookPointEntity();
+            roadbook.setIsDeleted(true);
+            roadbook.setDeletedAt(now);
+            roadbook.setDeletedBy(operator);
+            roadbookPointMapper.update(roadbook, new UpdateWrapper<SalesProductRoadbookPointEntity>()
+                    .eq("tenant_id", tenantId)
+                    .eq("product_id", productId)
+                    .eq("is_deleted", false));
+        }
+    }
+
     /**
      * 从产品团队安排备注扩展区解析默认团队属性。
      *
@@ -740,9 +1487,17 @@ public class SalesTeamScheduleService {
         return matcher.find() ? clean(matcher.group(1)) : null;
     }
 
-    private String firstText(String first, String second) {
-        String cleanFirst = clean(first);
-        return StringUtils.hasText(cleanFirst) ? cleanFirst : clean(second);
+    private String firstText(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            String cleaned = clean(value);
+            if (StringUtils.hasText(cleaned)) {
+                return cleaned;
+            }
+        }
+        return null;
     }
 
     /**
@@ -993,14 +1748,13 @@ public class SalesTeamScheduleService {
     }
 
     private String nextTeamNo(
-            SalesProductEntity product,
+            SalesTeamType teamType,
             Long tenantId,
             LocalDate departureDate,
             Set<String> generatedInThisBatch
     ) {
-        String base = teamNoBase(product, departureDate);
+        String base = teamNoBase(teamType, departureDate);
         List<String> existingNos = teamMapper.selectList(baseTeamQuery(tenantId)
-                        .eq("product_id", product.getId())
                         .eq("departure_date", departureDate)
                         .likeRight("team_no", base))
                 .stream()
@@ -1019,8 +1773,9 @@ public class SalesTeamScheduleService {
         return teamNo;
     }
 
-    private String teamNoBase(SalesProductEntity product, LocalDate departureDate) {
-        return DEFAULT_TEAM_NO_PREFIX + "-" + departureDate.format(TEAM_DATE_FORMATTER);
+    private String teamNoBase(SalesTeamType teamType, LocalDate departureDate) {
+        String prefix = teamType == SalesTeamType.SANPIN ? DEFAULT_TEAM_NO_PREFIX : "CS-BK";
+        return prefix + "-" + departureDate.format(TEAM_DATE_FORMATTER);
     }
 
     private String suffixOf(String teamNo) {

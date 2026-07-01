@@ -3,14 +3,30 @@ package com.mtravel.platform.sales.team.service;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.mtravel.platform.common.BizException;
+import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementEntity;
+import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementOrderAllocationEntity;
+import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementPriceLineEntity;
+import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementMapper;
+import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementOrderAllocationMapper;
+import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementPriceLineMapper;
+import com.mtravel.platform.sales.product.entity.SalesProductArrangementItemEntity;
+import com.mtravel.platform.sales.product.entity.SalesProductArrangementPriceLineEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductDescriptionEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductItineraryDayEntity;
+import com.mtravel.platform.sales.product.entity.SalesProductRoadbookPointEntity;
+import com.mtravel.platform.sales.product.dto.SalesProductItineraryDayRequest;
+import com.mtravel.platform.sales.product.dto.SalesProductRoadbookPointRequest;
+import com.mtravel.platform.sales.product.mapper.SalesProductArrangementItemMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductArrangementPriceLineMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductDescriptionMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductItineraryDayMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductRoadbookPointMapper;
 import com.mtravel.platform.sales.team.dto.SalesTeamBatchCreateRequest;
 import com.mtravel.platform.sales.team.dto.SalesTeamBatchEditRequest;
+import com.mtravel.platform.sales.team.dto.SalesTeamDirectCreateRequest;
+import com.mtravel.platform.sales.team.dto.SalesTeamDirectEditResponse;
 import com.mtravel.platform.sales.team.dto.SalesTeamListResponse;
 import com.mtravel.platform.sales.team.dto.SalesTeamPriceSaveRequest;
 import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
@@ -153,6 +169,111 @@ class SalesTeamScheduleServiceTest {
     }
 
     @Test
+    void batchCreateShouldCopyProductArrangementTemplateToFormalTeamArrangements() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesTeamPriceMapper priceMapper = mock(SalesTeamPriceMapper.class);
+        SalesProductArrangementItemMapper productArrangementMapper = mock(SalesProductArrangementItemMapper.class);
+        SalesProductArrangementPriceLineMapper productPriceLineMapper = mock(SalesProductArrangementPriceLineMapper.class);
+        DispatchTeamArrangementMapper teamArrangementMapper = mock(DispatchTeamArrangementMapper.class);
+        DispatchTeamArrangementPriceLineMapper teamPriceLineMapper = mock(DispatchTeamArrangementPriceLineMapper.class);
+        DispatchTeamArrangementOrderAllocationMapper allocationMapper = mock(DispatchTeamArrangementOrderAllocationMapper.class);
+        SalesTeamScheduleService service = new SalesTeamScheduleService(
+                productMapper,
+                null,
+                null,
+                null,
+                productArrangementMapper,
+                productPriceLineMapper,
+                teamMapper,
+                priceMapper,
+                mock(SalesTeamStatusLogMapper.class),
+                null,
+                null,
+                teamArrangementMapper,
+                teamPriceLineMapper,
+                allocationMapper
+        );
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
+        when(teamMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(productArrangementMapper.selectList(any(Wrapper.class))).thenReturn(List.of(productTrafficArrangement()));
+        when(productPriceLineMapper.selectList(any(Wrapper.class))).thenReturn(List.of(productTrafficPriceLine()));
+        when(teamMapper.insert(any(SalesTeamEntity.class))).thenAnswer(invocation -> {
+            SalesTeamEntity team = invocation.getArgument(0);
+            team.setId(3001L);
+            return 1;
+        });
+        when(teamArrangementMapper.insert(any(DispatchTeamArrangementEntity.class))).thenAnswer(invocation -> {
+            DispatchTeamArrangementEntity arrangement = invocation.getArgument(0);
+            arrangement.setId(9001L);
+            return 1;
+        });
+        ArgumentCaptor<DispatchTeamArrangementEntity> arrangementCaptor =
+                ArgumentCaptor.forClass(DispatchTeamArrangementEntity.class);
+        ArgumentCaptor<DispatchTeamArrangementPriceLineEntity> priceLineCaptor =
+                ArgumentCaptor.forClass(DispatchTeamArrangementPriceLineEntity.class);
+        ArgumentCaptor<DispatchTeamArrangementOrderAllocationEntity> allocationCaptor =
+                ArgumentCaptor.forClass(DispatchTeamArrangementOrderAllocationEntity.class);
+
+        service.batchCreate(
+                88L,
+                new SalesTeamBatchCreateRequest(
+                        LocalDate.of(2026, 7, 1),
+                        LocalDate.of(2026, 7, 1),
+                        List.of(3),
+                        6383L,
+                        "老板账号",
+                        77,
+                        new BigDecimal("701"),
+                        new BigDecimal("1701"),
+                        new BigDecimal("1201"),
+                        new BigDecimal("901"),
+                        new BigDecimal("1601"),
+                        new BigDecimal("301"),
+                        null,
+                        "默认",
+                        null
+                ),
+                1L,
+                "admin"
+        );
+
+        verify(teamArrangementMapper).insert(arrangementCaptor.capture());
+        DispatchTeamArrangementEntity arrangement = arrangementCaptor.getValue();
+        assertThat(arrangement.getTeamId()).isEqualTo(3001L);
+        assertThat(arrangement.getArrangementType()).isEqualTo("traffic");
+        assertThat(arrangement.getItemName()).isEqualTo("飞机票");
+        assertThat(arrangement.getTrafficType()).isEqualTo("飞机");
+        assertThat(arrangement.getDeparturePlace()).isEqualTo("杭州");
+        assertThat(arrangement.getArrivalPlace()).isEqualTo("北京");
+        assertThat(arrangement.getSupplierName()).isEqualTo("国航供应商");
+        assertThat(arrangement.getAllocationMode()).isEqualTo("group_order_average");
+        assertThat(arrangement.getSettlementType()).isEqualTo("credit");
+        assertThat(arrangement.getMealType()).isEqualTo("自助早");
+        assertThat(arrangement.getFundIncluded()).isEqualTo("含");
+        assertThat(arrangement.getConfirmed()).isTrue();
+        assertThat(arrangement.getConfirmationNo()).isEqualTo("CN-PRODUCT-1");
+        assertThat(arrangement.getGuideId()).isEqualTo(66L);
+        assertThat(arrangement.getGuideName()).isEqualTo("产品导游");
+        assertThat(arrangement.getTotalAmount()).isEqualByComparingTo("1200.00");
+        assertThat(arrangement.getCashAmount()).isEqualByComparingTo("0.00");
+        assertThat(arrangement.getCreditAmount()).isEqualByComparingTo("1200.00");
+        assertThat(arrangement.getNoGuideReport()).isFalse();
+
+        verify(teamPriceLineMapper).insert(priceLineCaptor.capture());
+        assertThat(priceLineCaptor.getValue().getArrangementId()).isEqualTo(9001L);
+        assertThat(priceLineCaptor.getValue().getProjectName()).isEqualTo("成人机票");
+        assertThat(priceLineCaptor.getValue().getUnitPrice()).isEqualByComparingTo("120.00");
+        assertThat(priceLineCaptor.getValue().getQuantity()).isEqualByComparingTo("10.00");
+        assertThat(priceLineCaptor.getValue().getAmount()).isEqualByComparingTo("1200.00");
+
+        verify(allocationMapper).insert(allocationCaptor.capture());
+        assertThat(allocationCaptor.getValue().getAllocationScope()).isEqualTo("team");
+        assertThat(allocationCaptor.getValue().getOrderId()).isNull();
+        assertThat(allocationCaptor.getValue().getAllocationAmount()).isEqualByComparingTo("1200.00");
+    }
+
+    @Test
     void batchCreateShouldGenerateSpecificNonContinuousDates() {
         SalesProductMapper productMapper = mock(SalesProductMapper.class);
         SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
@@ -204,6 +325,479 @@ class SalesTeamScheduleServiceTest {
                 );
         assertThat(teamCaptor.getAllValues()).extracting(SalesTeamEntity::getTeamNo)
                 .containsExactly("CS-SP-BK-260701A", "CS-SP-BK-260703A", "CS-SP-BK-260705A");
+    }
+
+    @Test
+    void directCreateShouldCreateProductAndTeamWithoutDefaultPriceForZhengtuan() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesTeamPriceMapper priceMapper = mock(SalesTeamPriceMapper.class);
+        SalesTeamStatusLogMapper statusLogMapper = mock(SalesTeamStatusLogMapper.class);
+        SalesTeamScheduleService service = new SalesTeamScheduleService(
+                productMapper,
+                teamMapper,
+                priceMapper,
+                statusLogMapper
+        );
+        when(teamMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        ArgumentCaptor<SalesProductEntity> productCaptor = ArgumentCaptor.forClass(SalesProductEntity.class);
+        ArgumentCaptor<SalesTeamEntity> teamCaptor = ArgumentCaptor.forClass(SalesTeamEntity.class);
+
+        var response = service.directCreate(
+                new SalesTeamDirectCreateRequest(
+                        "zhengtuan",
+                        "HD3流浪地球计划",
+                        "红色培训",
+                        "domestic",
+                        "重庆市",
+                        "重庆市",
+                        null,
+                        LocalDate.of(2026, 6, 23),
+                        "daily",
+                        "准四星",
+                        "亲子游",
+                        3,
+                        2,
+                        new BigDecimal("199"),
+                        500,
+                        List.of(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        "操作备注"
+                ),
+                1L,
+                "admin"
+        );
+
+        verify(productMapper).insert(productCaptor.capture());
+        SalesProductEntity product = productCaptor.getValue();
+        assertThat(product.getProductName()).isEqualTo("HD3流浪地球计划-CS-BK-260623A");
+        assertThat(product.getBusinessType()).isEqualTo("红色培训");
+        assertThat(product.getDomesticInternational()).isEqualTo("domestic");
+        assertThat(product.getProvince()).isEqualTo("重庆市");
+        assertThat(product.getTravelDays()).isEqualTo(3);
+        assertThat(product.getPlannedCapacity()).isEqualTo(500);
+        assertThat(product.getStatus()).isEqualTo("active");
+
+        verify(teamMapper).insert(teamCaptor.capture());
+        SalesTeamEntity team = teamCaptor.getValue();
+        assertThat(team.getTeamNo()).isEqualTo("CS-BK-260623A");
+        assertThat(team.getTeamType()).isEqualTo("zhengtuan");
+        assertThat(team.getBusinessType()).isEqualTo("红色培训");
+        assertThat(team.getDepartureDate()).isEqualTo(LocalDate.of(2026, 6, 23));
+        assertThat(team.getTotalSeats()).isEqualTo(500);
+        assertThat(team.getRemainingSeats()).isEqualTo(500);
+        assertThat(team.getSingleRoomDifference()).isEqualByComparingTo("199");
+        assertThat(team.getRemark()).isEqualTo("操作备注");
+
+        verify(priceMapper, never()).insert(any(SalesTeamPriceEntity.class));
+        assertThat(response.prices()).isEmpty();
+        assertThat(response.teamType()).isEqualTo("zhengtuan");
+    }
+
+    @Test
+    void directCreateShouldPersistProductDescriptionAndItineraryTabs() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductDescriptionMapper descriptionMapper = mock(SalesProductDescriptionMapper.class);
+        SalesProductItineraryDayMapper itineraryDayMapper = mock(SalesProductItineraryDayMapper.class);
+        SalesProductRoadbookPointMapper roadbookPointMapper = mock(SalesProductRoadbookPointMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesTeamPriceMapper priceMapper = mock(SalesTeamPriceMapper.class);
+        SalesTeamScheduleService service = new SalesTeamScheduleService(
+                productMapper,
+                descriptionMapper,
+                itineraryDayMapper,
+                roadbookPointMapper,
+                teamMapper,
+                priceMapper,
+                mock(SalesTeamStatusLogMapper.class)
+        );
+        when(productMapper.insert(any(SalesProductEntity.class))).thenAnswer(invocation -> {
+            SalesProductEntity product = invocation.getArgument(0);
+            product.setId(9001L);
+            return 1;
+        });
+        when(teamMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        ArgumentCaptor<SalesProductDescriptionEntity> descriptionCaptor = ArgumentCaptor.forClass(SalesProductDescriptionEntity.class);
+        ArgumentCaptor<SalesProductItineraryDayEntity> itineraryCaptor = ArgumentCaptor.forClass(SalesProductItineraryDayEntity.class);
+        ArgumentCaptor<SalesProductRoadbookPointEntity> roadbookPointCaptor = ArgumentCaptor.forClass(SalesProductRoadbookPointEntity.class);
+
+        service.directCreate(
+                new SalesTeamDirectCreateRequest(
+                        "sanpin",
+                        "杭州西湖二日游",
+                        "疗休养",
+                        "domestic",
+                        "浙江省",
+                        "杭州市",
+                        "西湖区",
+                        LocalDate.of(2026, 7, 1),
+                        "irregular",
+                        "准四星",
+                        "山水",
+                        2,
+                        1,
+                        BigDecimal.ZERO,
+                        40,
+                        List.of(new SalesProductItineraryDayRequest(
+                                1,
+                                "杭州集合",
+                                "西湖游览",
+                                "住杭州",
+                                "西湖酒店",
+                                BigDecimal.ZERO,
+                                true,
+                                true,
+                                false,
+                                null,
+                                "酒店 -> 西湖",
+                                12_000,
+                                1_800,
+                                List.of(new SalesProductRoadbookPointRequest(
+                                        1,
+                                        "西湖酒店",
+                                        "杭州市西湖区",
+                                        "120.145",
+                                        "30.245",
+                                        "departure",
+                                        10,
+                                        12_000,
+                                        1_800,
+                                        "集合点"
+                                ))
+                        )),
+                        "学生团队提前核对名单",
+                        "产品说明正文",
+                        "含车含导游",
+                        "不含单房差",
+                        "儿童不占床",
+                        "无购物",
+                        "无自费",
+                        "赠送矿泉水",
+                        "注意证件",
+                        "带好雨具",
+                        "团队备注"
+                ),
+                1L,
+                "admin"
+        );
+
+        verify(descriptionMapper).insert(descriptionCaptor.capture());
+        assertThat(descriptionCaptor.getValue().getProductId()).isEqualTo(9001L);
+        assertThat(descriptionCaptor.getValue().getBookingNotice()).isEqualTo("学生团队提前核对名单");
+        assertThat(descriptionCaptor.getValue().getProductDescription()).isEqualTo("产品说明正文");
+        assertThat(descriptionCaptor.getValue().getFeeIncluded()).isEqualTo("含车含导游");
+        assertThat(descriptionCaptor.getValue().getWarmReminder()).isEqualTo("带好雨具");
+
+        verify(itineraryDayMapper).insert(itineraryCaptor.capture());
+        assertThat(itineraryCaptor.getValue().getProductId()).isEqualTo(9001L);
+        assertThat(itineraryCaptor.getValue().getDayNo()).isEqualTo(1);
+        assertThat(itineraryCaptor.getValue().getDayTitle()).isEqualTo("杭州集合");
+        assertThat(itineraryCaptor.getValue().getItineraryContent()).isEqualTo("西湖游览");
+        assertThat(itineraryCaptor.getValue().getBreakfastIncluded()).isTrue();
+        assertThat(itineraryCaptor.getValue().getRoadbookSummary()).isEqualTo("酒店 -> 西湖");
+
+        verify(roadbookPointMapper).insert(roadbookPointCaptor.capture());
+        assertThat(roadbookPointCaptor.getValue().getProductId()).isEqualTo(9001L);
+        assertThat(roadbookPointCaptor.getValue().getDayNo()).isEqualTo(1);
+        assertThat(roadbookPointCaptor.getValue().getPointOrder()).isEqualTo(1);
+        assertThat(roadbookPointCaptor.getValue().getPlaceName()).isEqualTo("西湖酒店");
+        assertThat(roadbookPointCaptor.getValue().getPointType()).isEqualTo("departure");
+        assertThat(roadbookPointCaptor.getValue().getDistanceToNextMeters()).isEqualTo(12000);
+    }
+
+    @Test
+    void directCreateShouldAvoidTeamNoCollisionAcrossProductSnapshots() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesTeamPriceMapper priceMapper = mock(SalesTeamPriceMapper.class);
+        SalesTeamScheduleService service = new SalesTeamScheduleService(
+                productMapper,
+                teamMapper,
+                priceMapper,
+                mock(SalesTeamStatusLogMapper.class)
+        );
+        SalesTeamEntity existing = existingTeam("CS-BK-260623A");
+        existing.setDepartureDate(LocalDate.of(2026, 6, 23));
+        when(teamMapper.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
+        ArgumentCaptor<SalesTeamEntity> teamCaptor = ArgumentCaptor.forClass(SalesTeamEntity.class);
+
+        service.directCreate(
+                new SalesTeamDirectCreateRequest(
+                        "zhengtuan",
+                        "重庆三日整团",
+                        "定制团",
+                        "domestic",
+                        "重庆市",
+                        "重庆市",
+                        null,
+                        LocalDate.of(2026, 6, 23),
+                        "daily",
+                        null,
+                        null,
+                        3,
+                        0,
+                        BigDecimal.ZERO,
+                        30,
+                        List.of(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null
+                ),
+                1L,
+                "admin"
+        );
+
+        verify(teamMapper).insert(teamCaptor.capture());
+        assertThat(teamCaptor.getValue().getTeamNo()).isEqualTo("CS-BK-260623B");
+    }
+
+    @Test
+    void directCreateShouldUseTeamNoInProductSnapshotName() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesTeamPriceMapper priceMapper = mock(SalesTeamPriceMapper.class);
+        SalesTeamScheduleService service = new SalesTeamScheduleService(
+                productMapper,
+                teamMapper,
+                priceMapper,
+                mock(SalesTeamStatusLogMapper.class)
+        );
+        SalesTeamEntity existing = existingTeam("CS-BK-260623A");
+        existing.setDepartureDate(LocalDate.of(2026, 6, 23));
+        when(teamMapper.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
+        ArgumentCaptor<SalesProductEntity> productCaptor = ArgumentCaptor.forClass(SalesProductEntity.class);
+
+        service.directCreate(
+                new SalesTeamDirectCreateRequest(
+                        "zhengtuan",
+                        "重庆三日整团",
+                        "定制团",
+                        "domestic",
+                        "重庆市",
+                        "重庆市",
+                        null,
+                        LocalDate.of(2026, 6, 23),
+                        "daily",
+                        null,
+                        null,
+                        3,
+                        0,
+                        BigDecimal.ZERO,
+                        30,
+                        List.of(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null
+                ),
+                1L,
+                "admin"
+        );
+
+        verify(productMapper).insert(productCaptor.capture());
+        assertThat(productCaptor.getValue().getProductName()).isEqualTo("重庆三日整团-CS-BK-260623B");
+    }
+
+    @Test
+    void directEditDetailShouldLoadTeamProductDescriptionAndRoadbook() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductDescriptionMapper descriptionMapper = mock(SalesProductDescriptionMapper.class);
+        SalesProductItineraryDayMapper itineraryDayMapper = mock(SalesProductItineraryDayMapper.class);
+        SalesProductRoadbookPointMapper roadbookPointMapper = mock(SalesProductRoadbookPointMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesTeamScheduleService service = new SalesTeamScheduleService(
+                productMapper,
+                descriptionMapper,
+                itineraryDayMapper,
+                roadbookPointMapper,
+                teamMapper,
+                mock(SalesTeamPriceMapper.class),
+                mock(SalesTeamStatusLogMapper.class)
+        );
+        SalesTeamEntity team = existingTeam("CS-BK-260628A");
+        team.setId(31L);
+        team.setProductId(15L);
+        team.setTeamType("santuan");
+        team.setBusinessType("地接团");
+        team.setDepartureDate(LocalDate.of(2026, 6, 28));
+        team.setTotalSeats(20);
+        team.setSingleRoomDifference(new BigDecimal("180"));
+        team.setCloseDaysBefore(2);
+        team.setRemark("团队备注");
+        SalesProductEntity product = product();
+        product.setId(15L);
+        product.setProductName("西湖-CS-BK-260628A");
+        product.setTravelDays(2);
+        product.setPlannedCapacity(20);
+        product.setTripType("irregular");
+        product.setRemark("产品备注不直接显示成团队名称");
+        SalesProductDescriptionEntity description = new SalesProductDescriptionEntity();
+        description.setProductDescription("产品说明正文");
+        description.setBookingNotice("收客须知");
+        description.setFeeIncluded("费用包含");
+        when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(team);
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product);
+        when(descriptionMapper.selectOne(any(Wrapper.class))).thenReturn(description);
+        when(itineraryDayMapper.selectList(any(Wrapper.class))).thenReturn(List.of(itineraryDay(1, "第1天", "游西湖", 12_000, 1_800)));
+        when(roadbookPointMapper.selectList(any(Wrapper.class))).thenReturn(List.of(roadbookPoint(1, "西湖酒店")));
+
+        SalesTeamDirectEditResponse result = service.directEditDetail(31L, 1L);
+
+        assertThat(result.id()).isEqualTo(31L);
+        assertThat(result.productId()).isEqualTo(15L);
+        assertThat(result.teamNo()).isEqualTo("CS-BK-260628A");
+        assertThat(result.teamName()).isEqualTo("西湖");
+        assertThat(result.teamType()).isEqualTo("santuan");
+        assertThat(result.businessType()).isEqualTo("地接团");
+        assertThat(result.departureDate()).isEqualTo(LocalDate.of(2026, 6, 28));
+        assertThat(result.travelDays()).isEqualTo(2);
+        assertThat(result.bookingNotice()).isEqualTo("收客须知");
+        assertThat(result.feeIncluded()).isEqualTo("费用包含");
+        assertThat(result.itineraryDays()).hasSize(1);
+        assertThat(result.itineraryDays().getFirst().roadbookPoints()).hasSize(1);
+        assertThat(result.itineraryDays().getFirst().roadbookPoints().getFirst().placeName()).isEqualTo("西湖酒店");
+    }
+
+    @Test
+    void directUpdateShouldUpdateExistingTeamAndProductSnapshotWithoutCreatingNewTeam() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductDescriptionMapper descriptionMapper = mock(SalesProductDescriptionMapper.class);
+        SalesProductItineraryDayMapper itineraryDayMapper = mock(SalesProductItineraryDayMapper.class);
+        SalesProductRoadbookPointMapper roadbookPointMapper = mock(SalesProductRoadbookPointMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesTeamScheduleService service = new SalesTeamScheduleService(
+                productMapper,
+                descriptionMapper,
+                itineraryDayMapper,
+                roadbookPointMapper,
+                teamMapper,
+                mock(SalesTeamPriceMapper.class),
+                mock(SalesTeamStatusLogMapper.class)
+        );
+        SalesTeamEntity current = existingTeam("CS-BK-260628A");
+        current.setId(31L);
+        current.setProductId(15L);
+        current.setUsedSeats(3);
+        current.setTotalSeats(20);
+        SalesProductEntity product = product();
+        product.setId(15L);
+        product.setProductName("西湖-CS-BK-260628A");
+        when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(current);
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product);
+        when(productMapper.update(any(SalesProductEntity.class), any(Wrapper.class))).thenReturn(1);
+        when(teamMapper.update(any(SalesTeamEntity.class), any(Wrapper.class))).thenReturn(1);
+        ArgumentCaptor<SalesProductEntity> productUpdateCaptor = ArgumentCaptor.forClass(SalesProductEntity.class);
+        ArgumentCaptor<SalesTeamEntity> teamUpdateCaptor = ArgumentCaptor.forClass(SalesTeamEntity.class);
+        ArgumentCaptor<SalesProductDescriptionEntity> descriptionInsertCaptor = ArgumentCaptor.forClass(SalesProductDescriptionEntity.class);
+        ArgumentCaptor<SalesProductItineraryDayEntity> itineraryInsertCaptor = ArgumentCaptor.forClass(SalesProductItineraryDayEntity.class);
+        ArgumentCaptor<SalesProductRoadbookPointEntity> roadbookInsertCaptor = ArgumentCaptor.forClass(SalesProductRoadbookPointEntity.class);
+
+        service.directUpdate(
+                31L,
+                new SalesTeamDirectCreateRequest(
+                        "zhengtuan",
+                        "西湖深度游",
+                        "定制团",
+                        "domestic",
+                        "浙江省",
+                        "杭州市",
+                        "西湖区",
+                        LocalDate.of(2026, 7, 2),
+                        "daily",
+                        "准四星",
+                        "亲子游",
+                        2,
+                        1,
+                        new BigDecimal("220"),
+                        18,
+                        List.of(new SalesProductItineraryDayRequest(
+                                1,
+                                "杭州集合",
+                                "西湖游览",
+                                "住杭州",
+                                "西湖酒店",
+                                BigDecimal.ZERO,
+                                true,
+                                true,
+                                false,
+                                null,
+                                "西湖酒店 -> 西湖",
+                                12_000,
+                                1_800,
+                                List.of(new SalesProductRoadbookPointRequest(
+                                        1,
+                                        "西湖酒店",
+                                        "杭州市西湖区",
+                                        "120.145",
+                                        "30.245",
+                                        "departure",
+                                        10,
+                                        12_000,
+                                        1_800,
+                                        "集合点"
+                                ))
+                        )),
+                        "收客须知更新",
+                        "产品说明更新",
+                        "含车含导游",
+                        "不含单房差",
+                        "儿童不占床",
+                        "无购物",
+                        "无自费",
+                        "赠送矿泉水",
+                        "注意证件",
+                        "带好雨具",
+                        "团队备注更新"
+                ),
+                1L,
+                "admin"
+        );
+
+        verify(productMapper, never()).insert(any(SalesProductEntity.class));
+        verify(teamMapper, never()).insert(any(SalesTeamEntity.class));
+        verify(productMapper).update(productUpdateCaptor.capture(), any(Wrapper.class));
+        assertThat(productUpdateCaptor.getValue().getProductName()).isEqualTo("西湖深度游-CS-BK-260628A");
+        assertThat(productUpdateCaptor.getValue().getTravelDays()).isEqualTo(2);
+        verify(teamMapper).update(teamUpdateCaptor.capture(), any(Wrapper.class));
+        assertThat(teamUpdateCaptor.getValue().getTeamNo()).isNull();
+        assertThat(teamUpdateCaptor.getValue().getTeamType()).isEqualTo("zhengtuan");
+        assertThat(teamUpdateCaptor.getValue().getDepartureDate()).isEqualTo(LocalDate.of(2026, 7, 2));
+        assertThat(teamUpdateCaptor.getValue().getTotalSeats()).isEqualTo(18);
+        assertThat(teamUpdateCaptor.getValue().getRemainingSeats()).isEqualTo(15);
+        assertThat(teamUpdateCaptor.getValue().getRemark()).isEqualTo("团队备注更新");
+        verify(descriptionMapper).update(any(SalesProductDescriptionEntity.class), any(Wrapper.class));
+        verify(itineraryDayMapper).update(any(SalesProductItineraryDayEntity.class), any(Wrapper.class));
+        verify(roadbookPointMapper).update(any(SalesProductRoadbookPointEntity.class), any(Wrapper.class));
+        verify(descriptionMapper).insert(descriptionInsertCaptor.capture());
+        assertThat(descriptionInsertCaptor.getValue().getBookingNotice()).isEqualTo("收客须知更新");
+        verify(itineraryDayMapper).insert(itineraryInsertCaptor.capture());
+        assertThat(itineraryInsertCaptor.getValue().getProductId()).isEqualTo(15L);
+        verify(roadbookPointMapper).insert(roadbookInsertCaptor.capture());
+        assertThat(roadbookInsertCaptor.getValue().getPlaceName()).isEqualTo("西湖酒店");
     }
 
     @Test
@@ -731,6 +1325,23 @@ class SalesTeamScheduleServiceTest {
         return entity;
     }
 
+    private SalesProductRoadbookPointEntity roadbookPoint(Integer pointOrder, String placeName) {
+        SalesProductRoadbookPointEntity entity = new SalesProductRoadbookPointEntity();
+        entity.setProductId(88L);
+        entity.setDayNo(1);
+        entity.setPointOrder(pointOrder);
+        entity.setPlaceName(placeName);
+        entity.setAddress("杭州市西湖区");
+        entity.setLongitude("120.145");
+        entity.setLatitude("30.245");
+        entity.setPointType("departure");
+        entity.setStayMinutes(10);
+        entity.setDistanceToNextMeters(12000);
+        entity.setDurationToNextSeconds(1800);
+        entity.setRemark("集合点");
+        return entity;
+    }
+
     private SalesProductEntity product() {
         SalesProductEntity product = new SalesProductEntity();
         product.setId(88L);
@@ -750,6 +1361,56 @@ class SalesTeamScheduleServiceTest {
         product.setStatus("active");
         product.setIsDeleted(false);
         return product;
+    }
+
+    private SalesProductArrangementItemEntity productTrafficArrangement() {
+        SalesProductArrangementItemEntity item = new SalesProductArrangementItemEntity();
+        item.setId(7001L);
+        item.setTenantId(1L);
+        item.setProductId(88L);
+        item.setArrangementType("traffic");
+        item.setItemName("飞机票");
+        item.setArrangementContent("第1天杭州到北京");
+        item.setAllocationMode("group_order_average");
+        item.setScheduleStartDay("第1天");
+        item.setScheduleEndDay("第1天");
+        item.setDeparturePlace("杭州");
+        item.setArrivalPlace("北京");
+        item.setResourceName("国航航班");
+        item.setSupplierId(601L);
+        item.setSupplierName("国航供应商");
+        item.setTrafficType("飞机");
+        item.setSettlementType("credit");
+        item.setMealType("自助早");
+        item.setFundIncluded("含");
+        item.setConfirmed(true);
+        item.setConfirmationNo("CN-PRODUCT-1");
+        item.setGuideId(66L);
+        item.setGuideName("产品导游");
+        item.setTotalAmount(new BigDecimal("1200"));
+        item.setCashAmount(BigDecimal.ZERO);
+        item.setCreditAmount(new BigDecimal("1200"));
+        item.setCostAmount(new BigDecimal("1200"));
+        item.setNoGuideReport(false);
+        item.setIsDeleted(false);
+        return item;
+    }
+
+    private SalesProductArrangementPriceLineEntity productTrafficPriceLine() {
+        SalesProductArrangementPriceLineEntity line = new SalesProductArrangementPriceLineEntity();
+        line.setId(7101L);
+        line.setTenantId(1L);
+        line.setProductId(88L);
+        line.setArrangementItemId(7001L);
+        line.setProjectName("成人机票");
+        line.setUnitPrice(new BigDecimal("120"));
+        line.setQuantity(new BigDecimal("10"));
+        line.setAmount(new BigDecimal("1200"));
+        line.setCashAmount(BigDecimal.ZERO);
+        line.setCreditAmount(new BigDecimal("1200"));
+        line.setSortOrder(1);
+        line.setIsDeleted(false);
+        return line;
     }
 
     private SalesTeamEntity existingTeam(String teamNo) {

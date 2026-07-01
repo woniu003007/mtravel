@@ -1,0 +1,645 @@
+package com.mtravel.platform.dispatch.guide.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.mtravel.platform.common.BizException;
+import com.mtravel.platform.common.PageResult;
+import com.mtravel.platform.dispatch.guide.dto.GuideLeaveResponse;
+import com.mtravel.platform.dispatch.guide.dto.GuideLeaveSaveRequest;
+import com.mtravel.platform.dispatch.guide.dto.GuideScheduleCalendarResponse;
+import com.mtravel.platform.dispatch.guide.dto.GuideScheduleQuery;
+import com.mtravel.platform.dispatch.guide.dto.TeamGuideFieldUpdateRequest;
+import com.mtravel.platform.dispatch.guide.dto.TeamGuideResponse;
+import com.mtravel.platform.dispatch.guide.dto.TeamGuideSaveRequest;
+import com.mtravel.platform.dispatch.guide.entity.DispatchGuideLeaveRecordEntity;
+import com.mtravel.platform.dispatch.guide.entity.DispatchTeamGuideEntity;
+import com.mtravel.platform.dispatch.guide.enums.DispatchTeamGuideStatus;
+import com.mtravel.platform.dispatch.guide.enums.GuideLeaveSourceType;
+import com.mtravel.platform.dispatch.guide.enums.GuideLeaveStatus;
+import com.mtravel.platform.dispatch.guide.mapper.DispatchGuideLeaveRecordMapper;
+import com.mtravel.platform.dispatch.guide.mapper.DispatchTeamGuideMapper;
+import com.mtravel.platform.enterprise.guide.entity.EnterpriseGuideEntity;
+import com.mtravel.platform.enterprise.guide.mapper.EnterpriseGuideMapper;
+import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
+import com.mtravel.platform.sales.team.mapper.SalesTeamMapper;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+
+/**
+ * 导游安排、导游请假和排班汇总业务服务。
+ *
+ * <p>本服务集中维护导游时间占用规则。团队导游安排和已通过请假都会进入排班汇总；
+ * 新增安排、审批请假和计调直接设置请假时必须在这里做统一冲突判断。</p>
+ */
+@Service
+public class DispatchGuideScheduleService {
+
+    private static final int CALENDAR_DAYS = 37;
+
+    private final DispatchTeamGuideMapper teamGuideMapper;
+    private final DispatchGuideLeaveRecordMapper leaveRecordMapper;
+    private final SalesTeamMapper teamMapper;
+    private final EnterpriseGuideMapper guideMapper;
+
+    /**
+     * 构造导游排班服务。
+     *
+     * @param teamGuideMapper 团队导游安排 Mapper
+     * @param leaveRecordMapper 导游请假记录 Mapper
+     * @param teamMapper 团队 Mapper
+     * @param guideMapper 导游档案 Mapper
+     */
+    public DispatchGuideScheduleService(
+            DispatchTeamGuideMapper teamGuideMapper,
+            DispatchGuideLeaveRecordMapper leaveRecordMapper,
+            SalesTeamMapper teamMapper,
+            EnterpriseGuideMapper guideMapper
+    ) {
+        this.teamGuideMapper = teamGuideMapper;
+        this.leaveRecordMapper = leaveRecordMapper;
+        this.teamMapper = teamMapper;
+        this.guideMapper = guideMapper;
+    }
+
+    /**
+     * 查询团队导游安排列表。
+     *
+     * @param teamId 团队 ID
+     * @param tenantId 当前租户 ID
+     * @return 团队导游安排列表
+     */
+    public List<TeamGuideResponse> listTeamGuides(Long teamId, Long tenantId) {
+        return teamGuideMapper.selectList(teamGuideQuery(tenantId)
+                        .eq("team_id", teamId)
+                        .orderByAsc("start_at")
+                        .orderByAsc("id"))
+                .stream()
+                .map(TeamGuideResponse::fromEntity)
+                .toList();
+    }
+
+    /**
+     * 新增团队导游安排。
+     *
+     * @param teamId 团队 ID
+     * @param request 导游安排字段
+     * @param tenantId 当前租户 ID
+     * @param operator 操作人
+     * @return 新增后的导游安排
+     */
+    @Transactional
+    public TeamGuideResponse createTeamGuide(Long teamId, TeamGuideSaveRequest request, Long tenantId, String operator) {
+        validateTimeRange(request.startAt(), request.endAt());
+        SalesTeamEntity team = resolveTeam(teamId, tenantId);
+        EnterpriseGuideEntity guide = resolveGuide(request.guideId(), tenantId);
+        assertNoTeamGuideConflict(guide.getId(), request.startAt(), request.endAt(), tenantId, null);
+        assertNoApprovedLeaveConflict(guide.getId(), request.startAt(), request.endAt(), tenantId);
+
+        DispatchTeamGuideEntity entity = new DispatchTeamGuideEntity();
+        entity.setTenantId(tenantId);
+        entity.setTeamId(team.getId());
+        entity.setTeamNo(team.getTeamNo());
+        applyGuideSnapshot(entity, guide);
+        entity.setGuideFee(money(request.guideFee()));
+        entity.setImprestAmount(money(request.imprestAmount()));
+        entity.setOperationFee(money(request.operationFee()));
+        entity.setStartAt(request.startAt());
+        entity.setEndAt(request.endAt());
+        entity.setFeeMemo(clean(request.feeMemo()));
+        entity.setGuideMemo(clean(request.guideMemo()));
+        entity.setIsTentative(Boolean.TRUE.equals(request.tentative()));
+        entity.setStatus(DispatchTeamGuideStatus.ACTIVE.getValue());
+        entity.setCreatedBy(operator);
+        entity.setIsDeleted(false);
+        teamGuideMapper.insert(entity);
+        return TeamGuideResponse.fromEntity(entity);
+    }
+
+    /**
+     * 按老系统单字段保存模式更新团队导游安排。
+     *
+     * @param teamId 团队 ID
+     * @param recordId 安排记录 ID
+     * @param request 字段和值
+     * @param tenantId 当前租户 ID
+     * @return 更新后的导游安排
+     */
+    @Transactional
+    public TeamGuideResponse updateTeamGuideField(
+            Long teamId,
+            Long recordId,
+            TeamGuideFieldUpdateRequest request,
+            Long tenantId
+    ) {
+        DispatchTeamGuideEntity entity = resolveTeamGuide(recordId, teamId, tenantId);
+        applyTeamGuideField(entity, request, tenantId);
+        validateTimeRange(entity.getStartAt(), entity.getEndAt());
+        assertNoTeamGuideConflict(entity.getGuideId(), entity.getStartAt(), entity.getEndAt(), tenantId, entity.getId());
+        assertNoApprovedLeaveConflict(entity.getGuideId(), entity.getStartAt(), entity.getEndAt(), tenantId);
+        int updated = teamGuideMapper.update(entity, teamGuideUpdate(tenantId).eq("id", recordId).eq("team_id", teamId));
+        if (updated == 0) {
+            throw new BizException("导游安排不存在或已删除");
+        }
+        return TeamGuideResponse.fromEntity(entity);
+    }
+
+    /**
+     * 软删除团队导游安排。
+     */
+    @Transactional
+    public void deleteTeamGuide(Long teamId, Long recordId, Long tenantId, String operator) {
+        DispatchTeamGuideEntity entity = new DispatchTeamGuideEntity();
+        entity.setIsDeleted(true);
+        entity.setDeletedAt(OffsetDateTime.now());
+        entity.setDeletedBy(operator);
+        int updated = teamGuideMapper.update(entity, teamGuideUpdate(tenantId).eq("id", recordId).eq("team_id", teamId));
+        if (updated == 0) {
+            throw new BizException("导游安排不存在或已删除");
+        }
+    }
+
+    /**
+     * 计调直接设置导游请假，保存后直接生效。
+     *
+     * @param request 请假内容
+     * @param tenantId 当前租户 ID
+     * @param operator 操作人
+     * @return 请假记录
+     */
+    @Transactional
+    public GuideLeaveResponse directCreateLeave(GuideLeaveSaveRequest request, Long tenantId, String operator) {
+        validateTimeRange(request.startAt(), request.endAt());
+        EnterpriseGuideEntity guide = resolveGuide(request.guideId(), tenantId);
+        assertNoTeamGuideConflict(guide.getId(), request.startAt(), request.endAt(), tenantId, null);
+
+        DispatchGuideLeaveRecordEntity entity = newLeaveEntity(
+                request,
+                guide,
+                tenantId,
+                operator,
+                GuideLeaveSourceType.DISPATCHER_DIRECT.getValue(),
+                GuideLeaveStatus.APPROVED.getValue()
+        );
+        entity.setApprovedBy(operator);
+        entity.setApprovedAt(OffsetDateTime.now());
+        leaveRecordMapper.insert(entity);
+        return GuideLeaveResponse.fromEntity(entity);
+    }
+
+    /**
+     * 导游自己提交请假申请。
+     *
+     * @param request 请假内容
+     * @param tenantId 当前租户 ID
+     * @param operator 当前导游账号
+     * @return 请假记录
+     */
+    @Transactional
+    public GuideLeaveResponse submitLeaveByGuide(GuideLeaveSaveRequest request, Long tenantId, String operator) {
+        validateTimeRange(request.startAt(), request.endAt());
+        EnterpriseGuideEntity guide = request.guideId() == null
+                ? resolveGuideByUsername(operator, tenantId)
+                : resolveGuide(request.guideId(), tenantId);
+        DispatchGuideLeaveRecordEntity entity = newLeaveEntity(
+                request,
+                guide,
+                tenantId,
+                operator,
+                GuideLeaveSourceType.GUIDE_APPLY.getValue(),
+                GuideLeaveStatus.PENDING.getValue()
+        );
+        leaveRecordMapper.insert(entity);
+        return GuideLeaveResponse.fromEntity(entity);
+    }
+
+    /**
+     * 审批通过导游请假。通过前必须再次检查团队安排冲突。
+     */
+    @Transactional
+    public GuideLeaveResponse approveLeave(Long leaveId, String approvalRemark, Long tenantId, String operator) {
+        DispatchGuideLeaveRecordEntity entity = resolveLeave(leaveId, tenantId);
+        assertLeavePending(entity);
+        assertNoTeamGuideConflict(entity.getGuideId(), entity.getStartAt(), entity.getEndAt(), tenantId, null);
+        entity.setStatus(GuideLeaveStatus.APPROVED.getValue());
+        entity.setApprovedBy(operator);
+        entity.setApprovedAt(OffsetDateTime.now());
+        entity.setApprovalRemark(clean(approvalRemark));
+        int updated = leaveRecordMapper.update(entity, leaveUpdate(tenantId).eq("id", leaveId));
+        if (updated == 0) {
+            throw new BizException("导游请假记录不存在或已删除");
+        }
+        return GuideLeaveResponse.fromEntity(entity);
+    }
+
+    /**
+     * 驳回导游请假申请。
+     */
+    @Transactional
+    public GuideLeaveResponse rejectLeave(Long leaveId, String approvalRemark, Long tenantId, String operator) {
+        DispatchGuideLeaveRecordEntity entity = resolveLeave(leaveId, tenantId);
+        assertLeavePending(entity);
+        entity.setStatus(GuideLeaveStatus.REJECTED.getValue());
+        entity.setRejectedBy(operator);
+        entity.setRejectedAt(OffsetDateTime.now());
+        entity.setApprovalRemark(clean(approvalRemark));
+        int updated = leaveRecordMapper.update(entity, leaveUpdate(tenantId).eq("id", leaveId));
+        if (updated == 0) {
+            throw new BizException("导游请假记录不存在或已删除");
+        }
+        return GuideLeaveResponse.fromEntity(entity);
+    }
+
+    /**
+     * 撤回待审批请假申请。
+     */
+    @Transactional
+    public GuideLeaveResponse withdrawLeave(Long leaveId, Long tenantId, String operator) {
+        DispatchGuideLeaveRecordEntity entity = resolveLeave(leaveId, tenantId);
+        assertLeavePending(entity);
+        entity.setStatus(GuideLeaveStatus.WITHDRAWN.getValue());
+        entity.setWithdrawnBy(operator);
+        entity.setWithdrawnAt(OffsetDateTime.now());
+        int updated = leaveRecordMapper.update(entity, leaveUpdate(tenantId).eq("id", leaveId));
+        if (updated == 0) {
+            throw new BizException("导游请假记录不存在或已删除");
+        }
+        return GuideLeaveResponse.fromEntity(entity);
+    }
+
+    /**
+     * 分页查询后台导游请假记录。
+     */
+    public PageResult<GuideLeaveResponse> pageLeaves(
+            String guideName,
+            String status,
+            LocalDate startDate,
+            LocalDate endDate,
+            long page,
+            long pageSize,
+            Long tenantId
+    ) {
+        QueryWrapper<DispatchGuideLeaveRecordEntity> wrapper = leaveQuery(tenantId)
+                .like(StringUtils.hasText(guideName), "guide_name", guideName)
+                .eq(StringUtils.hasText(status), "status", status)
+                .lt(endDate != null, "start_at", endDate == null ? null : endDate.plusDays(1).atStartOfDay())
+                .gt(startDate != null, "end_at", startDate == null ? null : startDate.atStartOfDay())
+                .orderByDesc("created_at")
+                .orderByDesc("id");
+        Page<DispatchGuideLeaveRecordEntity> result = leaveRecordMapper.selectPage(Page.of(page, pageSize), wrapper);
+        return new PageResult<>(result.getRecords().stream().map(GuideLeaveResponse::fromEntity).toList(), result.getTotal());
+    }
+
+    /**
+     * 查询导游本人请假记录。
+     */
+    public List<GuideLeaveResponse> myLeaves(Long tenantId, String operator) {
+        EnterpriseGuideEntity guide = resolveGuideByUsername(operator, tenantId);
+        return leaveRecordMapper.selectList(leaveQuery(tenantId)
+                        .eq("guide_id", guide.getId())
+                        .orderByDesc("created_at")
+                        .orderByDesc("id"))
+                .stream()
+                .map(GuideLeaveResponse::fromEntity)
+                .toList();
+    }
+
+    /**
+     * 查询导游排班日历。结果包含团队占用和已通过请假占用。
+     */
+    public GuideScheduleCalendarResponse calendar(GuideScheduleQuery query, Long tenantId) {
+        LocalDate startDate = query.startDate() == null ? LocalDate.now() : query.startDate();
+        LocalDate endDate = startDate.plusDays(CALENDAR_DAYS - 1L);
+        LocalDateTime startAt = startDate.atStartOfDay();
+        LocalDateTime endAt = endDate.plusDays(1).atStartOfDay();
+        String guideName = clean(query.guideName());
+
+        List<EnterpriseGuideEntity> guides = guideMapper.selectList(new QueryWrapper<EnterpriseGuideEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq("status", "active")
+                .like(StringUtils.hasText(guideName), "guide_name", guideName)
+                .orderByAsc("guide_name")
+                .orderByAsc("id"));
+        List<DispatchTeamGuideEntity> teamGuides = teamGuideMapper.selectList(teamGuideQuery(tenantId)
+                .eq("status", DispatchTeamGuideStatus.ACTIVE.getValue())
+                .like(StringUtils.hasText(guideName), "guide_name", guideName)
+                .lt("start_at", endAt)
+                .gt("end_at", startAt)
+                .orderByAsc("guide_name")
+                .orderByAsc("start_at"));
+        List<DispatchGuideLeaveRecordEntity> leaves = leaveRecordMapper.selectList(leaveQuery(tenantId)
+                .eq("status", GuideLeaveStatus.APPROVED.getValue())
+                .like(StringUtils.hasText(guideName), "guide_name", guideName)
+                .lt("start_at", endAt)
+                .gt("end_at", startAt)
+                .orderByAsc("guide_name")
+                .orderByAsc("start_at"));
+
+        Map<Long, MutableGuideRow> rows = new LinkedHashMap<>();
+        for (EnterpriseGuideEntity guide : guides) {
+            rows.put(guide.getId(), new MutableGuideRow(guide.getId(), guide.getGuideName(), guide.getMobilePhone()));
+        }
+        for (DispatchTeamGuideEntity item : teamGuides) {
+            MutableGuideRow row = rows.computeIfAbsent(item.getGuideId(),
+                    key -> new MutableGuideRow(item.getGuideId(), item.getGuideName(), item.getGuideMobile()));
+            row.blocks.add(new GuideScheduleCalendarResponse.ScheduleBlock(
+                    "team",
+                    item.getId(),
+                    item.getTeamId(),
+                    item.getTeamNo(),
+                    item.getGuideId(),
+                    item.getTeamNo(),
+                    timeLabel(item.getStartAt()) + "上团 " + item.getTeamNo() + " " + timeLabel(item.getEndAt()) + "下团",
+                    item.getStartAt(),
+                    item.getEndAt(),
+                    item.getStatus()
+            ));
+        }
+        for (DispatchGuideLeaveRecordEntity item : leaves) {
+            MutableGuideRow row = rows.computeIfAbsent(item.getGuideId(),
+                    key -> new MutableGuideRow(item.getGuideId(), item.getGuideName(), item.getGuideMobile()));
+            row.blocks.add(new GuideScheduleCalendarResponse.ScheduleBlock(
+                    "leave",
+                    item.getId(),
+                    null,
+                    null,
+                    item.getGuideId(),
+                    "请假",
+                    item.getLeaveReason(),
+                    item.getStartAt(),
+                    item.getEndAt(),
+                    item.getStatus()
+            ));
+        }
+
+        List<GuideScheduleCalendarResponse.GuideRow> guideRows = rows.values().stream()
+                .sorted(Comparator.comparing(MutableGuideRow::guideName, Comparator.nullsLast(String::compareTo)))
+                .map(row -> new GuideScheduleCalendarResponse.GuideRow(
+                        row.guideId,
+                        row.guideName,
+                        row.guideMobile,
+                        row.blocks.stream().sorted(Comparator.comparing(GuideScheduleCalendarResponse.ScheduleBlock::startAt)).toList()
+                ))
+                .toList();
+        return new GuideScheduleCalendarResponse(startDate, endDate, buildDates(startDate), guideRows);
+    }
+
+    private List<GuideScheduleCalendarResponse.ScheduleDate> buildDates(LocalDate startDate) {
+        List<GuideScheduleCalendarResponse.ScheduleDate> dates = new ArrayList<>();
+        String[] weeks = {"日", "一", "二", "三", "四", "五", "六"};
+        for (int i = 0; i < CALENDAR_DAYS; i++) {
+            LocalDate date = startDate.plusDays(i);
+            dates.add(new GuideScheduleCalendarResponse.ScheduleDate(
+                    date,
+                    date.format(DateTimeFormatter.ofPattern("MM.dd", Locale.CHINA)),
+                    weeks[date.getDayOfWeek().getValue() % 7]
+            ));
+        }
+        return dates;
+    }
+
+    private DispatchGuideLeaveRecordEntity newLeaveEntity(
+            GuideLeaveSaveRequest request,
+            EnterpriseGuideEntity guide,
+            Long tenantId,
+            String operator,
+            String sourceType,
+            String status
+    ) {
+        DispatchGuideLeaveRecordEntity entity = new DispatchGuideLeaveRecordEntity();
+        entity.setTenantId(tenantId);
+        entity.setGuideId(guide.getId());
+        entity.setGuideName(guide.getGuideName());
+        entity.setGuideMobile(guide.getMobilePhone());
+        entity.setSourceType(sourceType);
+        entity.setStartAt(request.startAt());
+        entity.setEndAt(request.endAt());
+        entity.setLeaveReason(clean(request.leaveReason()));
+        entity.setStatus(status);
+        entity.setApplicant(operator);
+        entity.setAppliedAt(OffsetDateTime.now());
+        entity.setCreatedBy(operator);
+        entity.setRemark(clean(request.remark()));
+        entity.setIsDeleted(false);
+        return entity;
+    }
+
+    private void applyTeamGuideField(DispatchTeamGuideEntity entity, TeamGuideFieldUpdateRequest request, Long tenantId) {
+        String field = request.field();
+        String value = request.value();
+        switch (field) {
+            case "guideId" -> applyGuideSnapshot(entity, resolveGuide(parseLong(value, "请选择导游"), tenantId));
+            case "guideFee" -> entity.setGuideFee(parseMoney(value));
+            case "imprestAmount" -> entity.setImprestAmount(parseMoney(value));
+            case "operationFee" -> entity.setOperationFee(parseMoney(value));
+            case "startAt" -> entity.setStartAt(parseDateTime(value, "上团时间格式不正确"));
+            case "endAt" -> entity.setEndAt(parseDateTime(value, "下团时间格式不正确"));
+            case "feeMemo" -> entity.setFeeMemo(clean(value));
+            case "guideMemo" -> entity.setGuideMemo(clean(value));
+            case "tentative" -> entity.setIsTentative(Boolean.parseBoolean(value));
+            default -> throw new BizException("不支持修改该导游安排字段");
+        }
+    }
+
+    private void applyGuideSnapshot(DispatchTeamGuideEntity entity, EnterpriseGuideEntity guide) {
+        entity.setGuideId(guide.getId());
+        entity.setGuideName(guide.getGuideName());
+        entity.setGuideMobile(guide.getMobilePhone());
+    }
+
+    private void assertNoTeamGuideConflict(
+            Long guideId,
+            LocalDateTime startAt,
+            LocalDateTime endAt,
+            Long tenantId,
+            Long excludeRecordId
+    ) {
+        List<DispatchTeamGuideEntity> conflicts = teamGuideMapper.selectList(teamGuideQuery(tenantId)
+                .eq("guide_id", guideId)
+                .eq("status", DispatchTeamGuideStatus.ACTIVE.getValue())
+                .ne(excludeRecordId != null, "id", excludeRecordId)
+                .lt("start_at", endAt)
+                .gt("end_at", startAt));
+        if (!conflicts.isEmpty()) {
+            DispatchTeamGuideEntity conflict = conflicts.get(0);
+            throw new BizException("导游已有团队安排冲突：" + conflict.getTeamNo() + " "
+                    + conflict.getStartAt() + " 至 " + conflict.getEndAt());
+        }
+    }
+
+    private void assertNoApprovedLeaveConflict(Long guideId, LocalDateTime startAt, LocalDateTime endAt, Long tenantId) {
+        List<DispatchGuideLeaveRecordEntity> conflicts = leaveRecordMapper.selectList(leaveQuery(tenantId)
+                .eq("guide_id", guideId)
+                .eq("status", GuideLeaveStatus.APPROVED.getValue())
+                .lt("start_at", endAt)
+                .gt("end_at", startAt));
+        if (!conflicts.isEmpty()) {
+            DispatchGuideLeaveRecordEntity conflict = conflicts.get(0);
+            throw new BizException("导游请假冲突：" + conflict.getGuideName() + " "
+                    + conflict.getStartAt() + " 至 " + conflict.getEndAt());
+        }
+    }
+
+    private SalesTeamEntity resolveTeam(Long teamId, Long tenantId) {
+        SalesTeamEntity team = teamMapper.selectOne(new QueryWrapper<SalesTeamEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq("id", teamId));
+        if (team == null) {
+            throw new BizException("团队不存在或已删除");
+        }
+        return team;
+    }
+
+    private EnterpriseGuideEntity resolveGuide(Long guideId, Long tenantId) {
+        EnterpriseGuideEntity guide = guideMapper.selectOne(new QueryWrapper<EnterpriseGuideEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq("status", "active")
+                .eq("id", guideId));
+        if (guide == null) {
+            throw new BizException("导游不存在、已删除或已停用");
+        }
+        return guide;
+    }
+
+    private EnterpriseGuideEntity resolveGuideByUsername(String username, Long tenantId) {
+        EnterpriseGuideEntity guide = guideMapper.selectOne(new QueryWrapper<EnterpriseGuideEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq("status", "active")
+                .eq("username", username));
+        if (guide == null) {
+            throw new BizException("当前账号未绑定启用导游档案");
+        }
+        return guide;
+    }
+
+    private DispatchTeamGuideEntity resolveTeamGuide(Long recordId, Long teamId, Long tenantId) {
+        DispatchTeamGuideEntity entity = teamGuideMapper.selectOne(teamGuideQuery(tenantId)
+                .eq("id", recordId)
+                .eq("team_id", teamId));
+        if (entity == null) {
+            throw new BizException("导游安排不存在或已删除");
+        }
+        return entity;
+    }
+
+    private DispatchGuideLeaveRecordEntity resolveLeave(Long leaveId, Long tenantId) {
+        DispatchGuideLeaveRecordEntity entity = leaveRecordMapper.selectOne(leaveQuery(tenantId).eq("id", leaveId));
+        if (entity == null) {
+            throw new BizException("导游请假记录不存在或已删除");
+        }
+        return entity;
+    }
+
+    private void assertLeavePending(DispatchGuideLeaveRecordEntity entity) {
+        if (!GuideLeaveStatus.PENDING.getValue().equals(entity.getStatus())) {
+            throw new BizException("只有待审批请假可以执行该操作");
+        }
+    }
+
+    private QueryWrapper<DispatchTeamGuideEntity> teamGuideQuery(Long tenantId) {
+        return new QueryWrapper<DispatchTeamGuideEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false);
+    }
+
+    private QueryWrapper<DispatchGuideLeaveRecordEntity> leaveQuery(Long tenantId) {
+        return new QueryWrapper<DispatchGuideLeaveRecordEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false);
+    }
+
+    private UpdateWrapper<DispatchTeamGuideEntity> teamGuideUpdate(Long tenantId) {
+        return new UpdateWrapper<DispatchTeamGuideEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false);
+    }
+
+    private UpdateWrapper<DispatchGuideLeaveRecordEntity> leaveUpdate(Long tenantId) {
+        return new UpdateWrapper<DispatchGuideLeaveRecordEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false);
+    }
+
+    private void validateTimeRange(LocalDateTime startAt, LocalDateTime endAt) {
+        if (startAt == null || endAt == null) {
+            throw new BizException("开始时间和结束时间不能为空");
+        }
+        if (!endAt.isAfter(startAt)) {
+            throw new BizException("结束时间必须晚于开始时间");
+        }
+    }
+
+    private BigDecimal money(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
+    }
+
+    private BigDecimal parseMoney(String value) {
+        if (!StringUtils.hasText(value)) {
+            return BigDecimal.ZERO;
+        }
+        try {
+            BigDecimal result = new BigDecimal(value.trim());
+            if (result.compareTo(BigDecimal.ZERO) < 0) {
+                throw new BizException("金额不能小于0");
+            }
+            return result;
+        } catch (NumberFormatException ex) {
+            throw new BizException("金额请填写数字");
+        }
+    }
+
+    private Long parseLong(String value, String message) {
+        if (!StringUtils.hasText(value)) {
+            throw new BizException(message);
+        }
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException ex) {
+            throw new BizException(message);
+        }
+    }
+
+    private LocalDateTime parseDateTime(String value, String message) {
+        if (!StringUtils.hasText(value)) {
+            throw new BizException(message);
+        }
+        try {
+            return LocalDateTime.parse(value.trim());
+        } catch (RuntimeException ex) {
+            throw new BizException(message);
+        }
+    }
+
+    private String clean(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String timeLabel(LocalDateTime value) {
+        if (value == null) {
+            return "";
+        }
+        return value.format(DateTimeFormatter.ofPattern("HH:mm"));
+    }
+
+    private record MutableGuideRow(Long guideId, String guideName, String guideMobile, List<GuideScheduleCalendarResponse.ScheduleBlock> blocks) {
+        private MutableGuideRow(Long guideId, String guideName, String guideMobile) {
+            this(guideId, guideName, guideMobile, new ArrayList<>());
+        }
+    }
+}

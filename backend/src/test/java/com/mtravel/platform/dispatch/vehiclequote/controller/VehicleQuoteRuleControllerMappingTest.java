@@ -38,7 +38,7 @@ class VehicleQuoteRuleControllerMappingTest {
         assertThat(VehicleQuoteRuleController.class.getMethod("create", VehicleQuoteRuleSaveRequest.class, org.springframework.security.core.Authentication.class)
                 .getAnnotation(PostMapping.class)
                 .value()).containsExactly("/create");
-        assertThat(VehicleQuoteRuleController.class.getMethod("update", Long.class, VehicleQuoteRuleSaveRequest.class)
+        assertThat(VehicleQuoteRuleController.class.getMethod("update", Long.class, VehicleQuoteRuleSaveRequest.class, org.springframework.security.core.Authentication.class)
                 .getAnnotation(PostMapping.class)
                 .value()).containsExactly("/update");
         assertThat(VehicleQuoteRuleController.class.getMethod("delete", Long.class, org.springframework.security.core.Authentication.class)

@@ -1,4 +1,5 @@
 import { requestClient } from '#/api/request';
+import type { SalesProductApi } from '#/api/sales/product';
 
 export namespace SalesTeamApi {
   export type TeamStatus = 'cancelled' | 'normal' | 'stopped';
@@ -94,6 +95,19 @@ export namespace SalesTeamApi {
   }
 
   export type ArrangeStatus = 'confirmed' | 'none' | 'pending' | 'warning';
+  export type ArrangementType =
+    | 'extra_fee'
+    | 'ground_agent'
+    | 'hotel'
+    | 'meal'
+    | 'optional'
+    | 'other'
+    | 'scenic'
+    | 'shopping'
+    | 'traffic'
+    | 'vehicle';
+  export type ArrangementAllocationMode = 'group_order_average' | 'multi_order_average';
+  export type ArrangementSplitMode = 'by_order' | 'by_people';
   export type DateTeamStatus = 'all' | 'cancelled' | 'departed' | 'not_departed' | 'stopped';
   export type TeamProgress = 'cancelled' | 'closed' | 'departed' | 'done' | 'not_departed' | 'receiving' | 'stopped';
 
@@ -146,6 +160,42 @@ export namespace SalesTeamApi {
     singleRoomDifference?: number;
     teamType?: TeamType;
     totalSeats?: number;
+  }
+
+  export interface DirectCreateParams {
+    attentionItems?: string;
+    bookingNotice?: string;
+    businessType?: string;
+    childPolicy?: string;
+    city?: string;
+    closeDaysBefore?: number;
+    departureDate: string;
+    district?: string;
+    domesticInternational?: 'domestic' | 'international';
+    feeExcluded?: string;
+    feeIncluded?: string;
+    giftItems?: string;
+    itineraryDays?: SalesProductApi.ItineraryDay[];
+    productTheme?: string;
+    productDescription?: string;
+    province?: string;
+    receptionStandard?: string;
+    remark?: string;
+    shoppingArrangement?: string;
+    singleRoomDifference?: number;
+    teamName: string;
+    teamType: Exclude<TeamType, 'single'>;
+    totalSeats?: number;
+    travelDays?: number;
+    tripType?: 'daily' | 'irregular' | 'weekly';
+    optionalItems?: string;
+    warmReminder?: string;
+  }
+
+  export interface DirectEditDetail extends DirectCreateParams {
+    id: number;
+    productId: number;
+    teamNo: string;
   }
 
   export interface PriceSaveParams {
@@ -321,6 +371,229 @@ export namespace SalesTeamApi {
     targetTeamId?: number;
     tourDate?: string;
   }
+
+  export interface TeamArrangementPriceLine {
+    amount?: number;
+    cashAmount?: number;
+    companyRebateAmount?: number;
+    companyRebateRate?: number;
+    consumptionAmount?: number;
+    costPrice?: number;
+    creditAmount?: number;
+    guideCommissionAmount?: number;
+    guideCommissionRate?: number;
+    headFeeAmount?: number;
+    id?: number;
+    projectId?: number;
+    projectName?: string;
+    quantity?: number;
+    remark?: string;
+    salePrice?: number;
+    sortOrder?: number;
+    unitPrice?: number;
+  }
+
+  export interface TeamArrangementAllocation {
+    allocationAmount?: number;
+    allocationMode?: ArrangementAllocationMode;
+    allocationScope?: 'order' | 'team';
+    customerId?: number;
+    customerName?: string;
+    guestCount?: number;
+    id?: number;
+    orderId?: number;
+    orderNo?: string;
+    originalAmount?: number;
+    sortOrder?: number;
+    splitBatchNo?: string;
+    splitMode?: ArrangementSplitMode;
+  }
+
+  export interface TeamArrangement {
+    allocationMode: ArrangementAllocationMode;
+    allocations?: TeamArrangementAllocation[];
+    arrivalPlace?: string;
+    arrangementContent?: string;
+    arrangementType: ArrangementType;
+    businessDate?: string;
+    canDelete?: boolean;
+    cashAmount?: number;
+    companyRebateAmount?: number;
+    consumptionAmount?: number;
+    costAmount?: number;
+    costStage?: string;
+    createdAt?: string;
+    creditAmount?: number;
+    daysCount?: number;
+    deleteDisabledReason?: string;
+    departurePlace?: string;
+    driverName?: string;
+    financeAuditStatus?: string;
+    fundIncluded?: string;
+    guideCommissionAmount?: number;
+    guideId?: number;
+    guideInvolved?: boolean;
+    guideName?: string;
+    guideReportStatus?: string;
+    headFeeAmount?: number;
+    id: number;
+    itemName: string;
+    confirmed?: boolean;
+    confirmationNo?: string;
+    mealType?: string;
+    noGuideReport?: boolean;
+    operatorAuditStatus?: string;
+    peopleCount?: number;
+    prepaidAmount?: number;
+    priceLines?: TeamArrangementPriceLine[];
+    resourceName?: string;
+    responsibleEmployeeId?: number;
+    responsibleEmployeeName?: string;
+    saleAmount?: number;
+    scheduleEndDay?: string;
+    scheduleStartDay?: string;
+    settlementType?: SalesProductApi.SettlementType;
+    splitBatchNo?: string;
+    splitMode?: ArrangementSplitMode;
+    status?: string;
+    supplierId?: number;
+    supplierName?: string;
+    teamId?: number;
+    teamNo?: string;
+    totalAmount?: number;
+    trafficType?: string;
+    vehiclePlate?: string;
+    vehicleType?: string;
+  }
+
+  export interface TeamArrangementSaveParams {
+    allocationMode?: ArrangementAllocationMode;
+    arrivalPlace?: string;
+    arrangementContent?: string;
+    arrangementId?: number;
+    arrangementType: ArrangementType;
+    cashAmount?: number;
+    companyRebateAmount?: number;
+    consumptionAmount?: number;
+    costAmount?: number;
+    creditAmount?: number;
+    daysCount?: number;
+    departurePlace?: string;
+    driverName?: string;
+    fundIncluded?: string;
+    guideCommissionAmount?: number;
+    guideId?: number;
+    guideName?: string;
+    headFeeAmount?: number;
+    itemName: string;
+    confirmed?: boolean;
+    confirmationNo?: string;
+    mealType?: string;
+    multiOrderSplitMode?: ArrangementSplitMode;
+    noGuideReport?: boolean;
+    peopleCount?: number;
+    prepaidAmount?: number;
+    priceLines?: TeamArrangementPriceLine[];
+    remark?: string;
+    resourceName?: string;
+    responsibleEmployeeId?: number;
+    responsibleEmployeeName?: string;
+    saleAmount?: number;
+    scheduleEndDay?: string;
+    scheduleStartDay?: string;
+    selectedOrderIds?: number[];
+    settlementType?: SalesProductApi.SettlementType;
+    supplierId?: number;
+    supplierName?: string;
+    totalAmount?: number;
+    trafficType?: string;
+    vehiclePlate?: string;
+    vehicleType?: string;
+  }
+
+  export interface TeamArrangementSaveResult {
+    id: number;
+    ids: number[];
+  }
+
+  export interface GrossProfitTeamInfo {
+    departureDate?: string;
+    guestCount?: number;
+    guideSummary?: string;
+    operatorName?: string;
+    productName?: string;
+    teamId: number;
+    teamNo?: string;
+    travelDays?: number;
+  }
+
+  export interface GrossProfitIncomeRow {
+    bookingOperatorName?: string;
+    customerName?: string;
+    guestCount?: number;
+    receivableAmount?: number | string;
+    receivableDetail?: string;
+    receivedAmount?: number | string;
+    salespersonName?: string;
+  }
+
+  export interface GrossProfitCostRow {
+    auditorName?: string;
+    cashAmount?: number | string;
+    category?: string;
+    costDescription?: string;
+    paidCreditAmount?: number | string;
+    payableAmount?: number | string;
+    supplierName?: string;
+  }
+
+  export interface GrossProfitOptionalRow {
+    auditorName?: string;
+    companyProfit?: number | string;
+    costAmount?: number | string;
+    guestCount?: number | string;
+    guideCommissionAmount?: number | string;
+    projectName?: string;
+    salesAmount?: number | string;
+  }
+
+  export interface GrossProfitShoppingRow {
+    auditorName?: string;
+    companyProfit?: number | string;
+    companyRebateAmount?: number | string;
+    consumptionAmount?: number | string;
+    entryCount?: number | string;
+    guideCommissionAmount?: number | string;
+    headFeeAmount?: number | string;
+    shopName?: string;
+  }
+
+  export interface GrossProfitSummary {
+    grossProfit?: number | string;
+    guideFee?: number | string;
+    optionalProfit?: number | string;
+    orderIncome?: number | string;
+    regularCost?: number | string;
+    shoppingProfit?: number | string;
+  }
+
+  export interface GrossProfitSalespersonSummary {
+    grossProfit?: number | string;
+    grossProfitRate?: number | string;
+    receivableAmount?: number | string;
+    receivedAmount?: number | string;
+    salespersonName?: string;
+  }
+
+  export interface GrossProfitPreview {
+    costRows: GrossProfitCostRow[];
+    incomeRows: GrossProfitIncomeRow[];
+    optionalRows: GrossProfitOptionalRow[];
+    salespersonRows: GrossProfitSalespersonSummary[];
+    shoppingRows: GrossProfitShoppingRow[];
+    summary: GrossProfitSummary;
+    team: GrossProfitTeamInfo;
+  }
 }
 
 /** 分页查询销售团队管理全局列表。 */
@@ -338,6 +611,26 @@ export function getSalesTeamOperationDetail(teamId: number) {
   );
 }
 
+/** 团队管理页直接新增散拼、整团或散团。 */
+export function createSalesTeam(data: SalesTeamApi.DirectCreateParams) {
+  return requestClient.post<SalesTeamApi.Item>('/sales/team/create', data);
+}
+
+/** 查询团队直接编辑页详情。 */
+export function getSalesTeamEditDetail(teamId: number) {
+  return requestClient.get<SalesTeamApi.DirectEditDetail>(
+    `/sales/team/${teamId}/edit`,
+  );
+}
+
+/** 保存团队直接编辑页。 */
+export function updateSalesTeam(teamId: number, data: SalesTeamApi.DirectCreateParams) {
+  return requestClient.post<SalesTeamApi.Item>(
+    `/sales/team/${teamId}/edit`,
+    data,
+  );
+}
+
 /** 执行团队操作页拼团。 */
 export function mergeSalesTeamOrders(teamId: number, data: SalesTeamApi.MergeOrderParams) {
   return requestClient.post<void>(`/sales/team/${teamId}/operation/merge`, data);
@@ -346,6 +639,56 @@ export function mergeSalesTeamOrders(teamId: number, data: SalesTeamApi.MergeOrd
 /** 执行团队操作页转团。 */
 export function moveSalesTeamOrders(teamId: number, data: SalesTeamApi.MoveOrderParams) {
   return requestClient.post<void>(`/sales/team/${teamId}/operation/move`, data);
+}
+
+/** 查询正式团队安排成本。 */
+export function getTeamArrangements(teamId: number, type?: SalesTeamApi.ArrangementType) {
+  return requestClient.get<SalesTeamApi.TeamArrangement[]>(
+    `/sales/team/${teamId}/arrangements`,
+    { params: { type } },
+  );
+}
+
+/** 保存正式团队安排成本。 */
+export function saveTeamArrangement(teamId: number, data: SalesTeamApi.TeamArrangementSaveParams) {
+  return requestClient.post<SalesTeamApi.TeamArrangementSaveResult>(
+    `/sales/team/${teamId}/arrangements/save`,
+    data,
+  );
+}
+
+/** 删除正式团队安排成本。 */
+export function deleteTeamArrangement(teamId: number, arrangementId: number) {
+  return requestClient.post<void>(
+    `/sales/team/${teamId}/arrangements/${arrangementId}/delete`,
+    {},
+  );
+}
+
+/** 下载正式团队景区票务游客名单 Excel。 */
+export function exportScenicTicketGuests(teamId: number, params: {
+  resourceName: string;
+  supplierId: number;
+}) {
+  return requestClient.download<Blob>(
+    `/sales/team/${teamId}/arrangements/scenic-ticket-guests/export`,
+    { params },
+  );
+}
+
+/** 查询正式团队预算毛利表预览数据。 */
+export function getSalesTeamGrossProfitPreview(teamId: number) {
+  return requestClient.get<SalesTeamApi.GrossProfitPreview>(
+    `/sales/team/${teamId}/gross-profit/preview`,
+  );
+}
+
+/** 下载正式团队预算毛利表 Word 或 PDF。 */
+export function exportSalesTeamGrossProfit(teamId: number, format: 'docx' | 'pdf') {
+  return requestClient.download<Blob>(
+    `/sales/team/${teamId}/gross-profit/export`,
+    { params: { format } },
+  );
 }
 
 /** 分页查询产品团期。 */

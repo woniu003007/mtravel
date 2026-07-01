@@ -20,6 +20,9 @@ function readAppFile(path: string) {
 }
 
 describe('sales product form helpers', () => {
+  const arrangementEditorSource = () => readAppFile('src/views/sales/components/ArrangementEditorModal.vue');
+  const arrangementEditorModelSource = () => readAppFile('src/views/sales/components/arrangement-editor-model.ts');
+
   it('keeps the old-system team arrangement tab as a link to the standalone page', () => {
     // 老系统产品编辑页保留“团队安排”tab；新系统点击该 tab 跳独立页，不再把安排大表内嵌在产品表单里。
     const formSource = readAppFile('src/views/sales/product/form.vue');
@@ -163,6 +166,9 @@ describe('sales product form helpers', () => {
     expect(teamPageSource).toContain('散团');
     expect(teamPageSource).toContain('单项');
     expect(teamPageSource).toContain('团队名称');
+    expect(teamPageSource).toContain('openTeamEdit');
+    expect(teamPageSource).toContain('router.push(`/sales/team/edit/${record.id}`)');
+    expect(teamPageSource).toContain('router.push(`/sales/team/operation/${record.id}`)');
     expect(teamPageSource).toContain('客户单位/业务员');
     expect(teamPageSource).toContain('操作计调');
     expect(teamPageSource).toContain('出团日期始');
@@ -240,6 +246,8 @@ describe('sales product form helpers', () => {
     expect(arrangementPageSource).not.toContain("label: '出团日期'");
     expect(arrangementPageSource).toContain('团队管理');
     expect(arrangementPageSource).toContain('查看行程');
+    expect(arrangementPageSource).toContain('showTeamItineraryModal');
+    expect(arrangementPageSource).toContain('@click="showItineraryModal"');
     expect(arrangementPageSource).toContain('team-note-row');
     expect(arrangementPageSource).toContain('内部备注');
     expect(arrangementPageSource).toContain('人均坑位');
@@ -291,6 +299,8 @@ describe('sales product form helpers', () => {
     expect(arrangementPageSource).toContain("'日期', '时间', '餐厅名称', '供应商', '备注', '价格信息', '成本合计', '现结', '挂账', '操作'");
     expect(arrangementPageSource).toContain("'日期', '景区/项目名称', '供应商', '备注', '人数', '销售价', '成本价', '收入合计', '成本合计', '导游提成', '现结', '挂账', '操作'");
     expect(arrangementPageSource).toContain("'日期', '购物店', '供应商', '备注', '品类', '进店人数', '人头费', '消费总额', '导游提成', '操作'");
+    expect(arrangementPageSource).toContain("'开始', '结束', '天数', '供应商', '备注', '成本合计', '现结', '挂账', '操作'");
+    expect(arrangementPageSource).not.toContain("'开始', '结束', '天数', '供应商', '备注', '价格信息', '成本合计', '现结', '挂账', '操作'");
     expect(arrangementPageSource).not.toContain('activeArrangementType === item.value');
     expect(arrangementPageSource).not.toContain('activeArrangementItems');
     expect(arrangementPageSource).not.toContain('<Table');
@@ -309,30 +319,33 @@ describe('sales product form helpers', () => {
 
   it('opens an old-system aligned traffic arrangement modal from the traffic plus button', () => {
     const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+    const editorSource = arrangementEditorSource();
+    const modelSource = arrangementEditorModelSource();
 
     expect(arrangementPageSource).toContain('openArrangementEditor(section.value)');
     expect(arrangementPageSource).toContain('saveArrangementEditor');
     expect(arrangementPageSource).toContain('persistArrangementChanges');
     expect(arrangementPageSource).toContain("editingArrangementIndex.value >= 0 ? '安排信息已修改' : '安排信息已保存'");
-    expect(arrangementPageSource).toContain('traffic-arrangement-modal');
-    expect(arrangementPageSource).toContain('activeEditorTitle');
-    expect(arrangementPageSource).toContain('全团/订单均摊');
-    expect(arrangementPageSource).toContain('多订单均摊成本');
+    expect(arrangementPageSource).toContain('ArrangementEditorModal');
+    expect(editorSource).toContain('traffic-arrangement-modal');
+    expect(editorSource).toContain('activeEditorTitle');
+    expect(editorSource).toContain('全团/订单均摊');
+    expect(editorSource).toContain('多订单均摊成本');
     expect(arrangementPageSource).toContain('showMultiOrderAveragePriceNotice');
-    expect(arrangementPageSource).toContain('多订单均摊成本时，价格信息组成只能统一写成一条记录，点击 ⊕ 失效');
+    expect(editorSource).toContain('多订单均摊成本时，价格信息组成只能统一写成一条记录，点击 ⊕ 失效');
     expect(arrangementPageSource).toContain('addArrangementPriceLine');
     expect(arrangementPageSource).toContain('removeArrangementPriceLine');
-    expect(arrangementPageSource).toContain('arrangementForm.priceLines');
-    expect(arrangementPageSource).toContain(':disabled="showMultiOrderAveragePriceNotice"');
-    expect(arrangementPageSource).toContain(':class="{ disabled: showMultiOrderAveragePriceNotice }"');
-    expect(arrangementPageSource).toContain('交通类型');
-    expect(arrangementPageSource).toContain('日期行程');
-    expect(arrangementPageSource).toContain('供应商');
-    expect(arrangementPageSource).toContain('价格信息');
-    expect(arrangementPageSource).toContain('结算方式');
-    expect(arrangementPageSource).toContain('订单信息');
-    expect(arrangementPageSource).toContain('备注信息');
-    expect(arrangementPageSource).toContain('无需导游报账，同步更新导游报账和计调审核数据');
+    expect(editorSource).toContain('props.form.priceLines');
+    expect(editorSource).toContain(':disabled="showMultiOrderAveragePriceNotice"');
+    expect(editorSource).toContain(':class="{ disabled: showMultiOrderAveragePriceNotice }"');
+    expect(editorSource).toContain('交通类型');
+    expect(modelSource).toContain('日期行程');
+    expect(editorSource).toContain('供应商');
+    expect(editorSource).toContain('价格信息');
+    expect(editorSource).toContain('结算方式');
+    expect(editorSource).toContain('订单信息');
+    expect(editorSource).toContain('备注信息');
+    expect(editorSource).toContain('无需导游报账，同步更新导游报账和计调审核数据');
   });
 
   it('allows editing saved arrangement rows from the section table', () => {
@@ -341,8 +354,8 @@ describe('sales product form helpers', () => {
     expect(arrangementPageSource).toContain('editingArrangementIndex');
     expect(arrangementPageSource).toContain('hydrateArrangementFormFromItem');
     expect(arrangementPageSource).toContain('openArrangementEditor(section.value, item)');
-    expect(arrangementPageSource).toContain('保存修改');
-    expect(arrangementPageSource).toContain('新增安排');
+    expect(arrangementEditorSource()).toContain('保存修改');
+    expect(arrangementEditorSource()).toContain('新增安排');
     expect(arrangementPageSource).toContain("editingArrangementIndex.value >= 0 ? '安排信息已修改' : '安排信息已保存'");
     expect(arrangementPageSource).toContain('nextItems[editingArrangementIndex.value] = arrangementItem');
     expect(arrangementPageSource).not.toContain("if (column === '操作') return '--';");
@@ -404,11 +417,11 @@ describe('sales product form helpers', () => {
   });
 
   it('keeps the hotel editor field order aligned with the old system', () => {
-    const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
-    const hotelLayoutSource = arrangementPageSource.slice(arrangementPageSource.indexOf('hotel-old-system-layout'));
+    const editorSource = arrangementEditorSource();
+    const hotelLayoutSource = editorSource.slice(editorSource.indexOf('hotel-old-system-layout'));
 
-    expect(arrangementPageSource).toContain("activeEditorType === 'hotel'");
-    expect(arrangementPageSource).toContain('hotel-old-system-layout');
+    expect(editorSource).toContain("activeEditorType === 'hotel'");
+    expect(editorSource).toContain('hotel-old-system-layout');
     expect(hotelLayoutSource.indexOf('酒店名称')).toBeLessThan(hotelLayoutSource.indexOf('早餐基金'));
     expect(hotelLayoutSource.indexOf('早餐基金')).toBeLessThan(hotelLayoutSource.indexOf('入住退房'));
     expect(hotelLayoutSource.indexOf('入住退房')).toBeLessThan(hotelLayoutSource.indexOf('<span>供应商</span>'));
@@ -419,15 +432,17 @@ describe('sales product form helpers', () => {
 
   it('keeps the vehicle editor field order aligned with the old system', () => {
     const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
-    const vehicleLayoutStart = arrangementPageSource.indexOf('vehicle-old-system-layout');
-    const vehicleLayoutSource = arrangementPageSource.slice(
+    const editorSource = arrangementEditorSource();
+    const vehicleLayoutStart = editorSource.indexOf('vehicle-old-system-layout');
+    const vehicleLayoutSource = editorSource.slice(
       vehicleLayoutStart,
-      arrangementPageSource.indexOf('<template v-else>', vehicleLayoutStart),
+      editorSource.indexOf("<template v-else-if=\"activeEditorType === 'meal'\">", vehicleLayoutStart),
     );
 
-    expect(arrangementPageSource).toContain("activeEditorType === 'vehicle'");
-    expect(arrangementPageSource).toContain('vehicle-old-system-layout');
-    expect(vehicleLayoutSource.indexOf('<span>座位数</span>')).toBeLessThan(vehicleLayoutSource.indexOf('<span>用车时间</span>'));
+    expect(editorSource).toContain("activeEditorType === 'vehicle'");
+    expect(editorSource).toContain('vehicle-old-system-layout');
+    expect(vehicleLayoutSource).not.toContain('<span>座位数</span>');
+    expect(vehicleLayoutSource).not.toContain('Form.Item label="座位数"');
     expect(vehicleLayoutSource.indexOf('<span>用车时间</span>')).toBeLessThan(vehicleLayoutSource.indexOf('<span>司机车号</span>'));
     expect(vehicleLayoutSource.indexOf('<span>司机车号</span>')).toBeLessThan(vehicleLayoutSource.indexOf('<span>供应商</span>'));
     expect(vehicleLayoutSource.indexOf('<span>供应商</span>')).toBeLessThan(vehicleLayoutSource.indexOf('<span>价格信息</span>'));
@@ -460,9 +475,10 @@ describe('sales product form helpers', () => {
     expect(quotePageSource).not.toContain('ruleRegionPath');
     expect(quotePageSource).not.toContain('calcRegionPath');
     expect(quotePageSource).not.toContain('Cascader');
-    expect(arrangementPageSource).toContain('<span>座位数</span>');
-    expect(arrangementPageSource).toContain('Form.Item label="座位数"');
-    expect(arrangementPageSource).toContain('Form.Item label="规则座位数"');
+    const editorSource = arrangementEditorSource();
+    expect(editorSource).not.toContain('<span>座位数</span>');
+    expect(editorSource).not.toContain('Form.Item label="座位数"');
+    expect(editorSource).toContain('Form.Item label="规则座位数"');
     expect(arrangementPageSource).not.toContain('province: formState.province');
     expect(arrangementPageSource).not.toContain('city: formState.city');
     expect(arrangementPageSource).not.toContain('district: formState.district');
@@ -476,9 +492,18 @@ describe('sales product form helpers', () => {
     expect(quotePageSource).toContain('function seatCountFromVehicleType');
     expect(arrangementPageSource).toContain('function seatCountFromVehicleType');
     expect(quotePageSource).toContain('placeholder="请输入座位数"');
-    expect(arrangementPageSource).toContain('placeholder="请选择座位数规则"');
-    expect(arrangementPageSource).toContain('v-model:value="arrangementForm.vehicleType"');
-    expect(arrangementPageSource).toContain(':options="vehicleQuoteRuleOptions"');
+    expect(editorSource).toContain('placeholder="请选择座位数规则"');
+    expect(editorSource).toContain('v-model:value="props.form.vehicleType"');
+    expect(editorSource).toContain(':options="vehicleQuoteRuleOptions"');
+    const quoteBlockStart = editorSource.indexOf('Form.Item label="规则座位数"');
+    const quoteBlock = editorSource.slice(
+      quoteBlockStart,
+      editorSource.indexOf('Form.Item label="测算参考价"', quoteBlockStart),
+    );
+    expect(quoteBlock).toContain('<Select');
+    expect(quoteBlock).toContain('show-search');
+    expect(quoteBlock).toContain("@change=\"(value) => emit('sync-vehicle-price-project', value)\"");
+    expect(quoteBlock).not.toContain('<Input');
     expect(arrangementPageSource).not.toContain('v-model:value="arrangementVehicleSeatCount"');
     expect(arrangementPageSource).not.toContain('addon-after="座"');
     expect(arrangementPageSource).not.toContain('function vehicleTypeFromSeatCount');
@@ -508,9 +533,10 @@ describe('sales product form helpers', () => {
     expect(arrangementPageSource).toContain('getVehicleQuoteRuleAll');
     expect(arrangementPageSource).toContain('vehicleQuoteRuleOptions');
     expect(arrangementPageSource).toContain('loadVehicleQuoteRuleOptions');
-    expect(arrangementPageSource).toContain('v-model:value="arrangementForm.vehicleType"');
-    expect(arrangementPageSource).toContain(':options="vehicleQuoteRuleOptions"');
-    expect(arrangementPageSource).toContain('placeholder="请选择座位数规则"');
+    const editorSource = arrangementEditorSource();
+    expect(editorSource).toContain('v-model:value="props.form.vehicleType"');
+    expect(editorSource).toContain(':options="vehicleQuoteRuleOptions"');
+    expect(editorSource).toContain('placeholder="请选择座位数规则"');
     expect(arrangementPageSource).not.toContain('v-model:value="arrangementVehicleSeatCount"');
     expect(arrangementPageSource).not.toContain('请先填写座位数');
     expect(arrangementPageSource).toContain('请先选择座位数规则');
@@ -541,33 +567,39 @@ describe('sales product form helpers', () => {
 
   it('auto calculates vehicle day count from start and end day in team arrangement', () => {
     const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
-    const vehicleLayoutStart = arrangementPageSource.indexOf('<template v-else-if="activeEditorType === \'vehicle\'">');
-    const vehicleLayoutSource = arrangementPageSource.slice(
+    const editorSource = arrangementEditorSource();
+    const vehicleLayoutStart = editorSource.indexOf('<template v-else-if="activeEditorType === \'vehicle\'">');
+    const vehicleLayoutSource = editorSource.slice(
       vehicleLayoutStart,
-      arrangementPageSource.indexOf('<template v-else-if="activeEditorType === \'meal\'">', vehicleLayoutStart),
+      editorSource.indexOf('<template v-else-if="activeEditorType === \'meal\'">', vehicleLayoutStart),
     );
 
     expect(arrangementPageSource).toContain('syncVehicleDaysCount');
     expect(arrangementPageSource).toContain('const days = end - start + 1');
-    expect(vehicleLayoutSource).toContain('@change="syncVehicleDaysCount"');
-    expect(vehicleLayoutSource).toContain('v-model:value="arrangementForm.daysCount" disabled');
-    expect(vehicleLayoutSource).not.toContain('<InputNumber v-model:value="arrangementForm.daysCount" :min="0" :precision="0" />');
+    expect(vehicleLayoutSource).toContain('@change="emit(\'sync-vehicle-days-count\')"');
+    expect(vehicleLayoutSource).toContain('v-model:value="props.form.daysCount" disabled');
+    expect(vehicleLayoutSource).not.toContain('<InputNumber v-model:value="props.form.daysCount" :min="0" :precision="0" />');
   });
 
   it('auto calculates ground-agent day count from start and end day in team arrangement', () => {
     const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
-    const groundAgentLayoutStart = arrangementPageSource.indexOf('<template v-else-if="activeEditorType === \'ground_agent\'">');
-    const groundAgentLayoutSource = arrangementPageSource.slice(
+    const editorSource = arrangementEditorSource();
+    const groundAgentLayoutStart = editorSource.indexOf('<template v-else-if="activeEditorType === \'ground_agent\'">');
+    const groundAgentLayoutSource = editorSource.slice(
       groundAgentLayoutStart,
-      arrangementPageSource.indexOf('<template v-else>', groundAgentLayoutStart),
+      editorSource.indexOf('<template v-else>', groundAgentLayoutStart),
     );
 
     expect(arrangementPageSource).toContain('scheduleInclusiveDaysCount');
     expect(arrangementPageSource).toContain('syncGroundAgentDaysCount');
     expect(arrangementPageSource).toContain('const days = scheduleInclusiveDaysCount(');
-    expect(groundAgentLayoutSource).toContain('@change="syncGroundAgentDaysCount"');
-    expect(groundAgentLayoutSource).toContain('v-model:value="arrangementForm.daysCount" disabled');
-    expect(groundAgentLayoutSource).not.toContain('<InputNumber v-model:value="arrangementForm.daysCount" :min="0" :precision="0" />');
+    expect(groundAgentLayoutSource).toContain('@change="emit(\'sync-ground-agent-days-count\')"');
+    expect(groundAgentLayoutSource).toContain('v-model:value="props.form.daysCount" disabled');
+    expect(groundAgentLayoutSource).toContain('地接结算价');
+    expect(groundAgentLayoutSource).toContain('v-model:value="props.form.costAmount"');
+    expect(groundAgentLayoutSource).not.toContain('<span>价格信息</span>');
+    expect(groundAgentLayoutSource).not.toContain('v-for="(line, index) in props.form.priceLines"');
+    expect(groundAgentLayoutSource).not.toContain('<InputNumber v-model:value="props.form.daysCount" :min="0" :precision="0" />');
   });
 
   it('uses product travel days for arrangement date options', () => {
@@ -580,16 +612,17 @@ describe('sales product form helpers', () => {
 
   it('auto calculates hotel night count from check-in and check-out days', () => {
     const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
-    const hotelLayoutStart = arrangementPageSource.indexOf('<template v-if="activeEditorType === \'hotel\'">');
-    const hotelLayoutSource = arrangementPageSource.slice(
+    const editorSource = arrangementEditorSource();
+    const hotelLayoutStart = editorSource.indexOf('<template v-if="activeEditorType === \'hotel\'">');
+    const hotelLayoutSource = editorSource.slice(
       hotelLayoutStart,
-      arrangementPageSource.indexOf('<template v-else-if="activeEditorType === \'vehicle\'">', hotelLayoutStart),
+      editorSource.indexOf('<template v-else-if="activeEditorType === \'vehicle\'">', hotelLayoutStart),
     );
 
     expect(arrangementPageSource).toContain('syncHotelNightsCount');
     expect(arrangementPageSource).toContain('scheduleExclusiveNightsCount');
-    expect(hotelLayoutSource).toContain('@change="syncHotelNightsCount"');
-    expect(hotelLayoutSource).toContain('v-model:value="arrangementForm.daysCount" disabled');
+    expect(hotelLayoutSource).toContain('@change="emit(\'sync-hotel-nights-count\')"');
+    expect(hotelLayoutSource).toContain('v-model:value="props.form.daysCount" disabled');
   });
 
   it('lets users add optional and shopping detail rows instead of only normalizing existing rows', () => {
@@ -597,16 +630,17 @@ describe('sales product form helpers', () => {
 
     expect(arrangementPageSource).toContain('addOptionalSummaryLine');
     expect(arrangementPageSource).toContain('addShoppingConsumptionLine');
-    expect(arrangementPageSource).toContain('@click="addOptionalSummaryLine"');
-    expect(arrangementPageSource).toContain('@click="addShoppingConsumptionLine"');
-    expect(arrangementPageSource).toContain('optional-fee-summary-line');
-    expect(arrangementPageSource).toContain('shopping-consumption-line');
-    expect(arrangementPageSource).toContain('v-for="(line, index) in arrangementForm.priceLines"');
-    expect(arrangementPageSource).toContain('v-model:value="line.salePrice"');
-    expect(arrangementPageSource).toContain('v-model:value="line.costPrice"');
-    expect(arrangementPageSource).toContain('v-model:value="line.consumptionAmount"');
-    expect(arrangementPageSource).toContain('v-model:value="line.companyRebateRate"');
-    expect(arrangementPageSource).toContain('v-model:value="line.guideCommissionRate"');
+    const editorSource = arrangementEditorSource();
+    expect(editorSource).toContain('@click="emit(\'add-optional-summary-line\')"');
+    expect(editorSource).toContain('@click="emit(\'add-shopping-consumption-line\')"');
+    expect(editorSource).toContain('optional-fee-summary-line');
+    expect(editorSource).toContain('shopping-consumption-line');
+    expect(editorSource).toContain('v-for="(line, index) in props.form.priceLines"');
+    expect(editorSource).toContain('v-model:value="line.salePrice"');
+    expect(editorSource).toContain('v-model:value="line.costPrice"');
+    expect(editorSource).toContain('v-model:value="line.consumptionAmount"');
+    expect(editorSource).toContain('v-model:value="line.companyRebateRate"');
+    expect(editorSource).toContain('v-model:value="line.guideCommissionRate"');
     expect(arrangementPageSource).toContain('syncOptionalLineToForm');
     expect(arrangementPageSource).toContain('syncShoppingLineToForm');
     expect(arrangementPageSource).not.toContain('class="optional-add-summary-button"\n                          title="添加费用合计"\n                          type="button"\n                          @click="normalizeArrangementPriceLines"');
@@ -783,7 +817,7 @@ describe('sales product form helpers', () => {
     expect(arrangementPageSource).toContain('templateRelationId');
     expect(arrangementPageSource).toContain('游客名单模板');
     expect(arrangementPageSource).toContain("resourceType: 'scenic'");
-    expect(arrangementPageSource).toContain('@change="applySelectedResource"');
+    expect(arrangementEditorSource()).toContain("emit('apply-selected-resource'");
     expect(arrangementPageSource).not.toContain('pageSize: 500');
     expect(arrangementPageSource).not.toContain("import { getScenicResourcePage } from '#/api/purchase/scenic'");
     expect(arrangementPageSource).not.toContain("getScenicResourcePage({ page: 1, pageSize: 200, status: 'active' })");
@@ -801,7 +835,7 @@ describe('sales product form helpers', () => {
 
   it('loads hotel arrangement dropdown from resource overview and opens add hotel page', () => {
     const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
-    const hotelLayoutSource = arrangementPageSource.slice(arrangementPageSource.indexOf('hotel-old-system-layout'));
+    const hotelLayoutSource = arrangementEditorSource().slice(arrangementEditorSource().indexOf('hotel-old-system-layout'));
 
     expect(arrangementPageSource).not.toContain("import { getHotelResourcePage } from '#/api/purchase/hotel'");
     expect(arrangementPageSource).toContain("resourceType: 'hotel'");
@@ -809,7 +843,7 @@ describe('sales product form helpers', () => {
     expect(arrangementPageSource).toContain("path: '/purchase/resource'");
     expect(arrangementPageSource).toContain("create: '1'");
     expect(arrangementPageSource).toContain("resourceType: 'hotel'");
-    expect(hotelLayoutSource).toContain('@click="openHotelCreatePage"');
+    expect(hotelLayoutSource).toContain("emit('open-hotel-create-page')");
     expect(hotelLayoutSource).toContain('添加酒店');
   });
 
@@ -817,7 +851,7 @@ describe('sales product form helpers', () => {
     const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
     const crudPageSource = readAppFile('src/views/_business/crud/CrudPage.vue');
 
-    expect(arrangementPageSource).toContain('Cascader');
+    expect(arrangementEditorSource()).toContain('Cascader');
     expect(arrangementPageSource).toContain('buildRegionOptions');
     expect(arrangementPageSource).toContain('departureRegionPath');
     expect(arrangementPageSource).toContain('arrivalRegionPath');
@@ -841,67 +875,74 @@ describe('sales product form helpers', () => {
 
   it('uses old-system field sets for each team arrangement editor instead of a generic modal', () => {
     const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+    const editorSource = arrangementEditorSource();
+    const modelSource = arrangementEditorModelSource();
 
-    expect(arrangementPageSource).toContain('arrangementEditorConfigs');
-    expect(arrangementPageSource).toContain("title: '添加/修改大交通信息'");
-    expect(arrangementPageSource).toContain("title: '添加/修改酒店信息'");
-    expect(arrangementPageSource).toContain("title: '添加/修改用车信息'");
-    expect(arrangementPageSource).toContain("title: '添加/修改景区信息'");
-    expect(arrangementPageSource).toContain("title: '添加/修改用餐信息'");
-    expect(arrangementPageSource).toContain("title: '添加/修改其它信息'");
-    expect(arrangementPageSource).toContain("title: '添加/修改自费信息'");
-    expect(arrangementPageSource).toContain("title: '添加/修改购物信息'");
-    expect(arrangementPageSource).toContain("title: '添加/修改地接信息'");
-    expect(arrangementPageSource).toContain("title: '添加/修改附加费用'");
-    expect(arrangementPageSource).toContain('酒店名称');
-    expect(arrangementPageSource).toContain('早餐基金');
-    expect(arrangementPageSource).toContain('入住退房');
-    expect(arrangementPageSource).toContain('责任房调');
-    expect(arrangementPageSource).toContain('开始结束');
-    expect(arrangementPageSource).toContain('责任车调');
-    expect(arrangementPageSource).toContain('景区名称');
-    expect(arrangementPageSource).toContain('餐厅名称');
-    expect(arrangementPageSource).toContain('景区/项目名称');
-    expect(arrangementPageSource).toContain('购物店');
-    expect(arrangementPageSource).toContain('拼团日期');
-    expect(arrangementPageSource).toContain('添加/修改附加费用');
+    expect(modelSource).toContain('arrangementEditorConfigs');
+    expect(modelSource).toContain("title: '添加/修改大交通信息'");
+    expect(modelSource).toContain("title: '添加/修改酒店信息'");
+    expect(modelSource).toContain("title: '添加/修改用车信息'");
+    expect(modelSource).toContain("title: '添加/修改景区信息'");
+    expect(modelSource).toContain("title: '添加/修改用餐信息'");
+    expect(modelSource).toContain("title: '添加/修改其它信息'");
+    expect(modelSource).toContain("title: '添加/修改自费信息'");
+    expect(modelSource).toContain("title: '添加/修改购物信息'");
+    expect(modelSource).toContain("title: '添加/修改地接信息'");
+    expect(modelSource).toContain("title: '添加/修改附加费用'");
+    expect(editorSource).toContain('酒店名称');
+    expect(editorSource).toContain('早餐基金');
+    expect(editorSource).toContain('入住退房');
+    expect(editorSource).toContain('责任房调');
+    expect(modelSource).toContain('开始结束');
+    expect(editorSource).toContain('责任车调');
+    expect(modelSource).toContain("resourceLabel: '景区名称'");
+    expect(modelSource).toContain("resourceLabel: '餐厅名称'");
+    expect(editorSource).toContain('景区/项目名称');
+    expect(editorSource).toContain('购物店');
+    expect(editorSource).toContain('拼团日期');
+    expect(modelSource).toContain('拼团日期');
+    expect(modelSource).toContain('添加/修改附加费用');
+    expect(editorSource).toContain("activeEditorConfig.resourceMode === 'select'");
+    expect(editorSource).toContain(':label="activeEditorConfig.resourceLabel"');
     expect(arrangementPageSource).not.toContain('<span>日期行程</span>');
     expect(arrangementPageSource).not.toContain('<span>资源与供应商</span>');
   });
 
   it('aligns meal other optional shopping and ground-agent editors with old-system fields', () => {
     const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+    const editorSource = arrangementEditorSource();
+    const modelSource = arrangementEditorModelSource();
 
-    expect(arrangementPageSource).toContain('meal-old-system-layout');
-    expect(arrangementPageSource).toContain('other-old-system-layout');
-    expect(arrangementPageSource).toContain('optional-old-system-layout');
-    expect(arrangementPageSource).toContain('shopping-old-system-layout');
-    expect(arrangementPageSource).toContain('ground-agent-old-system-layout');
-    expect(arrangementPageSource).toContain("title: '添加/修改用餐信息'");
-    expect(arrangementPageSource).toContain("title: '添加/修改地接信息'");
-    expect(arrangementPageSource).toContain('使用日期');
-    expect(arrangementPageSource).toContain('游玩日期');
-    expect(arrangementPageSource).toContain('购物日期');
-    expect(arrangementPageSource).toContain('费用设置');
-    expect(arrangementPageSource).toContain('消费详情');
-    expect(arrangementPageSource).toContain('公司返佣');
-    expect(arrangementPageSource).toContain('导游提成');
-    expect(arrangementPageSource).toContain('费用合计');
-    expect(arrangementPageSource).toContain('人数：');
-    expect(arrangementPageSource).toContain('收入：');
-    expect(arrangementPageSource).toContain('提成：');
-    expect(arrangementPageSource).toContain('拼团日期');
-    expect(arrangementPageSource).toContain('共几天');
-    expect(arrangementPageSource).toContain('standardMealProjectOptions');
-    expect(arrangementPageSource).toContain('otherProjectOptions');
-    expect(arrangementPageSource).toContain('groundAgentProjectOptions');
-    expect(arrangementPageSource).toContain('shoppingCategoryOptions');
-    expect(arrangementPageSource).toContain('礼品');
-    expect(arrangementPageSource).toContain('购物返佣');
-    expect(arrangementPageSource).toContain('成人');
-    expect(arrangementPageSource).toContain('代收团款');
-    expect(arrangementPageSource).toContain('乳胶');
-    expect(arrangementPageSource).toContain('唐卡');
+    expect(editorSource).toContain('meal-old-system-layout');
+    expect(editorSource).toContain('other-old-system-layout');
+    expect(editorSource).toContain('optional-old-system-layout');
+    expect(editorSource).toContain('shopping-old-system-layout');
+    expect(editorSource).toContain('ground-agent-old-system-layout');
+    expect(modelSource).toContain("title: '添加/修改用餐信息'");
+    expect(modelSource).toContain("title: '添加/修改地接信息'");
+    expect(editorSource).toContain('使用日期');
+    expect(editorSource).toContain('游玩日期');
+    expect(editorSource).toContain('购物日期');
+    expect(editorSource).toContain('费用设置');
+    expect(editorSource).toContain('消费详情');
+    expect(editorSource).toContain('公司返佣');
+    expect(editorSource).toContain('导游提成');
+    expect(editorSource).toContain('费用合计');
+    expect(editorSource).toContain('人数：');
+    expect(editorSource).toContain('收入：');
+    expect(editorSource).toContain('提成：');
+    expect(editorSource).toContain('拼团日期');
+    expect(editorSource).toContain('共几天');
+    expect(modelSource).toContain('standardMealProjectOptions');
+    expect(modelSource).toContain('otherProjectOptions');
+    expect(modelSource).toContain('groundAgentProjectOptions');
+    expect(modelSource).toContain('shoppingCategoryOptions');
+    expect(modelSource).toContain('礼品');
+    expect(modelSource).toContain('购物返佣');
+    expect(modelSource).toContain('成人');
+    expect(modelSource).toContain('代收团款');
+    expect(modelSource).toContain('乳胶');
+    expect(modelSource).toContain('唐卡');
     expect(arrangementPageSource).toContain("resourceType: 'restaurant'");
     expect(arrangementPageSource).toContain("resourceType: 'shopping'");
     expect(arrangementPageSource).toContain("optional: 'scenic'");
@@ -919,34 +960,38 @@ describe('sales product form helpers', () => {
 
   it('aligns optional editor guide commission and fee summary with old-system fields', () => {
     const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+    const editorSource = arrangementEditorSource();
+    const modelSource = arrangementEditorModelSource();
 
-    expect(arrangementPageSource).toContain('guideCommissionRate: number;');
-    expect(arrangementPageSource).toContain('v-model:value="arrangementForm.guideCommissionRate"');
-    expect(arrangementPageSource).toContain('元/人');
-    expect(arrangementPageSource).toContain('或');
-    expect(arrangementPageSource).toContain('%');
-    expect(arrangementPageSource).toContain('费用合计');
-    expect(arrangementPageSource).toContain('optional-fee-summary-row');
-    expect(arrangementPageSource).toContain('optional-add-summary-button');
-    expect(arrangementPageSource).toContain('无需导游报账，同步更新导游报账和计调审核数据');
-    expect(arrangementPageSource).toContain('v-model:value="line.guideCommissionAmount"');
+    expect(modelSource).toContain('guideCommissionRate: number;');
+    expect(editorSource).toContain('v-model:value="props.form.guideCommissionRate"');
+    expect(editorSource).toContain('元/人');
+    expect(editorSource).toContain('或');
+    expect(editorSource).toContain('%');
+    expect(editorSource).toContain('费用合计');
+    expect(editorSource).toContain('optional-fee-summary-row');
+    expect(editorSource).toContain('optional-add-summary-button');
+    expect(editorSource).toContain('无需导游报账，同步更新导游报账和计调审核数据');
+    expect(editorSource).toContain('v-model:value="line.guideCommissionAmount"');
     expect(arrangementPageSource).toContain('guideCommissionRate: Number(line.guideCommissionRate ?? (arrangementForm.guideCommissionRate || 0))');
   });
 
   it('aligns shopping editor fields with old-system logic while keeping new-system visual layout', () => {
     const arrangementPageSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+    const editorSource = arrangementEditorSource();
+    const modelSource = arrangementEditorModelSource();
 
-    expect(arrangementPageSource).toContain('shopping-compact-grid');
-    expect(arrangementPageSource).toContain('shopping-fee-row');
-    expect(arrangementPageSource).toContain('shopping-consumption-main-row');
-    expect(arrangementPageSource).toContain('shopping-consumption-extra-row');
-    expect(arrangementPageSource).toContain('companyRebateRate: number;');
-    expect(arrangementPageSource).toContain('v-model:value="line.companyRebateRate"');
-    expect(arrangementPageSource).toContain('公司返佣');
-    expect(arrangementPageSource).toContain('% =');
-    expect(arrangementPageSource).toContain('导游提成');
-    expect(arrangementPageSource).toContain('%销售额 =');
-    expect(arrangementPageSource).toContain('shopping-add-detail-button');
+    expect(editorSource).toContain('shopping-compact-grid');
+    expect(editorSource).toContain('shopping-fee-row');
+    expect(editorSource).toContain('shopping-consumption-main-row');
+    expect(editorSource).toContain('shopping-consumption-extra-row');
+    expect(modelSource).toContain('companyRebateRate: number;');
+    expect(editorSource).toContain('v-model:value="line.companyRebateRate"');
+    expect(editorSource).toContain('公司返佣');
+    expect(editorSource).toContain('% =');
+    expect(editorSource).toContain('导游提成');
+    expect(editorSource).toContain('%销售额 =');
+    expect(editorSource).toContain('shopping-add-detail-button');
     expect(arrangementPageSource).toContain('companyRebateRate: Number(line.companyRebateRate ?? (arrangementForm.companyRebateRate || 0))');
   });
 

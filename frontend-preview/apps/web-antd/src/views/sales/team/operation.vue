@@ -104,6 +104,13 @@ const moveForm = reactive({
   tourDate: '',
 });
 
+const moveMode = computed({
+  get: () => (moveForm.createNewTeam ? 'copy' : 'target'),
+  set: (value: string) => {
+    moveForm.createNewTeam = value === 'copy';
+  },
+});
+
 const stageItems = [
   { key: 'receive', label: '收客' },
   { key: 'arrange', label: '排团' },
@@ -423,12 +430,12 @@ function handleAction(action: ActionInfo) {
     openMoveDialog();
     return;
   }
-  if (action.code === 'teamArrangement' && team.value?.productId) {
-    router.push(`/sales/product/team-arrangement/${team.value.productId}`);
+  if (action.code === 'teamArrangement' && team.value?.id) {
+    router.push(`/sales/team/arrangement/${team.value.id}`);
     return;
   }
-  if (action.code === 'editTeam' && team.value?.productId) {
-    router.push(`/sales/product/schedule/${team.value.productId}`);
+  if (action.code === 'editTeam' && team.value?.id) {
+    router.push(`/sales/team/edit/${team.value.id}`);
     return;
   }
   if (action.code === 'bookingOrder' && team.value?.id) {
@@ -532,9 +539,9 @@ async function openMoveDialog() {
   moveForm.targetTeamId = undefined;
   moveForm.lineType = team.value?.teamType || 'sanpin';
   moveForm.tourDate = team.value?.departureDate || dayjs().format('YYYY-MM-DD');
-  moveForm.allNum = Math.max(1, team.value?.totalSeats || selectedOrderKeys.value.length || 30);
-  moveForm.lineName = '';
-  moveForm.memo = '';
+  moveForm.allNum = Math.max(0, team.value?.totalSeats ?? selectedOrderKeys.value.length ?? 0);
+  moveForm.lineName = product.value?.productName || content.value?.internalRemark || team.value?.teamNo || '';
+  moveForm.memo = content.value?.internalRemark || '';
   moveForm.remark = '';
   moveDialogOpen.value = true;
   await loadTargetTeams();
@@ -573,8 +580,20 @@ async function submitMove() {
     message.warning('请选择目标团队');
     return;
   }
-  if (moveForm.createNewTeam && (!moveForm.lineName || !moveForm.tourDate || !moveForm.allNum)) {
-    message.warning('请填写新团队名称、发团日期和总位数');
+  if (moveForm.createNewTeam && !moveForm.lineType) {
+    message.warning('请选择团队类型');
+    return;
+  }
+  if (moveForm.createNewTeam && !moveForm.tourDate) {
+    message.warning('请选择团队日期');
+    return;
+  }
+  if (moveForm.createNewTeam && (moveForm.allNum === undefined || moveForm.allNum === null || moveForm.allNum < 0)) {
+    message.warning('预控人数填写有误');
+    return;
+  }
+  if (moveForm.createNewTeam && !moveForm.lineName) {
+    message.warning('请填写团队名称');
     return;
   }
   transferSubmitting.value = true;
@@ -1185,8 +1204,8 @@ onMounted(loadDetail);
     </Modal>
     <Modal
       v-model:open="moveDialogOpen"
-      title="转团操作"
-      width="680px"
+      title="将选择的订单转到其它团队"
+      width="720px"
       destroy-on-close
       :confirm-loading="transferSubmitting"
       @ok="submitMove"
@@ -1195,68 +1214,67 @@ onMounted(loadDetail);
         <Form.Item label="已选择订单">
           <div class="transfer-selected-count">{{ selectedOrderKeys.length }} 单</div>
         </Form.Item>
-        <Form.Item label="转团方式">
-          <Radio.Group v-model:value="moveForm.createNewTeam">
-            <Radio :value="false">转到已有团队</Radio>
-            <Radio :value="true">复制当前团队并转入新团队</Radio>
-          </Radio.Group>
-        </Form.Item>
-        <template v-if="!moveForm.createNewTeam">
-          <Form.Item label="目标团队">
-            <Select
-              v-model:value="moveForm.targetTeamId"
-              :options="targetTeamOptions.map((item) => ({ label: item.label, value: Number(item.value) }))"
-              :loading="targetTeamLoading"
-              show-search
-              allow-clear
-              placeholder="搜索并选择目标团队"
-              @search="loadTargetTeams"
-            />
-          </Form.Item>
-        </template>
-        <template v-else>
-          <div class="transfer-grid">
-            <Form.Item label="团队类型">
+        <Radio.Group v-model:value="moveMode" class="move-mode-list">
+          <div class="move-mode-panel">
+            <Radio value="target">目标团队</Radio>
+            <Form.Item class="move-mode-field" required>
               <Select
-                v-model:value="moveForm.lineType"
-                :options="teamTypeOptions"
-                placeholder="请选择团队类型"
-              />
-            </Form.Item>
-            <Form.Item label="发团日期">
-              <DatePicker
-                v-model:value="moveForm.tourDate"
-                value-format="YYYY-MM-DD"
-                class="transfer-date-input"
-              />
-            </Form.Item>
-            <Form.Item label="总位数">
-              <InputNumber
-                v-model:value="moveForm.allNum"
-                :min="1"
-                :precision="0"
-                class="transfer-number-input"
-              />
-            </Form.Item>
-            <Form.Item label="团队名称">
-              <Textarea
-                v-model:value="moveForm.lineName"
-                :rows="1"
-                :maxlength="120"
-                placeholder="填写新团队名称或团号"
+                v-model:value="moveForm.targetTeamId"
+                :options="targetTeamOptions.map((item) => ({ label: item.label, value: Number(item.value) }))"
+                :loading="targetTeamLoading"
+                show-search
+                allow-clear
+                placeholder="搜索并选择目标团队"
+                @search="loadTargetTeams"
               />
             </Form.Item>
           </div>
-          <Form.Item label="新团队备注">
-            <Textarea
-              v-model:value="moveForm.memo"
-              :rows="2"
-              :maxlength="1000"
-              show-count
-              placeholder="填写新团队备注"
-            />
-          </Form.Item>
-        </template>
+          <div class="move-mode-panel">
+            <Radio value="copy">复制当前团队，并将订单转入新团队</Radio>
+            <div class="transfer-grid">
+              <Form.Item label="团队类型" required>
+                <Select
+                  v-model:value="moveForm.lineType"
+                  :options="teamTypeOptions"
+                  placeholder="请选择团队类型"
+                />
+              </Form.Item>
+              <Form.Item label="团队日期" required>
+                <DatePicker
+                  v-model:value="moveForm.tourDate"
+                  value-format="YYYY-MM-DD"
+                  class="transfer-date-input"
+                />
+              </Form.Item>
+              <Form.Item label="预控人数">
+                <InputNumber
+                  v-model:value="moveForm.allNum"
+                  :min="0"
+                  :precision="0"
+                  addon-after="人"
+                  class="transfer-number-input"
+                />
+              </Form.Item>
+              <Form.Item label="团队名称" required>
+                <Textarea
+                  v-model:value="moveForm.lineName"
+                  :rows="1"
+                  :maxlength="120"
+                  placeholder="填写团队名称"
+                />
+              </Form.Item>
+            </div>
+            <Form.Item label="操作备注">
+              <Textarea
+                v-model:value="moveForm.memo"
+                :rows="2"
+                :maxlength="1000"
+                show-count
+                placeholder="填写操作备注"
+              />
+            </Form.Item>
+          </div>
+        </Radio.Group>
         <Form.Item label="转团备注">
           <Textarea
             v-model:value="moveForm.remark"
@@ -2223,6 +2241,30 @@ onMounted(loadDetail);
   background: #eff6ff;
   border: 1px solid #bfdbfe;
   border-radius: 6px;
+}
+
+.move-mode-list {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+}
+
+.move-mode-panel {
+  padding: 12px;
+  background: #fff;
+  border: 1px solid #dbe4f0;
+  border-radius: 6px;
+}
+
+.move-mode-panel :deep(.ant-radio-wrapper) {
+  align-items: center;
+  margin-bottom: 10px;
+  font-weight: 800;
+  color: var(--operation-label);
+}
+
+.move-mode-field {
+  margin: 0 0 0 28px;
 }
 
 .transfer-grid {
