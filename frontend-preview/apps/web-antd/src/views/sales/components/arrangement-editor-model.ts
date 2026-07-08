@@ -328,7 +328,7 @@ export function createDefaultArrangementEditorForm(type: ArrangementType): Arran
     cashAmount: 0,
     companyRebateAmount: 0,
     companyRebateRate: 0,
-    confirmed: type === 'hotel',
+    confirmed: false,
     consumptionAmount: 0,
     costAmount: 0,
     creditAmount: 0,

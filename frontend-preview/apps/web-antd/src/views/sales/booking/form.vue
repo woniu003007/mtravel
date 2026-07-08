@@ -90,6 +90,16 @@ type GuestTypeCounts = Record<PassengerPriceType, number>;
 
 const route = useRoute();
 const router = useRouter();
+const MAX_AI_IMPORT_FILE_SIZE_MB = 50;
+const MAX_AI_IMPORT_FILE_SIZE_BYTES = MAX_AI_IMPORT_FILE_SIZE_MB * 1024 * 1024;
+const MAX_AI_IMPORT_FILE_SIZE_MESSAGE = '上传文件不能超过50MB';
+const SUPPORTED_AI_IMPORT_FILE_EXTENSIONS = 'doc,docx,xls,xlsx,csv,txt,pdf,jpg,jpeg,png,webp,bmp';
+const SUPPORTED_AI_IMPORT_FILE_EXTENSION_SET = new Set(SUPPORTED_AI_IMPORT_FILE_EXTENSIONS.split(','));
+const SUPPORTED_AI_IMPORT_FILE_ACCEPT = SUPPORTED_AI_IMPORT_FILE_EXTENSIONS
+  .split(',')
+  .map((item) => `.${item}`)
+  .join(',');
+const UNSUPPORTED_AI_IMPORT_FILE_MESSAGE = '暂不支持该文件类型，请上传 Word、Excel、PDF、图片或粘贴文本';
 const loading = ref(false);
 const saving = ref(false);
 const aiImportOpen = ref(false);
@@ -1131,6 +1141,15 @@ async function runAiImportRecognize() {
 }
 
 const beforeUploadAiImportFile: UploadProps['beforeUpload'] = async (file) => {
+  if (file.size > MAX_AI_IMPORT_FILE_SIZE_BYTES) {
+    message.error(MAX_AI_IMPORT_FILE_SIZE_MESSAGE);
+    return false;
+  }
+  const extension = fileExt(file.name);
+  if (!SUPPORTED_AI_IMPORT_FILE_EXTENSION_SET.has(extension)) {
+    message.error(UNSUPPORTED_AI_IMPORT_FILE_MESSAGE);
+    return false;
+  }
   const data = new FormData();
   data.append('file', file as File);
   data.append('businessModule', '销售收客');
@@ -1146,7 +1165,7 @@ const beforeUploadAiImportFile: UploadProps['beforeUpload'] = async (file) => {
         id: attachment.id,
       },
     ];
-    aiImportSourceType.value = fileExt(file.name);
+    aiImportSourceType.value = extension;
     message.success('文件已上传，可以开始识别');
   } catch {
     message.error('文件上传失败');
@@ -2013,7 +2032,12 @@ onMounted(() => {
         <div class="ai-workbench-grid">
           <Card size="small" title="确认单来源" class="ai-source-card">
             <div class="ai-upload-zone">
-              <Upload :show-upload-list="false" :before-upload="beforeUploadAiImportFile" multiple>
+              <Upload
+                :accept="SUPPORTED_AI_IMPORT_FILE_ACCEPT"
+                :show-upload-list="false"
+                :before-upload="beforeUploadAiImportFile"
+                multiple
+              >
                 <Button type="primary">
                   <IconifyIcon icon="lucide:upload-cloud" />
                   上传确认单

@@ -42,6 +42,11 @@ import {
   saveSalesTeam,
 } from '#/api/sales/team';
 
+import FormalTeamPageHeader from '../components/FormalTeamPageHeader.vue';
+import ShoppingReconciliationModal from '../components/ShoppingReconciliationModal.vue';
+
+import '../team-arrangement-layout.css';
+
 type ActionInfo = SalesTeamApi.OperationActionInfo;
 type ItineraryDay = SalesTeamApi.OperationItineraryDay;
 type OperationDetail = SalesTeamApi.OperationDetail;
@@ -51,6 +56,14 @@ type DictItem = ProductDictionaryNamespace.Item;
 type ProfileEditorType = 'business_type' | 'department' | 'escort' | 'internal_note' | 'operator' | 'team_type';
 type SelectOption = { id?: number; label: string; value: string };
 type DateRangeValue = [string, string] | undefined;
+
+const DEFAULT_INTERNAL_REMARK_TEMPLATE = [
+  '>导游要求：',
+  '>控房要求：',
+  '>控车要求：',
+  '>用餐要求：',
+  '>其它要求：',
+].join('\n');
 
 const route = useRoute();
 const router = useRouter();
@@ -63,6 +76,8 @@ const transferSubmitting = ref(false);
 const targetTeamLoading = ref(false);
 const mergeDialogOpen = ref(false);
 const moveDialogOpen = ref(false);
+const shoppingReconciliationOpen = ref(false);
+const shoppingReconciliationTeamId = ref<number>();
 const detail = ref<OperationDetail>();
 const selectedOrderKeys = ref<number[]>([]);
 const mergeActiveTab = ref('team');
@@ -80,6 +95,9 @@ const profileForm = reactive({
   escortEmployeeName: '',
   internalRemark: '',
   operatorEmployeeName: '',
+  optionalMarkupRate: 0,
+  perCapitaPitAmount: 0,
+  perCapitaShoppingAmount: 0,
   teamType: 'sanpin' as SalesTeamApi.TeamType,
 });
 const mergeForm = reactive({
@@ -134,6 +152,7 @@ const actionIcons: Record<string, string> = {
   printGuestList: 'lucide:users-round',
   printItinerary: 'lucide:printer',
   printSettlement: 'lucide:file-spreadsheet',
+  shoppingReconciliation: 'lucide:percent',
   stopBooking: 'lucide:pause-circle',
   teamArrangement: 'lucide:clipboard-list',
 };
@@ -233,6 +252,31 @@ const profileBadges = computed(() => [
   { label: '领队', value: team.value?.leaderSummary || '--' },
   { editorType: 'escort' as const, label: '全陪', value: team.value?.escortEmployeeName || team.value?.escortSummary || '--' },
 ]);
+const formalHeaderBadges = computed(() => profileBadges.value.map((badge) => ({
+  color: badge.color,
+  editable: Boolean(badge.editorType),
+  key: badge.label,
+  label: badge.label,
+  value: badge.value,
+})));
+const formalHeaderStages = computed(() => stageItems.map((stage) => ({
+  label: stage.label,
+  state: stageState(stage.key) === 'active' ? 'template' : 'pending',
+})));
+const formalHeaderToolActions = computed(() => toolActions.value.map((action) => ({
+  icon: actionIcon(action.code),
+  key: action.code,
+  label: action.label,
+})));
+const formalHeaderActions = computed(() => [
+  { icon: 'lucide:tag', key: 'price', label: '查看价格' },
+  { icon: 'lucide:briefcase', key: 'itinerary', label: '查看行程' },
+]);
+const formalHeaderNoteMetrics = computed(() => [
+  `人均坑位：¥${formatMoney(content.value?.perCapitaPitAmount)}`,
+  `自费加点率：${formatPercent(content.value?.optionalMarkupRate)}`,
+  `人均购物：¥${formatMoney(content.value?.perCapitaShoppingAmount)}`,
+]);
 
 const pageTitle = computed(() => {
   const teamNo = team.value?.teamNo;
@@ -320,6 +364,11 @@ function formatMoney(value?: number) {
   if (value === 0) return '0';
   if (value === undefined || value === null) return '--';
   return `${value}`;
+}
+
+function formatPercent(value?: number) {
+  if (value === undefined || value === null) return '--';
+  return `${value}%`;
 }
 
 function formatMeal(day: ItineraryDay) {
@@ -434,6 +483,10 @@ function handleAction(action: ActionInfo) {
     router.push(`/sales/team/arrangement/${team.value.id}`);
     return;
   }
+  if (action.code === 'shoppingReconciliation' && team.value?.id) {
+    openShoppingReconciliationModal(team.value.id);
+    return;
+  }
   if (action.code === 'editTeam' && team.value?.id) {
     router.push(`/sales/team/edit/${team.value.id}`);
     return;
@@ -454,6 +507,35 @@ function handleAction(action: ActionInfo) {
     return;
   }
   message.info(action.note || `${action.label}待接入`);
+}
+
+function handleFormalHeaderToolAction(action: { key: string }) {
+  const target = toolActions.value.find((item) => item.code === action.key);
+  if (target) {
+    handleAction(target);
+  }
+}
+
+function handleFormalHeaderAction(action: { key: string }) {
+  if (action.key === 'price') {
+    showPriceModal();
+    return;
+  }
+  if (action.key === 'itinerary') {
+    showItineraryModal();
+  }
+}
+
+function handleFormalHeaderBadge(badge: { label: string }) {
+  const target = profileBadges.value.find((item) => item.label === badge.label);
+  if (target?.editorType) {
+    openProfileEditor(target.editorType);
+  }
+}
+
+function openShoppingReconciliationModal(targetTeamId: number) {
+  shoppingReconciliationTeamId.value = targetTeamId;
+  shoppingReconciliationOpen.value = true;
 }
 
 async function loadTargetTeams(keyword = '') {
@@ -488,6 +570,8 @@ async function loadMergeTargetTeams() {
       page: mergeTargetTeamPage.value,
       pageSize: mergeTargetTeamPageSize.value,
       startDate: startDate || undefined,
+      // 拼团目标团队只显示散拼，和老系统 MergeGroup.aspx 目标团列表保持一致。
+      teamType: 'sanpin',
       teamStatus: 'not_departed',
       travelDays: mergeTeamSearchForm.travelDays,
     });
@@ -682,7 +766,10 @@ async function openProfileEditor(type: ProfileEditorType) {
   profileForm.departmentName = team.value?.departmentName || '';
   profileForm.operatorEmployeeName = team.value?.operatorEmployeeName || '';
   profileForm.escortEmployeeName = team.value?.escortEmployeeName || team.value?.escortSummary || '';
-  profileForm.internalRemark = content.value?.internalRemark || '';
+  profileForm.internalRemark = content.value?.internalRemark || DEFAULT_INTERNAL_REMARK_TEMPLATE;
+  profileForm.perCapitaPitAmount = Number(content.value?.perCapitaPitAmount ?? 0);
+  profileForm.optionalMarkupRate = Number(content.value?.optionalMarkupRate ?? 0);
+  profileForm.perCapitaShoppingAmount = Number(content.value?.perCapitaShoppingAmount ?? 0);
   profileEditorOpen.value = true;
   await ensureProfileOptions(type);
 }
@@ -706,7 +793,10 @@ async function saveProfileEditor() {
       escortEmployeeName: profileForm.escortEmployeeName || undefined,
       operatorEmployeeId,
       operatorEmployeeName: profileForm.operatorEmployeeName || undefined,
-      remark: profileForm.internalRemark || undefined,
+      optionalMarkupRate: profileForm.optionalMarkupRate,
+      perCapitaPitAmount: profileForm.perCapitaPitAmount,
+      perCapitaShoppingAmount: profileForm.perCapitaShoppingAmount,
+      remark: profileForm.internalRemark,
       teamType: profileForm.teamType,
     });
     profileEditorOpen.value = false;
@@ -805,123 +895,62 @@ onMounted(loadDetail);
 <template>
   <Page :title="pageTitle">
     <Spin :spinning="loading">
-      <Card class="team-operation-shell" :bordered="false">
-        <div class="team-operation-header">
-          <div>
-            <div class="operation-title">团队操作</div>
-            <div class="operation-subtitle">团队业务操作台：收客、排团、发团、结算入口集中跟进。</div>
+      <Card class="team-arrangement-card formal-team-arrangement-card" :bordered="false">
+        <FormalTeamPageHeader
+          :actions="formalHeaderActions"
+          :badges="formalHeaderBadges"
+          :metrics="metricItems"
+          :note="content?.internalRemark || '无'"
+          :note-metrics="formalHeaderNoteMetrics"
+          :stages="formalHeaderStages"
+          :title="product?.productName || '未命名团队'"
+          :tool-actions="formalHeaderToolActions"
+          tool-title="团队工具"
+          @action-click="handleFormalHeaderAction"
+          @badge-click="handleFormalHeaderBadge"
+          @note-edit="openProfileEditor('internal_note')"
+          @tool-click="handleFormalHeaderToolAction"
+        />
+
+        <div class="formal-description-stack">
+          <div class="formal-description-row">
+            <div class="formal-description-title">产品说明</div>
+            <div class="formal-description-text">{{ content?.productDescription || '无' }}</div>
           </div>
-          <div class="top-tool-actions">
-            <Button
-              v-for="action in toolActions"
+          <div class="formal-description-row">
+            <div class="formal-description-title">收客须知</div>
+            <div class="formal-description-text">{{ content?.bookingNotice || '无' }}</div>
+          </div>
+        </div>
+
+        <div class="arrangement-tabs-block formal-operation-actions" aria-label="团队业务入口">
+          <div class="arrangement-icon-grid compact-category-strip operation-action-grid">
+            <button
+              v-for="action in businessActions"
               :key="action.code"
-              size="small"
+              type="button"
+              class="arrangement-icon-button operation-action-tile"
+              :class="{ danger: actionDanger(action) }"
               @click="handleAction(action)"
             >
               <IconifyIcon :icon="actionIcon(action.code)" />
               <span>{{ action.label }}</span>
-            </Button>
-          </div>
-        </div>
-
-        <div class="operation-flow-row" aria-label="团队阶段">
-          <template v-for="(stage, index) in stageItems" :key="stage.key">
-            <div class="stage-flow-item" :class="stageState(stage.key)">
-              <span class="stage-index">{{ index + 1 }}</span>
-              <span class="stage-label">{{ stage.label }}</span>
-            </div>
-            <IconifyIcon v-if="index < stageItems.length - 1" icon="lucide:chevrons-right" class="stage-arrow" />
-          </template>
-        </div>
-
-        <div class="team-profile-block">
-          <div class="team-name">{{ product?.productName || '未命名团队' }}</div>
-          <div class="team-badges">
-            <Tag
-              v-for="badge in profileBadges"
-              :key="badge.label"
-              :color="badge.color"
-              class="profile-edit-tag"
-              @click="badge.editorType && openProfileEditor(badge.editorType)"
-            >
-              {{ badge.label }}：{{ badge.value }}
-              <IconifyIcon v-if="badge.editorType" icon="lucide:pencil" />
-            </Tag>
-          </div>
-
-          <div class="team-metric-panel">
-            <div class="team-metric-strip">
-              <span
-                v-for="item in metricItems"
-                :key="item.key"
-                class="team-metric-item"
-                :class="`metric-${item.key}`"
-              >
-                <em>{{ item.label }}</em>
-                <strong>{{ item.value }}</strong>
-              </span>
-            </div>
-            <div class="old-system-view-actions">
-              <button type="button" class="view-action-tile" @click="showPriceModal">
-                <IconifyIcon icon="lucide:tag" />
-                <span>查看价格</span>
-              </button>
-              <button type="button" class="view-action-tile" @click="showItineraryModal">
-                <IconifyIcon icon="lucide:briefcase-business" />
-                <span>查看行程</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="team-description-stack">
-          <div class="description-row">
-            <div class="description-title">产品说明</div>
-            <div class="description-text">{{ content?.productDescription || '无' }}</div>
-          </div>
-          <div class="description-row">
-            <div class="description-title">收客须知</div>
-            <div class="description-text">{{ content?.bookingNotice || '无' }}</div>
-          </div>
-          <div class="description-row internal">
-            <div class="description-title">
-              <IconifyIcon icon="lucide:info" />
-              <span>内部备注</span>
-            </div>
-            <div class="description-text">{{ content?.internalRemark || '无' }}</div>
-            <Button type="link" size="small" @click="openProfileEditor('internal_note')">
-              <IconifyIcon icon="lucide:file-pen-line" />
-              <span>编辑</span>
-            </Button>
-          </div>
-        </div>
-
-        <div class="operation-icon-actions">
-          <button
-            v-for="action in businessActions"
-            :key="action.code"
-            type="button"
-            class="operation-icon-button"
-            :class="{ danger: actionDanger(action) }"
-            @click="handleAction(action)"
-          >
-            <span class="operation-icon-circle">
-              <IconifyIcon :icon="actionIcon(action.code)" />
-            </span>
-            <span class="operation-icon-label">{{ action.label }}</span>
-          </button>
-          <button type="button" class="operation-icon-button" @click="goBack">
-            <span class="operation-icon-circle">
+            </button>
+            <button type="button" class="arrangement-icon-button operation-action-tile" @click="goBack">
               <IconifyIcon icon="lucide:undo-2" />
-            </span>
-            <span class="operation-icon-label">返回上页</span>
-          </button>
+              <span>返回上页</span>
+            </button>
+          </div>
         </div>
 
-        <div class="order-section">
-          <div class="section-heading">
-            <IconifyIcon icon="lucide:list-checks" />
-            <span>该团相关订单</span>
+        <section class="arrangement-section-card formal-order-section">
+          <div class="arrangement-section-header">
+            <div class="arrangement-section-heading">
+              <div class="arrangement-section-title">
+                <IconifyIcon icon="lucide:list-checks" />
+                <span>该团相关订单</span>
+              </div>
+            </div>
           </div>
           <Table
             :columns="orderColumns"
@@ -1052,7 +1081,7 @@ onMounted(loadDetail);
               </template>
             </template>
           </Table>
-        </div>
+        </section>
       </Card>
     </Spin>
     <Modal
@@ -1290,22 +1319,55 @@ onMounted(loadDetail);
       v-model:open="profileEditorOpen"
       :title="activeProfileTitle"
       :footer="null"
-      width="520px"
+      :width="profileEditorType === 'internal_note' ? 760 : 460"
       destroy-on-close
     >
       <Spin :spinning="profileOptionsLoading || profileSaving">
         <Form layout="vertical" class="profile-editor-form">
-          <Form.Item :label="activeProfileLabel">
-            <Textarea
-              v-if="profileEditorType === 'internal_note'"
-              v-model:value="profileForm.internalRemark"
-              :rows="4"
-              placeholder="填写团队内部备注"
-              :maxlength="500"
-              show-count
-            />
+          <template v-if="profileEditorType === 'internal_note'">
+            <Form.Item label="内部备注">
+              <Textarea
+                v-model:value="profileForm.internalRemark"
+                class="inside-memo-textarea"
+                :auto-size="{ minRows: 10, maxRows: 16 }"
+                placeholder="填写导游、控房、控车、用餐和其它要求"
+                :maxlength="500"
+                show-count
+              />
+            </Form.Item>
+            <div class="inside-memo-edit-grid">
+              <Form.Item label="人均坑位">
+                <InputNumber
+                  v-model:value="profileForm.perCapitaPitAmount"
+                  :min="0"
+                  :precision="2"
+                  addon-before="¥"
+                  class="inside-memo-number-input"
+                />
+              </Form.Item>
+              <Form.Item label="自费加点率">
+                <InputNumber
+                  v-model:value="profileForm.optionalMarkupRate"
+                  :min="0"
+                  :precision="2"
+                  addon-after="%"
+                  class="inside-memo-number-input"
+                />
+              </Form.Item>
+              <Form.Item label="人均购物">
+                <InputNumber
+                  v-model:value="profileForm.perCapitaShoppingAmount"
+                  :min="0"
+                  :precision="2"
+                  addon-before="¥"
+                  class="inside-memo-number-input"
+                />
+              </Form.Item>
+            </div>
+          </template>
+          <Form.Item v-else :label="activeProfileLabel">
             <Select
-              v-else-if="profileEditorType === 'team_type'"
+              v-if="profileEditorType === 'team_type'"
               v-model:value="profileForm.teamType"
               :options="activeProfileOptions"
               placeholder="请选择团队类型"
@@ -1349,286 +1411,16 @@ onMounted(loadDetail);
         </Form>
       </Spin>
     </Modal>
+
+    <ShoppingReconciliationModal
+      v-model:open="shoppingReconciliationOpen"
+      :team-departure-date="team?.departureDate"
+      :team-id="shoppingReconciliationTeamId"
+    />
   </Page>
 </template>
 
 <style scoped>
-.team-operation-shell {
-  --operation-border: #e2e8f0;
-  --operation-border-soft: #edf2f7;
-  --operation-heading: #0f172a;
-  --operation-label: #1e293b;
-  --operation-muted: #64748b;
-  --operation-normal: #475569;
-  --operation-primary: #1677ff;
-  --operation-primary-soft: #e6f4ff;
-  --operation-panel-bg: #fff;
-  --operation-soft-bg: #f8fafc;
-
-  overflow: hidden;
-  color: var(--operation-label);
-  background: #fff;
-  border: 1px solid var(--operation-border);
-  border-radius: 8px;
-  box-shadow: 0 8px 22px rgb(15 23 42 / 5%);
-}
-
-.team-operation-shell :deep(.ant-card-body) {
-  padding: 16px;
-  background: #fff;
-}
-
-.team-operation-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 16px;
-  align-items: center;
-  padding: 14px 16px;
-  margin-bottom: 10px;
-  background: linear-gradient(180deg, #f8fbff 0%, #fff 100%);
-  border: 1px solid var(--operation-border);
-  border-radius: 8px;
-}
-
-.operation-title {
-  font-size: 22px;
-  font-weight: 800;
-  line-height: 1.25;
-  color: var(--operation-heading);
-}
-
-.operation-subtitle {
-  margin-top: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--operation-muted);
-}
-
-.top-tool-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.top-tool-actions :deep(.ant-btn),
-.description-row :deep(.ant-btn) {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  font-weight: 800;
-}
-
-.top-tool-actions :deep(.ant-btn) {
-  height: 30px;
-  color: #334155;
-  background: #fff;
-  border-color: #dbe4f0;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
-}
-
-.top-tool-actions :deep(.ant-btn):hover {
-  color: #0958d9;
-  background: #e6f4ff;
-  border-color: #69b1ff;
-}
-
-.operation-flow-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 0 14px;
-}
-
-.stage-flow-item {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: center;
-  min-width: 126px;
-  height: 34px;
-  color: #475569;
-  background: #f8fafc;
-  border: 1px solid #dbe4f0;
-  border-radius: 5px;
-}
-
-.stage-flow-item.active {
-  color: #fff;
-  background: #1677ff;
-  border-color: #1677ff;
-  box-shadow: 0 4px 10px rgb(22 119 255 / 18%);
-}
-
-.stage-flow-item.pending {
-  color: #334155;
-  background: linear-gradient(180deg, #fff 0%, #f1f5f9 100%);
-  border-color: #d7dee8;
-}
-
-.stage-index {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  font-size: 11px;
-  font-weight: 900;
-  color: currentcolor;
-  background: rgb(255 255 255 / 70%);
-  border: 1px solid currentcolor;
-  border-radius: 999px;
-}
-
-.stage-flow-item.active .stage-index {
-  color: #fff;
-  background: rgb(255 255 255 / 16%);
-  border-color: rgb(255 255 255 / 72%);
-}
-
-.stage-label {
-  font-size: 12.5px;
-  font-weight: 800;
-  letter-spacing: 0;
-}
-
-.stage-arrow {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  color: #b8c2d0;
-}
-
-.team-name {
-  margin-bottom: 10px;
-  overflow: hidden;
-  font-size: 20px;
-  font-weight: 800;
-  line-height: 1.35;
-  color: var(--operation-heading);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.team-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-bottom: 12px;
-}
-
-.team-badges :deep(.ant-tag) {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  margin-inline-end: 0;
-  font-weight: 600;
-  color: #334155 !important;
-  background: #f8fafc !important;
-  border-color: #dbe4f0 !important;
-  border-radius: 4px;
-}
-
-.profile-edit-tag {
-  cursor: pointer;
-}
-
-.profile-edit-tag:hover {
-  color: #0958d9 !important;
-  background: #e6f4ff !important;
-  border-color: #91caff !important;
-}
-
-.profile-edit-tag svg {
-  width: 12px;
-  height: 12px;
-}
-
-.team-badges :deep(.ant-tag:nth-child(1)) {
-  color: #0958d9 !important;
-  background: #e6f4ff !important;
-  border-color: #91caff !important;
-}
-
-.team-badges :deep(.ant-tag:nth-child(2)) {
-  color: #ad6800 !important;
-  background: #fff7e6 !important;
-  border-color: #ffd591 !important;
-}
-
-.team-badges :deep(.ant-tag:nth-child(4)) {
-  color: #1554ad !important;
-  background: #eef6ff !important;
-  border-color: #b7d7ff !important;
-}
-
-.team-badges :deep(.ant-tag:nth-child(5)) {
-  color: #237804 !important;
-  background: #f6ffed !important;
-  border-color: #b7eb8f !important;
-}
-
-.team-metric-panel {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 176px;
-  gap: 8px;
-  align-items: stretch;
-}
-
-.team-metric-strip {
-  display: grid;
-  grid-template-columns:
-    minmax(104px, 0.86fr)
-    minmax(104px, 0.86fr)
-    minmax(104px, 0.86fr)
-    minmax(104px, 0.86fr)
-    minmax(218px, 1.5fr)
-    minmax(132px, 1fr)
-    minmax(110px, 0.86fr);
-  min-width: 0;
-  overflow: hidden;
-  background: #fff;
-  border: 1px solid var(--operation-border);
-  border-radius: 8px;
-}
-
-.team-metric-item {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-width: 0;
-  min-height: 58px;
-  padding: 9px 12px;
-  border-right: 1px solid var(--operation-border-soft);
-}
-
-.team-metric-item:last-child {
-  border-right: 0;
-}
-
-.team-metric-item em {
-  display: block;
-  margin-bottom: 5px;
-  overflow: hidden;
-  font-size: 11.5px;
-  font-style: normal;
-  font-weight: 700;
-  color: var(--operation-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.team-metric-item strong {
-  display: block;
-  overflow: hidden;
-  font-size: 16px;
-  font-weight: 800;
-  line-height: 1.2;
-  color: var(--operation-primary);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .team-metric-item.metric-teamNo strong {
   overflow: visible;
   font-size: 15px;
@@ -1636,54 +1428,14 @@ onMounted(loadDetail);
   text-overflow: clip;
 }
 
-.old-system-view-actions {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 6px;
+.formal-description-stack {
+  margin-bottom: 10px;
   overflow: hidden;
-  background: transparent;
-  border: 0;
+  border: 1px solid #dbe5f2;
+  border-radius: 6px;
 }
 
-.view-action-tile {
-  display: flex;
-  flex-direction: row;
-  gap: 6px;
-  align-items: center;
-  justify-content: flex-start;
-  min-height: 26px;
-  padding: 6px 10px;
-  color: #1554ad;
-  cursor: pointer;
-  background: #eef6ff;
-  border: 1px solid #b7d7ff;
-  border-radius: 5px;
-}
-
-.view-action-tile:hover,
-.view-action-tile:focus {
-  color: #0958d9;
-  background: #f0f7ff;
-}
-
-.view-action-tile svg {
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-}
-
-.view-action-tile span {
-  font-size: 12.5px;
-  font-weight: 800;
-}
-
-.team-description-stack {
-  margin-top: 10px;
-  border: 1px solid var(--operation-border);
-  border-radius: 8px;
-}
-
-.description-row {
+.formal-description-row {
   display: grid;
   grid-template-columns: 96px minmax(0, 1fr) auto;
   gap: 12px;
@@ -1691,179 +1443,87 @@ onMounted(loadDetail);
   min-height: 42px;
   padding: 10px 14px;
   background: #fff;
-  border-bottom: 1px solid var(--operation-border-soft);
+  border-bottom: 1px solid #edf2f7;
 }
 
-.description-row:first-child {
-  border-radius: 8px 8px 0 0;
-}
-
-.description-row.internal {
-  min-height: 58px;
-  padding: 0;
-  overflow: hidden;
-  background: #f8fbff;
+.formal-description-row:last-child {
   border-bottom: 0;
-  border-radius: 0 0 8px 8px;
 }
 
-.description-row.internal .description-title {
+.inside-memo-text {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inside-memo-display-text {
+  line-height: 1.65;
+  white-space: pre-line;
+  word-break: break-word;
+}
+
+.inside-memo-metrics {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  align-items: center;
-  height: 100%;
-  padding: 14px 16px;
-  color: #1e293b;
+}
+
+.inside-memo-metrics span {
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #1554ad;
   background: #eef6ff;
+  border: 1px solid #d6e9ff;
+  border-radius: 4px;
 }
 
-.description-row.internal .description-title svg {
-  width: 18px;
-  height: 18px;
-  color: var(--operation-primary);
-}
-
-.description-row.internal .description-text {
-  padding: 14px 0;
-}
-
-.description-row.internal :deep(.ant-btn) {
-  margin: 10px 10px 0 0;
-}
-
-.description-title {
+.formal-description-title {
   font-size: 14px;
   font-weight: 800;
-  color: var(--operation-label);
+  color: #1e293b;
 }
 
-.description-text {
+.formal-description-text {
   min-width: 0;
   font-size: 13px;
   font-weight: 600;
   line-height: 1.6;
-  color: var(--operation-normal);
+  color: #475569;
   word-break: break-word;
 }
 
-.operation-icon-actions {
+.formal-operation-actions {
+  margin-bottom: 10px;
+}
+
+.operation-action-grid {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
-  align-items: center;
-  padding: 10px 0 12px;
+  align-items: stretch;
+  padding: 10px 12px;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
-.operation-icon-button {
-  display: flex;
-  flex-direction: row;
-  gap: 6px;
-  align-items: center;
-  justify-content: flex-start;
-  min-width: 0;
-  min-height: 32px;
-  padding: 5px 10px;
-  color: #334155;
-  cursor: pointer;
-  background: #fff;
-  border: 1px solid #dbe4f0;
-  border-radius: 5px;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 3%);
-  transition:
-    color 0.18s ease,
-    background-color 0.18s ease,
-    border-color 0.18s ease,
-    box-shadow 0.18s ease;
+.operation-action-tile {
+  flex: 1 0 92px;
+  min-width: 92px;
+  min-height: 64px;
 }
 
-.operation-icon-button:hover,
-.operation-icon-button:focus {
-  color: #0958d9;
-  background: #f8fbff;
-  border-color: #91caff;
-  box-shadow: 0 4px 12px rgb(22 119 255 / 10%);
-}
-
-.operation-icon-button.danger {
+.operation-action-tile.danger {
   color: #b42318;
 }
 
-.operation-icon-button.danger:hover,
-.operation-icon-button.danger:focus {
+.operation-action-tile.danger:hover,
+.operation-action-tile.danger:focus {
   color: #ff4d4f;
 }
 
-.operation-icon-circle {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  color: currentcolor;
-  background: #f1f5f9;
-  border: 1px solid #dbe4f0;
-  border-radius: 5px;
-  transition: all 0.16s ease;
-}
-
-.operation-icon-button:hover .operation-icon-circle,
-.operation-icon-button:focus .operation-icon-circle {
-  background: #e6f4ff;
-  border-color: #91caff;
-  box-shadow: 0 4px 12px rgb(22 119 255 / 14%);
-}
-
-.operation-icon-button.danger .operation-icon-circle {
-  background: #fff5f5;
-  border-color: #ffd6d6;
-}
-
-.operation-icon-button.danger:hover .operation-icon-circle,
-.operation-icon-button.danger:focus .operation-icon-circle {
-  background: #fff1f0;
-  border-color: #ffccc7;
-}
-
-.operation-icon-circle svg {
-  width: 13px;
-  height: 13px;
-}
-
-.operation-icon-label {
-  display: block;
-  width: auto;
-  overflow: hidden;
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1.2;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.order-section {
-  padding-top: 0;
-}
-
-.section-heading {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 10px 12px;
+.formal-order-section {
   margin-bottom: 0;
-  font-size: 16px;
-  font-weight: 800;
-  color: #1554ad;
-  background: #eef6ff;
-  border: 1px solid #b7d7ff;
-  border-bottom: 0;
-  border-radius: 8px 8px 0 0;
-}
-
-.section-heading svg {
-  width: 18px;
-  height: 18px;
 }
 
 .order-table :deep(.ant-table) {
@@ -2064,6 +1724,20 @@ onMounted(loadDetail);
 
 .profile-editor-form {
   padding-top: 6px;
+}
+
+.inside-memo-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.inside-memo-textarea {
+  line-height: 1.7;
+}
+
+.inside-memo-number-input {
+  width: 100%;
 }
 
 .profile-editor-actions {
@@ -2412,58 +2086,7 @@ onMounted(loadDetail);
   text-align: right;
 }
 
-@media (width <= 1440px) {
-  .team-metric-panel {
-    grid-template-columns: minmax(0, 1fr) 168px;
-  }
-
-  .team-metric-strip {
-    grid-template-columns:
-      minmax(92px, 1fr)
-      minmax(92px, 1fr)
-      minmax(92px, 1fr)
-      minmax(92px, 1fr)
-      minmax(210px, 1.6fr)
-      minmax(118px, 1fr)
-      minmax(92px, 1fr);
-  }
-}
-
 @media (width <= 1024px) {
-  .team-operation-header,
-  .operation-flow-row {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .top-tool-actions {
-    justify-content: flex-start;
-  }
-
-  .operation-flow-row {
-    gap: 8px;
-  }
-
-  .stage-flow-item {
-    width: 100%;
-  }
-
-  .stage-arrow {
-    display: none;
-  }
-
-  .team-metric-panel {
-    grid-template-columns: 1fr;
-  }
-
-  .operation-icon-actions {
-    gap: 6px;
-  }
-
-  .operation-icon-button {
-    flex: 1 1 128px;
-  }
-
   .merge-selected-order-row {
     grid-template-columns: 1fr;
   }

@@ -334,6 +334,44 @@ CREATE INDEX IF NOT EXISTS idx_dispatch_team_arrangement_flow_tenant_team
 CREATE INDEX IF NOT EXISTS idx_dispatch_team_arrangement_flow_tenant_status
   ON dispatch_team_arrangement_flow_records (tenant_id, is_deleted, flow_type, flow_status, registered_at DESC);
 
+CREATE TABLE IF NOT EXISTS dispatch_team_arrangement_section_statuses (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  team_id bigint NOT NULL,
+  team_no varchar(80) NOT NULL,
+  team_type varchar(20),
+  arrangement_type varchar(30) NOT NULL,
+  status varchar(20) NOT NULL DEFAULT 'pending',
+  created_by varchar(80),
+  remark text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  is_deleted boolean NOT NULL DEFAULT false,
+  deleted_at timestamptz,
+  deleted_by varchar(64),
+  CONSTRAINT fk_dispatch_team_arrangement_section_status_team
+    FOREIGN KEY (tenant_id, team_id) REFERENCES sales_teams (tenant_id, id),
+  CONSTRAINT uk_dispatch_team_arrangement_section_status_tenant_id_id UNIQUE (tenant_id, id),
+  CONSTRAINT chk_dispatch_team_arrangement_section_status_type CHECK (
+    arrangement_type IN ('traffic', 'hotel', 'vehicle', 'scenic', 'meal', 'other', 'optional', 'shopping', 'ground_agent', 'extra_fee')
+  ),
+  CONSTRAINT chk_dispatch_team_arrangement_section_status_status CHECK (
+    status IN ('pending', 'none', 'done')
+  )
+);
+
+DROP TRIGGER IF EXISTS trg_dispatch_team_arrangement_section_statuses_updated_at ON dispatch_team_arrangement_section_statuses;
+CREATE TRIGGER trg_dispatch_team_arrangement_section_statuses_updated_at
+BEFORE UPDATE ON dispatch_team_arrangement_section_statuses
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_dispatch_team_arrangement_section_status_active
+  ON dispatch_team_arrangement_section_statuses (tenant_id, team_id, arrangement_type)
+  WHERE is_deleted = false;
+
+CREATE INDEX IF NOT EXISTS idx_dispatch_team_arrangement_section_status_tenant_team
+  ON dispatch_team_arrangement_section_statuses (tenant_id, is_deleted, team_id, arrangement_type);
+
 COMMENT ON TABLE dispatch_team_arrangements IS '正式团队安排成本主表。保存团队实际执行阶段的大交通、住宿、用车、景区、用餐等资源安排和成本。';
 COMMENT ON COLUMN dispatch_team_arrangements.id IS '团队安排成本主键 ID。';
 COMMENT ON COLUMN dispatch_team_arrangements.tenant_id IS '租户 ID，用于隔离不同地接公司的团队安排成本数据。';
@@ -473,5 +511,21 @@ COMMENT ON COLUMN dispatch_team_arrangement_flow_records.updated_at IS '更新�
 COMMENT ON COLUMN dispatch_team_arrangement_flow_records.is_deleted IS '是否已软删除。';
 COMMENT ON COLUMN dispatch_team_arrangement_flow_records.deleted_at IS '软删除时间。';
 COMMENT ON COLUMN dispatch_team_arrangement_flow_records.deleted_by IS '软删除操作人。';
+
+COMMENT ON TABLE dispatch_team_arrangement_section_statuses IS '正式团队安排分类流程状态表。保存团队安排页各资源分类是否待处理、无需或已完成。';
+COMMENT ON COLUMN dispatch_team_arrangement_section_statuses.id IS '团队安排分类流程状态主键 ID。';
+COMMENT ON COLUMN dispatch_team_arrangement_section_statuses.tenant_id IS '租户 ID，用于隔离不同地接公司的分类状态数据。';
+COMMENT ON COLUMN dispatch_team_arrangement_section_statuses.team_id IS '所属团队 ID。';
+COMMENT ON COLUMN dispatch_team_arrangement_section_statuses.team_no IS '团队编号快照，用于列表和流程展示。';
+COMMENT ON COLUMN dispatch_team_arrangement_section_statuses.team_type IS '团队类型快照。';
+COMMENT ON COLUMN dispatch_team_arrangement_section_statuses.arrangement_type IS '安排资源类型。traffic 大交通，hotel 住宿，vehicle 用车，scenic 景区，meal 用餐，other 其它，optional 自费，shopping 购物，ground_agent 地接，extra_fee 附加。';
+COMMENT ON COLUMN dispatch_team_arrangement_section_statuses.status IS '分类流程状态。pending 待完成，none 无需安排，done 已完成。';
+COMMENT ON COLUMN dispatch_team_arrangement_section_statuses.created_by IS '创建人账号或名称。';
+COMMENT ON COLUMN dispatch_team_arrangement_section_statuses.remark IS '备注。';
+COMMENT ON COLUMN dispatch_team_arrangement_section_statuses.created_at IS '创建时间。';
+COMMENT ON COLUMN dispatch_team_arrangement_section_statuses.updated_at IS '更新时间，由触发器自动维护。';
+COMMENT ON COLUMN dispatch_team_arrangement_section_statuses.is_deleted IS '是否已软删除。';
+COMMENT ON COLUMN dispatch_team_arrangement_section_statuses.deleted_at IS '软删除时间。';
+COMMENT ON COLUMN dispatch_team_arrangement_section_statuses.deleted_by IS '软删除操作人。';
 
 COMMIT;

@@ -27,7 +27,6 @@ import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { getProductDictionaryAll } from '#/api/enterprise/product-dictionary';
-import { getControlledRoomResourceAll } from '#/api/dispatch/room-status';
 import { getHotelResourcePage } from '#/api/purchase/hotel';
 import {
   calculateRoadbookRoute,
@@ -161,10 +160,6 @@ function dictionaryOptions(items: DictItem[]): SelectOption[] {
   }));
 }
 
-function formatHotelLocation(item: { city?: string; district?: string; province?: string }) {
-  return [item.province, item.city, item.district].filter(Boolean).join(' / ') || '未填地区';
-}
-
 function uniqueHotelOptions(options: SelectOption[]) {
   const seen = new Set<string>();
   return options.filter((item) => {
@@ -193,26 +188,18 @@ async function loadDictionaries() {
 /**
  * 加载行程关联酒店候选项。
  *
- * 团队直接创建页复用产品行程录入口径，关联酒店仍从自营房源和采购酒店资源中选择。
+ * 团队直接创建页复用产品行程录入口径，关联酒店候选来自采购酒店资源。
  */
 async function loadRelatedHotelOptions() {
   relatedHotelLoading.value = true;
   try {
-    const [controlledResources, purchasedResult] = await Promise.all([
-      getControlledRoomResourceAll(false),
-      getHotelResourcePage({ page: 1, pageSize: 200, status: 'active' }),
-    ]);
-
-    const controlledOptions = controlledResources.map((item) => ({
-      label: `自营｜${item.hotelName}｜${formatHotelLocation(item)}｜${item.starStandard || '未设标准'}`,
-      value: item.hotelName,
-    }));
+    const purchasedResult = await getHotelResourcePage({ page: 1, pageSize: 200, status: 'active' });
     const purchasedOptions = purchasedResult.items.map((item) => ({
       label: `采购｜${item.hotelName}｜${[item.city, item.area].filter(Boolean).join(' / ') || '未填地区'}｜${item.roomType || '未填房型'}`,
       value: item.hotelName,
     }));
 
-    relatedHotelOptions.value = uniqueHotelOptions([...controlledOptions, ...purchasedOptions]);
+    relatedHotelOptions.value = uniqueHotelOptions(purchasedOptions);
   } catch (error) {
     relatedHotelOptions.value = [];
     message.warning('关联酒店候选加载失败，可先手动输入后保存');

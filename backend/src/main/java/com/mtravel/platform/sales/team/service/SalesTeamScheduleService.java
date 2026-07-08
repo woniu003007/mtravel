@@ -5,13 +5,20 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mtravel.platform.common.BizException;
 import com.mtravel.platform.common.PageResult;
+import com.mtravel.platform.dispatch.guide.entity.DispatchTeamGuideEntity;
+import com.mtravel.platform.dispatch.guide.enums.DispatchTeamGuideStatus;
+import com.mtravel.platform.dispatch.guide.mapper.DispatchTeamGuideMapper;
 import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementEntity;
 import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementOrderAllocationEntity;
 import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementPriceLineEntity;
+import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementSectionStatusEntity;
 import com.mtravel.platform.dispatch.teamarrangement.enums.DispatchArrangementSettlementType;
 import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementMapper;
 import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementOrderAllocationMapper;
 import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementPriceLineMapper;
+import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementSectionStatusMapper;
+import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderEntity;
+import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderMapper;
 import com.mtravel.platform.sales.booking.order.service.SalesBookingOrderService;
 import com.mtravel.platform.sales.product.entity.SalesProductArrangementItemEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductArrangementPriceLineEntity;
@@ -53,6 +60,7 @@ import com.mtravel.platform.sales.team.mapper.SalesTeamNoLogMapper;
 import com.mtravel.platform.sales.team.mapper.SalesTeamPriceMapper;
 import com.mtravel.platform.sales.team.mapper.SalesTeamStatusLogMapper;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
@@ -87,6 +95,10 @@ public class SalesTeamScheduleService {
     private static final Pattern TEAM_SUFFIX_PATTERN = Pattern.compile("([A-Z](?:\\d+)?)$");
     private static final String TEAM_PROFILE_MARKER = "[[TEAM_PROFILE_JSON]]";
     private static final Pattern TEAM_PROFILE_STRING_FIELD_PATTERN = Pattern.compile("\"%s\"\\s*:\\s*\"([^\"]*)\"");
+    private static final String ARRANGE_STATUS_NONE = "none";
+    private static final String ARRANGE_STATUS_PENDING = "pending";
+    private static final String ARRANGE_STATUS_CONFIRMED = "confirmed";
+    private static final String ARRANGEMENT_STATUS_ACTIVE = "active";
 
     private final SalesProductMapper productMapper;
     private final SalesProductDescriptionMapper descriptionMapper;
@@ -99,9 +111,12 @@ public class SalesTeamScheduleService {
     private final SalesTeamStatusLogMapper statusLogMapper;
     private final SalesTeamNoLogMapper noLogMapper;
     private final SalesBookingOrderService bookingOrderService;
+    private final SalesBookingOrderMapper bookingOrderMapper;
     private final DispatchTeamArrangementMapper teamArrangementMapper;
     private final DispatchTeamArrangementPriceLineMapper teamArrangementPriceLineMapper;
     private final DispatchTeamArrangementOrderAllocationMapper teamArrangementAllocationMapper;
+    private final DispatchTeamArrangementSectionStatusMapper teamArrangementSectionStatusMapper;
+    private final DispatchTeamGuideMapper teamGuideMapper;
 
     /**
      * 测试专用兼容构造器。
@@ -114,7 +129,7 @@ public class SalesTeamScheduleService {
             SalesTeamPriceMapper priceMapper,
             SalesTeamStatusLogMapper statusLogMapper
     ) {
-        this(productMapper, null, null, null, null, null, teamMapper, priceMapper, statusLogMapper, null, null, null, null, null);
+        this(productMapper, null, null, null, null, null, teamMapper, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -127,7 +142,7 @@ public class SalesTeamScheduleService {
             SalesTeamPriceMapper priceMapper,
             SalesTeamStatusLogMapper statusLogMapper
     ) {
-        this(productMapper, descriptionMapper, null, null, null, null, teamMapper, priceMapper, statusLogMapper, null, null, null, null, null);
+        this(productMapper, descriptionMapper, null, null, null, null, teamMapper, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -141,7 +156,7 @@ public class SalesTeamScheduleService {
             SalesTeamPriceMapper priceMapper,
             SalesTeamStatusLogMapper statusLogMapper
     ) {
-        this(productMapper, descriptionMapper, itineraryDayMapper, null, null, null, teamMapper, priceMapper, statusLogMapper, null, null, null, null, null);
+        this(productMapper, descriptionMapper, itineraryDayMapper, null, null, null, teamMapper, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -156,13 +171,12 @@ public class SalesTeamScheduleService {
             SalesTeamPriceMapper priceMapper,
             SalesTeamStatusLogMapper statusLogMapper
     ) {
-        this(productMapper, descriptionMapper, itineraryDayMapper, roadbookPointMapper, null, null, teamMapper, priceMapper, statusLogMapper, null, null, null, null, null);
+        this(productMapper, descriptionMapper, itineraryDayMapper, roadbookPointMapper, null, null, teamMapper, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null);
     }
 
     /**
      * 运行时构造器，注入团队主表、价格表、状态日志和团号日志访问对象。
      */
-    @Autowired
     public SalesTeamScheduleService(
             SalesProductMapper productMapper,
             SalesProductDescriptionMapper descriptionMapper,
@@ -179,6 +193,89 @@ public class SalesTeamScheduleService {
             DispatchTeamArrangementPriceLineMapper teamArrangementPriceLineMapper,
             DispatchTeamArrangementOrderAllocationMapper teamArrangementAllocationMapper
     ) {
+        this(
+                productMapper,
+                descriptionMapper,
+                itineraryDayMapper,
+                roadbookPointMapper,
+                productArrangementMapper,
+                productArrangementPriceLineMapper,
+                teamMapper,
+                priceMapper,
+                statusLogMapper,
+                noLogMapper,
+                bookingOrderService,
+                null,
+                teamArrangementMapper,
+                teamArrangementPriceLineMapper,
+                teamArrangementAllocationMapper
+        );
+    }
+
+    /**
+     * 运行时构造器，注入团队主表、订单主表、价格表、状态日志和团号日志访问对象。
+     */
+    public SalesTeamScheduleService(
+            SalesProductMapper productMapper,
+            SalesProductDescriptionMapper descriptionMapper,
+            SalesProductItineraryDayMapper itineraryDayMapper,
+            SalesProductRoadbookPointMapper roadbookPointMapper,
+            SalesProductArrangementItemMapper productArrangementMapper,
+            SalesProductArrangementPriceLineMapper productArrangementPriceLineMapper,
+            SalesTeamMapper teamMapper,
+            SalesTeamPriceMapper priceMapper,
+            SalesTeamStatusLogMapper statusLogMapper,
+            SalesTeamNoLogMapper noLogMapper,
+            SalesBookingOrderService bookingOrderService,
+            SalesBookingOrderMapper bookingOrderMapper,
+            DispatchTeamArrangementMapper teamArrangementMapper,
+            DispatchTeamArrangementPriceLineMapper teamArrangementPriceLineMapper,
+            DispatchTeamArrangementOrderAllocationMapper teamArrangementAllocationMapper
+    ) {
+        this(
+                productMapper,
+                descriptionMapper,
+                itineraryDayMapper,
+                roadbookPointMapper,
+                productArrangementMapper,
+                productArrangementPriceLineMapper,
+                teamMapper,
+                priceMapper,
+                statusLogMapper,
+                noLogMapper,
+                bookingOrderService,
+                bookingOrderMapper,
+                teamArrangementMapper,
+                teamArrangementPriceLineMapper,
+                teamArrangementAllocationMapper,
+                null,
+                null
+        );
+    }
+
+    /**
+     * 运行时构造器，注入团队主表、价格表、状态日志、团号日志和团队执行安排访问对象。
+     */
+    @Autowired
+    public SalesTeamScheduleService(
+            SalesProductMapper productMapper,
+            SalesProductDescriptionMapper descriptionMapper,
+            SalesProductItineraryDayMapper itineraryDayMapper,
+            SalesProductRoadbookPointMapper roadbookPointMapper,
+            SalesProductArrangementItemMapper productArrangementMapper,
+            SalesProductArrangementPriceLineMapper productArrangementPriceLineMapper,
+            SalesTeamMapper teamMapper,
+            SalesTeamPriceMapper priceMapper,
+            SalesTeamStatusLogMapper statusLogMapper,
+            SalesTeamNoLogMapper noLogMapper,
+            SalesBookingOrderService bookingOrderService,
+            SalesBookingOrderMapper bookingOrderMapper,
+            DispatchTeamArrangementMapper teamArrangementMapper,
+            DispatchTeamArrangementPriceLineMapper teamArrangementPriceLineMapper,
+            DispatchTeamArrangementOrderAllocationMapper teamArrangementAllocationMapper,
+            DispatchTeamArrangementSectionStatusMapper teamArrangementSectionStatusMapper,
+            DispatchTeamGuideMapper teamGuideMapper
+    ) {
         this.productMapper = productMapper;
         this.descriptionMapper = descriptionMapper;
         this.itineraryDayMapper = itineraryDayMapper;
@@ -190,9 +287,12 @@ public class SalesTeamScheduleService {
         this.statusLogMapper = statusLogMapper;
         this.noLogMapper = noLogMapper;
         this.bookingOrderService = bookingOrderService;
+        this.bookingOrderMapper = bookingOrderMapper;
         this.teamArrangementMapper = teamArrangementMapper;
         this.teamArrangementPriceLineMapper = teamArrangementPriceLineMapper;
         this.teamArrangementAllocationMapper = teamArrangementAllocationMapper;
+        this.teamArrangementSectionStatusMapper = teamArrangementSectionStatusMapper;
+        this.teamGuideMapper = teamGuideMapper;
     }
 
     /**
@@ -252,6 +352,7 @@ public class SalesTeamScheduleService {
      * @param tenantId 当前租户 ID
      * @param teamType 团队类型，散拼、整团、散团、单项等
      * @param keyword 团号、团队名称或备注关键字
+     * @param customerKeyword 客户单位关键字
      * @param operatorKeyword 操作计调关键字
      * @param departurePlace 出发地关键字
      * @param businessType 业务类型
@@ -267,6 +368,7 @@ public class SalesTeamScheduleService {
             Long tenantId,
             String teamType,
             String keyword,
+            String customerKeyword,
             String operatorKeyword,
             String departurePlace,
             String businessType,
@@ -277,13 +379,66 @@ public class SalesTeamScheduleService {
             long page,
             long pageSize
     ) {
+        return globalPage(
+                tenantId,
+                teamType,
+                keyword,
+                customerKeyword,
+                operatorKeyword,
+                departurePlace,
+                businessType,
+                startDate,
+                endDate,
+                travelDays,
+                teamStatus,
+                null,
+                null,
+                null,
+                null,
+                page,
+                pageSize
+        );
+    }
+
+    /**
+     * 分页查询销售团队全局列表，包含高级筛选。
+     *
+     * @param guideKeyword 导游姓名或手机号关键字
+     * @param departmentName 团队归属部门名称
+     * @param orderStatus 订单状态；none 表示无有效订单
+     * @param addDate 团队添加日期
+     */
+    public PageResult<SalesTeamListResponse> globalPage(
+            Long tenantId,
+            String teamType,
+            String keyword,
+            String customerKeyword,
+            String operatorKeyword,
+            String departurePlace,
+            String businessType,
+            LocalDate startDate,
+            LocalDate endDate,
+            Integer travelDays,
+            String teamStatus,
+            String guideKeyword,
+            String departmentName,
+            String orderStatus,
+            LocalDate addDate,
+            long page,
+            long pageSize
+    ) {
         QueryWrapper<SalesTeamEntity> wrapper = baseTeamQuery(tenantId)
                 .eq(StringUtils.hasText(teamType), "team_type", clean(teamType))
                 .like(StringUtils.hasText(operatorKeyword), "operator_employee_name", clean(operatorKeyword))
+                .like(StringUtils.hasText(departmentName), "department_name", clean(departmentName))
                 .ge(startDate != null, "departure_date", startDate)
                 .le(endDate != null, "departure_date", endDate);
+        applyGlobalAddDateFilter(wrapper, addDate);
         applyGlobalStatusFilter(wrapper, teamStatus);
+        applyGlobalGuideFilter(wrapper, tenantId, guideKeyword);
+        applyGlobalOrderStatusFilter(wrapper, tenantId, orderStatus);
         applyGlobalProductFilters(wrapper, tenantId, keyword, departurePlace, businessType, travelDays);
+        applyGlobalCustomerFilter(wrapper, tenantId, customerKeyword);
         wrapper.orderByDesc("departure_date").orderByAsc("team_no");
 
         Page<SalesTeamEntity> result = teamMapper.selectPage(Page.of(page, Math.min(pageSize, 200)), wrapper);
@@ -291,8 +446,17 @@ public class SalesTeamScheduleService {
             return new PageResult<>(List.of(), result.getTotal());
         }
         Map<Long, SalesProductEntity> products = loadProductsForTeams(tenantId, result.getRecords());
+        List<DispatchTeamGuideEntity> activeGuides = loadActiveGuidesForTeams(tenantId, result.getRecords());
+        Map<Long, SalesTeamListResponse.ArrangePlans> plans = loadArrangePlansForTeams(tenantId, result.getRecords(), activeGuides);
+        Map<Long, String> customerSummaries = loadCustomerSummariesForTeams(tenantId, result.getRecords());
+        Map<Long, String> guideSummaries = buildGuideSummaries(activeGuides);
         List<SalesTeamListResponse> items = result.getRecords().stream()
-                .map(team -> SalesTeamListResponse.fromEntity(team, products.get(team.getProductId())))
+                .map(team -> SalesTeamListResponse.fromEntity(
+                        team,
+                        products.get(team.getProductId()),
+                        plans.get(team.getId()),
+                        customerSummaries.get(team.getId()),
+                        guideSummaries.get(team.getId())))
                 .toList();
         return new PageResult<>(items, result.getTotal());
     }
@@ -320,10 +484,24 @@ public class SalesTeamScheduleService {
         List<SalesProductItineraryDayEntity> itineraryDays = loadProductItineraryDays(tenantId, team.getProductId());
         List<SalesTeamPriceResponse> prices = loadPricesForTeams(tenantId, List.of(team))
                 .getOrDefault(team.getId(), List.of());
+        List<SalesBookingOrderEntity> orders = bookingOrderService == null
+                ? List.of()
+                : bookingOrderService.listOrdersByTeam(teamId, tenantId);
         List<SalesTeamOperationResponse.OrderRow> orderRows = bookingOrderService == null
                 ? List.of()
-                : bookingOrderService.toOperationRows(bookingOrderService.listOrdersByTeam(teamId, tenantId));
-        return SalesTeamOperationResponse.from(team, product, description, prices, itineraryDays, orderRows);
+                : bookingOrderService.toOperationRows(orders);
+        String guideSummary = buildGuideSummaries(loadActiveGuidesForTeams(tenantId, List.of(team))).get(team.getId());
+        String leaderSummary = bookingOrderService == null ? null : bookingOrderService.operationLeaderSummary(tenantId, orders);
+        return SalesTeamOperationResponse.from(
+                team,
+                product,
+                description,
+                prices,
+                itineraryDays,
+                orderRows,
+                guideSummary,
+                leaderSummary
+        );
     }
 
     /**
@@ -718,6 +896,15 @@ public class SalesTeamScheduleService {
         if (request.remark() != null) {
             wrapper.set("remark", clean(request.remark()));
         }
+        if (request.perCapitaPitAmount() != null) {
+            wrapper.set("per_capita_pit_amount", money(request.perCapitaPitAmount()));
+        }
+        if (request.optionalMarkupRate() != null) {
+            wrapper.set("optional_markup_rate", money(request.optionalMarkupRate()));
+        }
+        if (request.perCapitaShoppingAmount() != null) {
+            wrapper.set("per_capita_shopping_amount", money(request.perCapitaShoppingAmount()));
+        }
     }
 
     private QueryWrapper<SalesTeamPriceEntity> basePriceQuery(Long tenantId) {
@@ -732,7 +919,7 @@ public class SalesTeamScheduleService {
                 .eq("is_deleted", false);
     }
 
-    /** 批量读取产品团队安排模板，供从产品排期生成团队时复制为团队执行快照。 */
+    /** 批量读取产品团队安排模板，供从产品排期生成团队时复制为团队安排参考。 */
     private List<SalesProductArrangementItemEntity> loadProductArrangementTemplates(Long productId, Long tenantId) {
         if (productArrangementMapper == null) {
             return List.of();
@@ -782,10 +969,10 @@ public class SalesTeamScheduleService {
     }
 
     /**
-     * 将产品团队安排模板复制为正式团队安排快照。
+     * 将产品团队安排模板复制为正式团队安排参考。
      *
-     * <p>产品阶段没有正式订单，因此复制后的成本默认是团队公共成本，不关联订单；也不在生成团期时
-     * 自动产生导游报账或计调审核流水，后续由团队安排页确认具体执行数据后再进入审核链路。</p>
+     * <p>产品阶段没有正式订单和游客人数，复制时只带资源、供应商、项目和参考单价。
+     * 数量、人数、成本、现结和挂账都置零，后续由计调在团队安排页确认具体执行数据后再进入成本和审核链路。</p>
      */
     private void copyProductArrangementsToTeam(
             SalesTeamEntity team,
@@ -804,7 +991,7 @@ public class SalesTeamScheduleService {
             List<SalesProductArrangementPriceLineEntity> lines =
                     productPriceLines.getOrDefault(template.getId(), List.of());
             if (CollectionUtils.isEmpty(lines)) {
-                insertDefaultTeamArrangementPriceLine(arrangement, tenantId, operator);
+                insertDefaultTeamArrangementPriceLine(arrangement, template, tenantId, operator);
             } else {
                 for (SalesProductArrangementPriceLineEntity line : lines) {
                     insertTeamArrangementPriceLine(arrangement, line, tenantId, operator);
@@ -814,20 +1001,13 @@ public class SalesTeamScheduleService {
         }
     }
 
-    /** 构建正式团队安排快照主记录。 */
+    /** 构建正式团队安排参考主记录，避免产品模板人数提前进入正式团队成本。 */
     private DispatchTeamArrangementEntity buildTeamArrangementSnapshot(
             SalesTeamEntity team,
             SalesProductArrangementItemEntity template,
             Long tenantId,
             String operator
     ) {
-        BigDecimal total = arrangementTotalAmount(template);
-        BigDecimal cash = money(template.getCashAmount());
-        BigDecimal prepaid = money(template.getPrepaidAmount());
-        BigDecimal credit = money(template.getCreditAmount());
-        if (credit.compareTo(BigDecimal.ZERO) <= 0) {
-            credit = total.subtract(cash).subtract(prepaid).max(BigDecimal.ZERO).setScale(2);
-        }
         DispatchTeamArrangementEntity entity = new DispatchTeamArrangementEntity();
         entity.setTenantId(tenantId);
         entity.setTeamId(team.getId());
@@ -860,21 +1040,21 @@ public class SalesTeamScheduleService {
         entity.setSettlementType(DispatchArrangementSettlementType.fromValueOrDefault(template.getSettlementType()).getValue());
         entity.setMealType(clean(template.getMealType()));
         entity.setFundIncluded(clean(template.getFundIncluded()));
-        entity.setConfirmed(Boolean.TRUE.equals(template.getConfirmed()));
+        entity.setConfirmed(false);
         entity.setConfirmationNo(clean(template.getConfirmationNo()));
         entity.setGuideId(template.getGuideId());
         entity.setGuideName(clean(template.getGuideName()));
-        entity.setTotalAmount(total);
-        entity.setCashAmount(cash);
-        entity.setCreditAmount(credit);
-        entity.setPrepaidAmount(prepaid);
-        entity.setSaleAmount(money(template.getSaleAmount()));
-        entity.setCostAmount(money(template.getCostAmount()).compareTo(BigDecimal.ZERO) > 0 ? money(template.getCostAmount()) : total);
-        entity.setGuideCommissionAmount(money(template.getGuideCommissionAmount()));
-        entity.setCompanyRebateAmount(money(template.getCompanyRebateAmount()));
-        entity.setHeadFeeAmount(money(template.getHeadFeeAmount()));
-        entity.setConsumptionAmount(money(template.getConsumptionAmount()));
-        entity.setPeopleCount(money(template.getPeopleCount()));
+        entity.setTotalAmount(zeroMoney());
+        entity.setCashAmount(zeroMoney());
+        entity.setCreditAmount(zeroMoney());
+        entity.setPrepaidAmount(zeroMoney());
+        entity.setSaleAmount(zeroMoney());
+        entity.setCostAmount(zeroMoney());
+        entity.setGuideCommissionAmount(zeroMoney());
+        entity.setCompanyRebateAmount(zeroMoney());
+        entity.setHeadFeeAmount(zeroMoney());
+        entity.setConsumptionAmount(zeroMoney());
+        entity.setPeopleCount(zeroMoney());
         entity.setNoGuideReport(Boolean.FALSE);
         entity.setGuideInvolved(Boolean.TRUE);
         entity.setCostStage("arrangement");
@@ -900,28 +1080,29 @@ public class SalesTeamScheduleService {
         entity.setTeamId(arrangement.getTeamId());
         entity.setProjectId(line.getProjectId());
         entity.setProjectName(firstText(line.getProjectName(), arrangement.getItemName()));
-        entity.setUnitPrice(money(line.getUnitPrice()));
-        entity.setQuantity(money(line.getQuantity()));
-        entity.setAmount(priceLineTotal(line));
+        entity.setUnitPrice(referenceUnitPrice(line));
+        entity.setQuantity(zeroMoney());
+        entity.setAmount(zeroMoney());
         entity.setSalePrice(money(line.getSalePrice()));
         entity.setCostPrice(money(line.getCostPrice()));
-        entity.setCashAmount(money(line.getCashAmount()));
-        entity.setCreditAmount(money(line.getCreditAmount()));
-        entity.setGuideCommissionAmount(money(line.getGuideCommissionAmount()));
+        entity.setCashAmount(zeroMoney());
+        entity.setCreditAmount(zeroMoney());
+        entity.setGuideCommissionAmount(zeroMoney());
         entity.setGuideCommissionRate(money(line.getGuideCommissionRate()));
-        entity.setCompanyRebateAmount(money(line.getCompanyRebateAmount()));
+        entity.setCompanyRebateAmount(zeroMoney());
         entity.setCompanyRebateRate(money(line.getCompanyRebateRate()));
-        entity.setHeadFeeAmount(money(line.getHeadFeeAmount()));
-        entity.setConsumptionAmount(money(line.getConsumptionAmount()));
+        entity.setHeadFeeAmount(zeroMoney());
+        entity.setConsumptionAmount(zeroMoney());
         entity.setSortOrder(line.getSortOrder() == null ? 1 : line.getSortOrder());
         entity.setCreatedBy(operator);
         entity.setIsDeleted(false);
         teamArrangementPriceLineMapper.insert(entity);
     }
 
-    /** 产品模板没有价格明细时生成一条默认明细，保证团队安排页仍可展示成本。 */
+    /** 产品模板没有价格明细时生成一条默认参考明细，计调后续人工填写真实数量和金额。 */
     private void insertDefaultTeamArrangementPriceLine(
             DispatchTeamArrangementEntity arrangement,
+            SalesProductArrangementItemEntity template,
             Long tenantId,
             String operator
     ) {
@@ -930,11 +1111,11 @@ public class SalesTeamScheduleService {
         entity.setArrangementId(arrangement.getId());
         entity.setTeamId(arrangement.getTeamId());
         entity.setProjectName(arrangement.getItemName());
-        entity.setUnitPrice(arrangement.getTotalAmount());
-        entity.setQuantity(BigDecimal.ONE.setScale(2));
-        entity.setAmount(arrangement.getTotalAmount());
-        entity.setCashAmount(arrangement.getCashAmount());
-        entity.setCreditAmount(arrangement.getCreditAmount());
+        entity.setUnitPrice(referenceUnitPrice(template));
+        entity.setQuantity(zeroMoney());
+        entity.setAmount(zeroMoney());
+        entity.setCashAmount(zeroMoney());
+        entity.setCreditAmount(zeroMoney());
         entity.setSortOrder(1);
         entity.setCreatedBy(operator);
         entity.setIsDeleted(false);
@@ -963,20 +1144,28 @@ public class SalesTeamScheduleService {
         teamArrangementAllocationMapper.insert(allocation);
     }
 
-    private BigDecimal arrangementTotalAmount(SalesProductArrangementItemEntity template) {
-        BigDecimal total = money(template.getTotalAmount());
-        if (total.compareTo(BigDecimal.ZERO) > 0) {
-            return total;
+    private BigDecimal referenceUnitPrice(SalesProductArrangementItemEntity template) {
+        BigDecimal unitPrice = money(template.getUnitPrice());
+        if (unitPrice.compareTo(BigDecimal.ZERO) > 0) {
+            return unitPrice;
         }
-        return money(template.getUnitPrice()).multiply(money(template.getQuantity())).setScale(2);
+        return divideAmountByQuantity(template.getTotalAmount(), template.getQuantity());
     }
 
-    private BigDecimal priceLineTotal(SalesProductArrangementPriceLineEntity line) {
-        BigDecimal amount = money(line.getAmount());
-        if (amount.compareTo(BigDecimal.ZERO) > 0) {
-            return amount;
+    private BigDecimal referenceUnitPrice(SalesProductArrangementPriceLineEntity line) {
+        BigDecimal unitPrice = money(line.getUnitPrice());
+        if (unitPrice.compareTo(BigDecimal.ZERO) > 0) {
+            return unitPrice;
         }
-        return money(line.getUnitPrice()).multiply(money(line.getQuantity())).setScale(2);
+        return divideAmountByQuantity(line.getAmount(), line.getQuantity());
+    }
+
+    private BigDecimal divideAmountByQuantity(BigDecimal amount, BigDecimal quantity) {
+        BigDecimal count = money(quantity);
+        if (count.compareTo(BigDecimal.ZERO) <= 0) {
+            return zeroMoney();
+        }
+        return money(amount).divide(count, 2, RoundingMode.HALF_UP);
     }
 
     private UpdateWrapper<SalesProductEntity> baseProductUpdate(Long tenantId) {
@@ -1118,6 +1307,74 @@ public class SalesTeamScheduleService {
         }
     }
 
+    private void applyGlobalCustomerFilter(QueryWrapper<SalesTeamEntity> wrapper, Long tenantId, String customerKeyword) {
+        if (!StringUtils.hasText(customerKeyword)) {
+            return;
+        }
+        String value = clean(customerKeyword).replace("'", "''");
+        wrapper.exists("""
+                SELECT 1
+                FROM sales_orders so
+                WHERE so.tenant_id = {0}
+                  AND so.team_id = sales_teams.id
+                  AND so.is_deleted = false
+                  AND so.status <> 'cancelled'
+                  AND COALESCE(so.order_role, 'normal') IN ('normal', 'merge_child')
+                  AND (so.customer_name ILIKE {1} OR so.salesperson_employee_name ILIKE {1})
+                """, tenantId, "%" + value + "%");
+    }
+
+    private void applyGlobalGuideFilter(QueryWrapper<SalesTeamEntity> wrapper, Long tenantId, String guideKeyword) {
+        if (!StringUtils.hasText(guideKeyword)) {
+            return;
+        }
+        String value = clean(guideKeyword).replace("'", "''");
+        wrapper.exists("""
+                SELECT 1
+                FROM dispatch_team_guides dtg
+                WHERE dtg.tenant_id = {0}
+                  AND dtg.team_id = sales_teams.id
+                  AND dtg.is_deleted = false
+                  AND dtg.status = 'active'
+                  AND (dtg.guide_name ILIKE {1} OR dtg.guide_mobile ILIKE {1})
+                """, tenantId, "%" + value + "%");
+    }
+
+    private void applyGlobalOrderStatusFilter(QueryWrapper<SalesTeamEntity> wrapper, Long tenantId, String orderStatus) {
+        if (!StringUtils.hasText(orderStatus)) {
+            return;
+        }
+        String status = clean(orderStatus);
+        if ("none".equals(status)) {
+            wrapper.notExists("""
+                    SELECT 1
+                    FROM sales_orders so
+                    WHERE so.tenant_id = {0}
+                      AND so.team_id = sales_teams.id
+                      AND so.is_deleted = false
+                      AND COALESCE(so.order_role, 'normal') IN ('normal', 'merge_child')
+                    """, tenantId);
+            return;
+        }
+        wrapper.exists("""
+                SELECT 1
+                FROM sales_orders so
+                WHERE so.tenant_id = {0}
+                  AND so.team_id = sales_teams.id
+                  AND so.is_deleted = false
+                  AND COALESCE(so.order_role, 'normal') IN ('normal', 'merge_child')
+                  AND so.status = {1}
+                """, tenantId, status);
+    }
+
+    private void applyGlobalAddDateFilter(QueryWrapper<SalesTeamEntity> wrapper, LocalDate addDate) {
+        if (addDate == null) {
+            return;
+        }
+        wrapper.ge("created_at", addDate.atStartOfDay())
+                .lt("created_at", addDate.plusDays(1).atStartOfDay());
+    }
+
     private UpdateWrapper<SalesTeamPriceEntity> basePriceUpdate(Long tenantId) {
         return new UpdateWrapper<SalesTeamPriceEntity>()
                 .eq("tenant_id", tenantId)
@@ -1202,6 +1459,16 @@ public class SalesTeamScheduleService {
         entity.setOperatorEmployeeId(request.operatorEmployeeId());
         entity.setOperatorEmployeeName(firstText(request.operatorEmployeeName(), profile.operatorName()));
         entity.setEscortEmployeeName(clean(profile.escortName()));
+        entity.setRemark(clean(profile.internalRemark()));
+        if (profile.perCapitaPitAmount() != null) {
+            entity.setPerCapitaPitAmount(money(profile.perCapitaPitAmount()));
+        }
+        if (profile.optionalMarkupRate() != null) {
+            entity.setOptionalMarkupRate(money(profile.optionalMarkupRate()));
+        }
+        if (profile.perCapitaShoppingAmount() != null) {
+            entity.setPerCapitaShoppingAmount(money(profile.perCapitaShoppingAmount()));
+        }
         entity.setStatus(SalesTeamStatus.NORMAL.getValue());
         entity.setTotalSeats(totalSeats);
         entity.setUsedSeats(0);
@@ -1473,18 +1740,40 @@ public class SalesTeamScheduleService {
         if (markerIndex < 0) {
             return TeamProfileSnapshot.empty();
         }
+        String internalRemark = clean(text.substring(0, markerIndex));
         String json = text.substring(markerIndex + TEAM_PROFILE_MARKER.length());
         return new TeamProfileSnapshot(
                 jsonStringField(json, "businessType"),
                 jsonStringField(json, "departmentName"),
                 jsonStringField(json, "operatorName"),
-                jsonStringField(json, "escortName")
+                jsonStringField(json, "escortName"),
+                internalRemark,
+                jsonDecimalField(json, "perCapitaPitAmount"),
+                jsonDecimalField(json, "optionalMarkupRate"),
+                jsonDecimalField(json, "perCapitaShoppingAmount")
         );
     }
 
     private String jsonStringField(String json, String fieldName) {
         Matcher matcher = Pattern.compile(TEAM_PROFILE_STRING_FIELD_PATTERN.pattern().formatted(Pattern.quote(fieldName))).matcher(json);
         return matcher.find() ? clean(matcher.group(1)) : null;
+    }
+
+    private BigDecimal jsonDecimalField(String json, String fieldName) {
+        Pattern pattern = Pattern.compile("\"" + Pattern.quote(fieldName) + "\"\\s*:\\s*(?:\"([^\"]*)\"|(-?\\d+(?:\\.\\d+)?))");
+        Matcher matcher = pattern.matcher(json);
+        if (!matcher.find()) {
+            return null;
+        }
+        String rawValue = firstText(matcher.group(1), matcher.group(2));
+        if (!StringUtils.hasText(rawValue)) {
+            return null;
+        }
+        try {
+            return new BigDecimal(rawValue);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     private String firstText(String... values) {
@@ -1507,10 +1796,14 @@ public class SalesTeamScheduleService {
             String businessType,
             String departmentName,
             String operatorName,
-            String escortName
+            String escortName,
+            String internalRemark,
+            BigDecimal perCapitaPitAmount,
+            BigDecimal optionalMarkupRate,
+            BigDecimal perCapitaShoppingAmount
     ) {
         static TeamProfileSnapshot empty() {
-            return new TeamProfileSnapshot(null, null, null, null);
+            return new TeamProfileSnapshot(null, null, null, null, null, null, null, null);
         }
     }
 
@@ -1713,6 +2006,281 @@ public class SalesTeamScheduleService {
                 .collect(Collectors.toMap(SalesProductEntity::getId, item -> item, (left, right) -> left));
     }
 
+    private Map<Long, String> loadCustomerSummariesForTeams(Long tenantId, List<SalesTeamEntity> teams) {
+        if (bookingOrderMapper == null) {
+            return Map.of();
+        }
+        List<Long> teamIds = teamIds(teams);
+        if (teamIds.isEmpty()) {
+            return Map.of();
+        }
+        return bookingOrderMapper.selectList(new QueryWrapper<SalesBookingOrderEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .in("team_id", teamIds)
+                        .ne("status", "cancelled")
+                        .and(wrapper -> wrapper
+                                .in("order_role", List.of("normal", "merge_child"))
+                                .or()
+                                .isNull("order_role"))
+                        .orderByAsc("team_id")
+                        .orderByAsc("id"))
+                .stream()
+                .filter(this::visibleCustomerOrder)
+                .filter(order -> StringUtils.hasText(order.getCustomerName()))
+                .collect(Collectors.groupingBy(
+                        SalesBookingOrderEntity::getTeamId,
+                        Collectors.collectingAndThen(
+                                Collectors.mapping(order -> clean(order.getCustomerName()), Collectors.toCollection(java.util.LinkedHashSet::new)),
+                                names -> names.isEmpty() ? null : String.join("、", names)
+                        )
+                ));
+    }
+
+    private boolean visibleCustomerOrder(SalesBookingOrderEntity order) {
+        if (order == null || "cancelled".equals(order.getStatus())) {
+            return false;
+        }
+        String role = StringUtils.hasText(order.getOrderRole()) ? order.getOrderRole() : "normal";
+        return "normal".equals(role) || "merge_child".equals(role);
+    }
+
+    private List<DispatchTeamGuideEntity> loadActiveGuidesForTeams(Long tenantId, List<SalesTeamEntity> teams) {
+        if (teamGuideMapper == null) {
+            return List.of();
+        }
+        List<Long> teamIds = teamIds(teams);
+        if (teamIds.isEmpty()) {
+            return List.of();
+        }
+        return teamGuideMapper.selectList(new QueryWrapper<DispatchTeamGuideEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .in("team_id", teamIds)
+                .eq("status", DispatchTeamGuideStatus.ACTIVE.getValue())
+                .orderByAsc("team_id")
+                .orderByAsc("id"));
+    }
+
+    private Map<Long, String> buildGuideSummaries(List<DispatchTeamGuideEntity> guides) {
+        if (CollectionUtils.isEmpty(guides)) {
+            return Map.of();
+        }
+        return guides.stream()
+                .filter(guide -> StringUtils.hasText(guide.getGuideName()))
+                .collect(Collectors.groupingBy(
+                        DispatchTeamGuideEntity::getTeamId,
+                        Collectors.collectingAndThen(
+                                Collectors.mapping(this::guideSummaryText, Collectors.toCollection(java.util.LinkedHashSet::new)),
+                                names -> names.isEmpty() ? null : String.join("、", names)
+                        )
+                ));
+    }
+
+    private String guideSummaryText(DispatchTeamGuideEntity guide) {
+        String name = clean(guide.getGuideName());
+        if (!StringUtils.hasText(guide.getGuideMobile())) {
+            return name;
+        }
+        return name + "[Tel:" + clean(guide.getGuideMobile()) + "]";
+    }
+
+    private List<Long> teamIds(List<SalesTeamEntity> teams) {
+        return teams.stream()
+                .map(SalesTeamEntity::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+    }
+
+    /**
+     * 批量读取团队管理列表上的安排状态。
+     *
+     * <p>列表只需要判断各模块是否已安排、是否确认，因此按当前页团队 ID 聚合正式团队安排和导游排班，
+     * 不加载价格明细、成本分摊和导游报账流水，避免团队管理页出现 N+1 查询或响应体过大。</p>
+     */
+    private Map<Long, SalesTeamListResponse.ArrangePlans> loadArrangePlansForTeams(
+            Long tenantId,
+            List<SalesTeamEntity> teams,
+            List<DispatchTeamGuideEntity> activeGuides
+    ) {
+        List<Long> teamIds = teamIds(teams);
+        if (teamIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, MutableArrangePlans> mutablePlans = teamIds.stream()
+                .collect(Collectors.toMap(id -> id, id -> new MutableArrangePlans()));
+        applyTeamArrangementPlans(tenantId, teamIds, mutablePlans);
+        applyTeamArrangementSectionStatusPlans(tenantId, teamIds, mutablePlans);
+        applyGuidePlans(activeGuides, mutablePlans);
+        return mutablePlans.entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, entry -> entry.getValue().toResponse()));
+    }
+
+    /** 批量聚合大交通、住宿、用车、景区等正式团队安排状态。 */
+    private void applyTeamArrangementPlans(
+            Long tenantId,
+            List<Long> teamIds,
+            Map<Long, MutableArrangePlans> plans
+    ) {
+        if (teamArrangementMapper == null) {
+            return;
+        }
+        List<DispatchTeamArrangementEntity> arrangements = teamArrangementMapper.selectList(
+                new QueryWrapper<DispatchTeamArrangementEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .in("team_id", teamIds)
+                        .eq("status", ARRANGEMENT_STATUS_ACTIVE)
+        );
+        if (CollectionUtils.isEmpty(arrangements)) {
+            return;
+        }
+        for (DispatchTeamArrangementEntity arrangement : arrangements) {
+            if (!ARRANGEMENT_STATUS_ACTIVE.equals(arrangement.getStatus())) {
+                continue;
+            }
+            MutableArrangePlans plan = plans.get(arrangement.getTeamId());
+            if (plan == null) {
+                continue;
+            }
+            plan.merge(arrangement.getArrangementType(), ARRANGE_STATUS_PENDING);
+        }
+    }
+
+    /** 批量聚合正式团队安排分类流程状态，覆盖“有安排”推导出的待完成状态。 */
+    private void applyTeamArrangementSectionStatusPlans(
+            Long tenantId,
+            List<Long> teamIds,
+            Map<Long, MutableArrangePlans> plans
+    ) {
+        if (teamArrangementSectionStatusMapper == null) {
+            return;
+        }
+        List<DispatchTeamArrangementSectionStatusEntity> sectionStatuses = teamArrangementSectionStatusMapper.selectList(
+                new QueryWrapper<DispatchTeamArrangementSectionStatusEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .in("team_id", teamIds)
+        );
+        if (CollectionUtils.isEmpty(sectionStatuses)) {
+            return;
+        }
+        for (DispatchTeamArrangementSectionStatusEntity sectionStatus : sectionStatuses) {
+            MutableArrangePlans plan = plans.get(sectionStatus.getTeamId());
+            if (plan == null) {
+                continue;
+            }
+            String listStatus = switch (sectionStatus.getStatus()) {
+                case "done" -> ARRANGE_STATUS_CONFIRMED;
+                case "none" -> ARRANGE_STATUS_NONE;
+                default -> ARRANGE_STATUS_PENDING;
+            };
+            plan.set(sectionStatus.getArrangementType(), listStatus);
+        }
+    }
+
+    /** 批量聚合导游安排状态。 */
+    private void applyGuidePlans(List<DispatchTeamGuideEntity> guides, Map<Long, MutableArrangePlans> plans) {
+        if (CollectionUtils.isEmpty(guides)) {
+            return;
+        }
+        for (DispatchTeamGuideEntity guide : guides) {
+            if (!DispatchTeamGuideStatus.ACTIVE.getValue().equals(guide.getStatus())) {
+                continue;
+            }
+            MutableArrangePlans plan = plans.get(guide.getTeamId());
+            if (plan == null) {
+                continue;
+            }
+            String status = Boolean.TRUE.equals(guide.getIsTentative())
+                    ? ARRANGE_STATUS_PENDING
+                    : ARRANGE_STATUS_CONFIRMED;
+            plan.mergeGuide(status);
+        }
+    }
+
+    /** 团队列表安排状态的可变聚合对象，用于处理同一团队同一模块多条安排记录的优先级。 */
+    private static class MutableArrangePlans {
+        private String guidePlan = ARRANGE_STATUS_NONE;
+        private String trafficPlan = ARRANGE_STATUS_NONE;
+        private String hotelPlan = ARRANGE_STATUS_NONE;
+        private String vehiclePlan = ARRANGE_STATUS_NONE;
+        private String scenicPlan = ARRANGE_STATUS_NONE;
+        private String mealPlan = ARRANGE_STATUS_NONE;
+        private String otherPlan = ARRANGE_STATUS_NONE;
+        private String optionalPlan = ARRANGE_STATUS_NONE;
+        private String shoppingPlan = ARRANGE_STATUS_NONE;
+        private String groundAgentPlan = ARRANGE_STATUS_NONE;
+
+        void mergeGuide(String status) {
+            guidePlan = higherStatus(guidePlan, status);
+        }
+
+        void merge(String arrangementType, String status) {
+            switch (arrangementType) {
+                case "traffic" -> trafficPlan = higherStatus(trafficPlan, status);
+                case "hotel" -> hotelPlan = higherStatus(hotelPlan, status);
+                case "vehicle" -> vehiclePlan = higherStatus(vehiclePlan, status);
+                case "scenic" -> scenicPlan = higherStatus(scenicPlan, status);
+                case "meal" -> mealPlan = higherStatus(mealPlan, status);
+                case "other" -> otherPlan = higherStatus(otherPlan, status);
+                case "optional" -> optionalPlan = higherStatus(optionalPlan, status);
+                case "shopping" -> shoppingPlan = higherStatus(shoppingPlan, status);
+                case "ground_agent" -> groundAgentPlan = higherStatus(groundAgentPlan, status);
+                default -> {
+                    // 列表只展示老系统团队管理中的固定资源安排列，其它类型不参与图标聚合。
+                }
+            }
+        }
+
+        void set(String arrangementType, String status) {
+            switch (arrangementType) {
+                case "traffic" -> trafficPlan = status;
+                case "hotel" -> hotelPlan = status;
+                case "vehicle" -> vehiclePlan = status;
+                case "scenic" -> scenicPlan = status;
+                case "meal" -> mealPlan = status;
+                case "other" -> otherPlan = status;
+                case "optional" -> optionalPlan = status;
+                case "shopping" -> shoppingPlan = status;
+                case "ground_agent" -> groundAgentPlan = status;
+                default -> {
+                    // 列表只展示固定资源安排列，其它类型不参与图标聚合。
+                }
+            }
+        }
+
+        SalesTeamListResponse.ArrangePlans toResponse() {
+            return new SalesTeamListResponse.ArrangePlans(
+                    guidePlan,
+                    trafficPlan,
+                    hotelPlan,
+                    vehiclePlan,
+                    scenicPlan,
+                    mealPlan,
+                    otherPlan,
+                    optionalPlan,
+                    shoppingPlan,
+                    groundAgentPlan
+            );
+        }
+
+        private static String higherStatus(String current, String next) {
+            return statusRank(next) > statusRank(current) ? next : current;
+        }
+
+        private static int statusRank(String status) {
+            if (ARRANGE_STATUS_CONFIRMED.equals(status)) {
+                return 2;
+            }
+            if (ARRANGE_STATUS_PENDING.equals(status)) {
+                return 1;
+            }
+            return 0;
+        }
+    }
+
     private void updateStatus(
             Long teamId,
             Long tenantId,
@@ -1866,6 +2434,10 @@ public class SalesTeamScheduleService {
 
     private BigDecimal money(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;
+    }
+
+    private BigDecimal zeroMoney() {
+        return BigDecimal.ZERO.setScale(2);
     }
 
     private Integer number(Integer value) {

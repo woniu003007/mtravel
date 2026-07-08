@@ -83,6 +83,18 @@ public class SalesTeamEntity extends TenantSoftDeleteEntity {
     @TableField("close_days_before")
     private Integer closeDaysBefore;
 
+    /** 团队人均坑位金额，用于内部备注和导游备用金测算参考。 */
+    @TableField("per_capita_pit_amount")
+    private BigDecimal perCapitaPitAmount;
+
+    /** 团队自费加点率，按百分数保存，例如 70 表示 70%。 */
+    @TableField("optional_markup_rate")
+    private BigDecimal optionalMarkupRate;
+
+    /** 团队人均购物金额，用于内部备注和购物预期测算参考。 */
+    @TableField("per_capita_shopping_amount")
+    private BigDecimal perCapitaShoppingAmount;
+
     public Long getProductId() {
         return productId;
     }
@@ -217,5 +229,29 @@ public class SalesTeamEntity extends TenantSoftDeleteEntity {
 
     public void setCloseDaysBefore(Integer closeDaysBefore) {
         this.closeDaysBefore = closeDaysBefore;
+    }
+
+    public BigDecimal getPerCapitaPitAmount() {
+        return perCapitaPitAmount;
+    }
+
+    public void setPerCapitaPitAmount(BigDecimal perCapitaPitAmount) {
+        this.perCapitaPitAmount = perCapitaPitAmount;
+    }
+
+    public BigDecimal getOptionalMarkupRate() {
+        return optionalMarkupRate;
+    }
+
+    public void setOptionalMarkupRate(BigDecimal optionalMarkupRate) {
+        this.optionalMarkupRate = optionalMarkupRate;
+    }
+
+    public BigDecimal getPerCapitaShoppingAmount() {
+        return perCapitaShoppingAmount;
+    }
+
+    public void setPerCapitaShoppingAmount(BigDecimal perCapitaShoppingAmount) {
+        this.perCapitaShoppingAmount = perCapitaShoppingAmount;
     }
 }

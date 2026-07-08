@@ -192,6 +192,42 @@ class SalesOrderTransferServiceTest {
     }
 
     @Test
+    void mergeOrdersShouldRejectNonSanpinTargetTeam() {
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesOrderTransferService service = new SalesOrderTransferService(
+                orderMapper,
+                mock(SalesBookingOrderChargeLineMapper.class),
+                mock(SalesBookingOrderGuestMapper.class),
+                teamMapper,
+                mock(SalesTeamPriceMapper.class),
+                mock(SalesOrderTransferLogMapper.class)
+        );
+        SalesTeamEntity sourceTeam = team(1001L, "CS-SP-BK-260625A");
+        SalesTeamEntity targetTeam = team(1002L, "CS-BK-260626A");
+        targetTeam.setTeamType("zhengtuan");
+        when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(sourceTeam, targetTeam);
+
+        assertThatThrownBy(() -> service.mergeOrders(
+                1001L,
+                new SalesOrderTransferMergeRequest(
+                        List.of(2001L),
+                        1002L,
+                        false,
+                        "",
+                        List.of()
+                ),
+                1L,
+                "admin"
+        ))
+                .isInstanceOf(BizException.class)
+                .hasMessage("拼团目标团队必须是散拼团队");
+
+        verify(orderMapper, never()).selectOne(any(Wrapper.class));
+        verify(orderMapper, never()).insert(any(SalesBookingOrderEntity.class));
+    }
+
+    @Test
     void mergeOrdersShouldRejectAlreadyMergedSourceOrder() {
         SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
         SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);

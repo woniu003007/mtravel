@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS sales_orders (
   booking_operator_employee_id bigint,
   booking_operator_employee_name varchar(100),
   original_order_info text,
+  order_role varchar(20) NOT NULL DEFAULT 'normal',
+  tagging boolean NOT NULL DEFAULT false,
   CONSTRAINT fk_sales_orders_team
     FOREIGN KEY (tenant_id, team_id) REFERENCES sales_teams (tenant_id, id),
   CONSTRAINT fk_sales_orders_customer
@@ -110,6 +112,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_sales_orders_tenant_order_no_active
 ALTER TABLE sales_orders
   ADD COLUMN IF NOT EXISTS original_order_info text,
   ADD COLUMN IF NOT EXISTS order_role varchar(20) NOT NULL DEFAULT 'normal',
+  ADD COLUMN IF NOT EXISTS tagging boolean NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS salesperson_employee_id bigint,
   ADD COLUMN IF NOT EXISTS salesperson_employee_name varchar(100),
   ADD COLUMN IF NOT EXISTS booking_operator_employee_id bigint,
@@ -119,9 +122,15 @@ UPDATE sales_orders
 SET order_role = 'normal'
 WHERE order_role IS NULL;
 
+UPDATE sales_orders
+SET tagging = false
+WHERE tagging IS NULL;
+
 ALTER TABLE sales_orders
   ALTER COLUMN order_role SET DEFAULT 'normal',
-  ALTER COLUMN order_role SET NOT NULL;
+  ALTER COLUMN order_role SET NOT NULL,
+  ALTER COLUMN tagging SET DEFAULT false,
+  ALTER COLUMN tagging SET NOT NULL;
 
 ALTER TABLE sales_orders
   DROP CONSTRAINT IF EXISTS chk_sales_orders_order_role;
@@ -137,6 +146,9 @@ CREATE INDEX IF NOT EXISTS idx_sales_orders_tenant_deleted_customer
 
 CREATE INDEX IF NOT EXISTS idx_sales_orders_tenant_deleted_booked
   ON sales_orders (tenant_id, is_deleted, booked_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_sales_orders_tenant_deleted_tagging
+  ON sales_orders (tenant_id, is_deleted, tagging, booked_at DESC);
 
 CREATE TABLE IF NOT EXISTS sales_order_price_lines (
   id BIGSERIAL PRIMARY KEY,
@@ -555,6 +567,7 @@ COMMENT ON COLUMN sales_orders.contact_phone IS '客户联系人电话。';
 COMMENT ON COLUMN sales_orders.customer_team_no IS '客户方团队编号或客户团号。';
 COMMENT ON COLUMN sales_orders.original_order_info IS '原始订单摘要，用于拼团、转团或来源订单在团队操作页追溯显示。';
 COMMENT ON COLUMN sales_orders.order_role IS '订单业务角色：normal普通订单，merge_source拼团来源留痕订单，merge_child拼团目标子订单。';
+COMMENT ON COLUMN sales_orders.tagging IS '订单管理页标记状态，用于筛选重点订单。';
 COMMENT ON COLUMN sales_orders.salesperson_employee_id IS '业务员员工 ID，用于销售归属和收款统计。';
 COMMENT ON COLUMN sales_orders.salesperson_employee_name IS '业务员姓名快照。';
 COMMENT ON COLUMN sales_orders.booking_operator_employee_id IS '收客计调员工 ID，用于收客操作归属。';

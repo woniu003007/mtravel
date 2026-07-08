@@ -32,12 +32,53 @@ public record SalesTeamListResponse(
         Integer remainingSeats,
         String customerSummary,
         String guideSummary,
+        String guidePlan,
+        String trafficPlan,
+        String hotelPlan,
+        String vehiclePlan,
+        String scenicPlan,
+        String mealPlan,
+        String otherPlan,
+        String optionalPlan,
+        String shoppingPlan,
+        String groundAgentPlan,
         String operatorEmployeeName,
         String remark,
         OffsetDateTime createdAt
 ) {
     /** 将团队实体和产品实体合并为团队管理列表行。 */
     public static SalesTeamListResponse fromEntity(SalesTeamEntity team, SalesProductEntity product) {
+        return fromEntity(team, product, ArrangePlans.empty(), null);
+    }
+
+    /** 将团队实体、产品实体和资源安排状态合并为团队管理列表行。 */
+    public static SalesTeamListResponse fromEntity(
+            SalesTeamEntity team,
+            SalesProductEntity product,
+            ArrangePlans plans
+    ) {
+        return fromEntity(team, product, plans, null);
+    }
+
+    /** 将团队实体、产品实体、资源安排状态和客户摘要合并为团队管理列表行。 */
+    public static SalesTeamListResponse fromEntity(
+            SalesTeamEntity team,
+            SalesProductEntity product,
+            ArrangePlans plans,
+            String customerSummary
+    ) {
+        return fromEntity(team, product, plans, customerSummary, null);
+    }
+
+    /** 将团队实体、产品实体、资源安排状态、客户摘要和导游摘要合并为团队管理列表行。 */
+    public static SalesTeamListResponse fromEntity(
+            SalesTeamEntity team,
+            SalesProductEntity product,
+            ArrangePlans plans,
+            String customerSummary,
+            String guideSummary
+    ) {
+        ArrangePlans safePlans = plans == null ? ArrangePlans.empty() : plans;
         int days = product != null && product.getTravelDays() != null && product.getTravelDays() > 0
                 ? product.getTravelDays()
                 : 1;
@@ -57,12 +98,45 @@ public record SalesTeamListResponse(
                 team.getTotalSeats(),
                 team.getUsedSeats(),
                 team.getRemainingSeats(),
-                null,
-                null,
+                customerSummary,
+                guideSummary,
+                safePlans.guidePlan(),
+                safePlans.trafficPlan(),
+                safePlans.hotelPlan(),
+                safePlans.vehiclePlan(),
+                safePlans.scenicPlan(),
+                safePlans.mealPlan(),
+                safePlans.otherPlan(),
+                safePlans.optionalPlan(),
+                safePlans.shoppingPlan(),
+                safePlans.groundAgentPlan(),
                 team.getOperatorEmployeeName(),
                 team.getRemark(),
                 team.getCreatedAt()
         );
+    }
+
+    /**
+     * 团队列表资源安排状态。
+     *
+     * <p>字段值供前端统一映射图标：none 未安排，pending 已录入待确认，confirmed 已确认。</p>
+     */
+    public record ArrangePlans(
+            String guidePlan,
+            String trafficPlan,
+            String hotelPlan,
+            String vehiclePlan,
+            String scenicPlan,
+            String mealPlan,
+            String otherPlan,
+            String optionalPlan,
+            String shoppingPlan,
+            String groundAgentPlan
+    ) {
+        /** 创建默认空安排状态。 */
+        public static ArrangePlans empty() {
+            return new ArrangePlans("none", "none", "none", "none", "none", "none", "none", "none", "none", "none");
+        }
     }
 
     private static String joinPlace(String province, String city, String district) {

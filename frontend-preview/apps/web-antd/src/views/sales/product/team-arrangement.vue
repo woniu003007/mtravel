@@ -9,10 +9,10 @@ import {
   Button,
   Card,
   Form,
+  InputNumber,
   Modal,
   Select,
   Spin,
-  Tag,
   Textarea,
   message,
 } from 'ant-design-vue';
@@ -49,6 +49,7 @@ import { getSupplierAll, type SupplierApi } from '#/api/purchase/supplier';
 import { buildRegionOptions } from '#/utils/region';
 
 import ArrangementEditorModal from '../components/ArrangementEditorModal.vue';
+import FormalTeamPageHeader from '../components/FormalTeamPageHeader.vue';
 import { showTeamItineraryModal } from '../components/itinerary-modal';
 import {
   arrangementEditorConfigs,
@@ -151,16 +152,20 @@ type TeamProfile = {
   departmentName?: string;
   escortName?: string;
   internalNote?: string;
+  optionalMarkupRate?: number;
   operatorName?: string;
+  perCapitaPitAmount?: number;
+  perCapitaShoppingAmount?: number;
   receptionStandard?: string;
   totalDistanceText?: string;
 };
 
 type QuickProfileEditorType = 'business_type' | 'department' | 'escort' | 'internal_note' | 'operator';
+type TeamProfileTextField = 'businessType' | 'departmentName' | 'escortName' | 'internalNote' | 'operatorName';
 
 type QuickProfileEditorConfig = {
   buttonText: string;
-  field: keyof TeamProfile;
+  field: TeamProfileTextField;
   inputType: 'select' | 'textarea';
   label: string;
   optionsType?: 'business_type' | 'department' | 'employee';
@@ -168,6 +173,14 @@ type QuickProfileEditorConfig = {
   required?: boolean;
   title: string;
 };
+
+const DEFAULT_INTERNAL_REMARK_TEMPLATE = [
+  '>导游要求：',
+  '>控房要求：',
+  '>控车要求：',
+  '>用餐要求：',
+  '>其它要求：',
+].join('\n');
 
 const route = useRoute();
 const router = useRouter();
@@ -305,7 +318,7 @@ const quickProfileEditorConfigs: Record<QuickProfileEditorType, QuickProfileEdit
     field: 'internalNote',
     inputType: 'textarea',
     label: '内部备注',
-    placeholder: '最多输入100个汉字',
+    placeholder: '填写导游、控房、控车、用餐和其它要求',
     title: '内部备注',
   },
 };
@@ -442,6 +455,7 @@ const selectedScenicResourceRelation = computed(() => (
   ))
 ));
 const activeQuickProfileEditor = computed(() => quickProfileEditorConfigs[quickProfileEditorType.value]);
+const quickProfileEditorTextMaxLength = computed(() => (quickProfileEditorType.value === 'internal_note' ? 500 : 100));
 const quickProfileEditorModel = computed({
   get: () => teamProfile[activeQuickProfileEditor.value.field],
   set: (value?: string) => {
@@ -464,6 +478,13 @@ const teamBadges = computed<TeamBadgeItem[]>(() => [
   { color: 'green', label: '领队', value: '--' },
   { color: 'default', editorType: 'escort', label: '全陪', value: teamProfile.escortName || '未设置' },
 ]);
+const formalHeaderBadges = computed(() => teamBadges.value.map((badge) => ({
+  color: badge.color,
+  editable: Boolean(badge.editorType),
+  key: badge.label,
+  label: badge.label,
+  value: badge.value,
+})));
 const teamMetricItems = computed<TeamMetricItem[]>(() => [
   {
     key: 'travelDays',
@@ -501,6 +522,15 @@ const teamMetricItems = computed<TeamMetricItem[]>(() => [
     value: `${formatPlainMoney(arrangementTotal.value)}`,
   },
 ]);
+const formalHeaderActions = computed(() => [
+  { icon: 'lucide:clipboard-list', key: 'productEdit', label: '团队管理' },
+  { icon: 'lucide:briefcase', key: 'itinerary', label: '查看行程' },
+]);
+const formalHeaderNoteMetrics = computed(() => [
+  `人均坑位：${formatMoney(teamProfile.perCapitaPitAmount)}`,
+  `自费加点率：${Number(teamProfile.optionalMarkupRate || 0)}%`,
+  `人均购物：${formatMoney(teamProfile.perCapitaShoppingAmount)}`,
+]);
 
 function formatMoney(value?: number) {
   return new Intl.NumberFormat('zh-CN', {
@@ -509,6 +539,14 @@ function formatMoney(value?: number) {
     minimumFractionDigits: 2,
     style: 'currency',
   }).format(Number(value || 0));
+}
+
+function formatCostCashMoney(value?: number) {
+  return formatMoney(value);
+}
+
+function formatCostDetailMoney(value?: number) {
+  return formatMoney(value);
 }
 
 function costAmountClass(value?: number, extraClass?: string) {
@@ -550,7 +588,10 @@ function decodeTeamProfileRemark(rawRemark?: string) {
     departmentName: undefined,
     escortName: undefined,
     internalNote: undefined,
+    optionalMarkupRate: undefined,
     operatorName: undefined,
+    perCapitaPitAmount: undefined,
+    perCapitaShoppingAmount: undefined,
     receptionStandard: undefined,
     totalDistanceText: undefined,
   });
@@ -595,6 +636,9 @@ function quickProfileEditorOptions(config: QuickProfileEditorConfig) {
 
 async function openTeamProfileEditor(editorType: QuickProfileEditorType) {
   teamProfile.businessType ||= formState.businessType;
+  if (editorType === 'internal_note') {
+    teamProfile.internalNote ||= DEFAULT_INTERNAL_REMARK_TEMPLATE;
+  }
   quickProfileEditorType.value = editorType;
   quickProfileEditorOpen.value = true;
   if (activeQuickProfileEditor.value.inputType === 'select') {
@@ -1063,11 +1107,16 @@ function syncOptionalLineToForm() {
     const quantity = Number(line.quantity || 0);
     const salePrice = Number(line.salePrice || 0);
     const costPrice = Number(line.costPrice || 0);
+    const guideCommissionRate = Number(line.guideCommissionRate || 0);
+    const guideCommissionFixedAmount = Number(line.guideCommissionAmount || 0);
+    const guideCommissionUnitAmount = guideCommissionFixedAmount > 0
+      ? guideCommissionFixedAmount
+      : Math.max(salePrice - costPrice, 0) * guideCommissionRate / 100;
     peopleCount += quantity;
-    saleAmount += salePrice;
-    costAmount += costPrice;
+    saleAmount += quantity * salePrice;
+    costAmount += quantity * costPrice;
     cashAmount += Number(line.cashAmount || 0);
-    guideCommissionAmount += Number(line.guideCommissionAmount || 0);
+    guideCommissionAmount += quantity * guideCommissionUnitAmount;
   });
   arrangementForm.peopleCount = peopleCount;
   arrangementForm.saleAmount = saleAmount;
@@ -1719,7 +1768,9 @@ async function saveArrangementEditor() {
     : arrangementForm.priceLines.map((line, index) => {
       const quantity = Number(line.quantity || 0);
       const unitPrice = Number(line.unitPrice || 0);
-      const amount = unitPrice * quantity;
+      const amount = type === 'optional'
+        ? Number(line.costPrice || 0) * quantity
+        : unitPrice * quantity;
       return {
         amount,
         cashAmount: Number(line.cashAmount ?? ((index === 0 ? arrangementForm.cashAmount : 0) || 0)),
@@ -1928,6 +1979,23 @@ function goProductEdit() {
   router.push(`/sales/product/edit/${productId.value}`);
 }
 
+function handleFormalHeaderAction(action: { key: string }) {
+  if (action.key === 'productEdit') {
+    goProductEdit();
+    return;
+  }
+  if (action.key === 'itinerary') {
+    showItineraryModal();
+  }
+}
+
+function handleFormalHeaderBadge(badge: { label: string }) {
+  const target = teamBadges.value.find((item) => item.label === badge.label);
+  if (target?.editorType) {
+    openTeamProfileEditor(target.editorType);
+  }
+}
+
 /**
  * 保存产品团队安排参数。
  *
@@ -1945,78 +2013,18 @@ onMounted(loadDetail);
   <Page :title="pageTitle">
     <Spin :spinning="loading">
       <Card class="team-arrangement-card formal-team-arrangement-card">
-        <div class="arrangement-command-bar">
-          <div class="command-main">
-            <div class="form-kicker">团队安排总览 · Group Arrange</div>
-            <div class="team-title-line formal-team-title-line">
-              <div class="team-name">{{ formState.productName || '未命名产品' }}</div>
-              <div class="team-badges formal-team-badges">
-                <Tag
-                  v-for="item in teamBadges"
-                  :key="item.label"
-                  :color="item.color"
-                  :class="{ editable: item.editorType }"
-                  @click="item.editorType && openTeamProfileEditor(item.editorType)"
-                >
-                  {{ item.label }}：{{ item.value }}
-                </Tag>
-              </div>
-            </div>
-            <div class="team-metric-strip formal-team-metric-strip">
-              <span
-                v-for="item in teamMetricItems"
-                :key="item.key"
-                class="team-metric-item"
-                :class="`metric-${item.key}`"
-              >
-                <em>{{ item.label }}</em>
-                <strong>{{ item.value }}</strong>
-              </span>
-            </div>
-          </div>
-
-          <div class="command-side">
-            <div class="workflow-rail" aria-label="团队阶段">
-              <div
-                v-for="(stage, index) in arrangementStages"
-                :key="stage.label"
-                class="stage-flow-item"
-                :class="stage.state"
-              >
-                <span class="stage-index">{{ index + 1 }}</span>
-                <span class="stage-label">{{ stage.label }}</span>
-              </div>
-            </div>
-            <div class="team-profile-actions">
-              <button type="button" class="compact-action" @click="goProductEdit">
-                <IconifyIcon icon="lucide:clipboard-list" />
-                <span>团队管理</span>
-              </button>
-              <button type="button" class="compact-action" @click="showItineraryModal">
-                <IconifyIcon icon="lucide:briefcase" />
-                <span>查看行程</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="team-note-row">
-          <div class="internal-note-title">
-            <div>
-              <IconifyIcon icon="lucide:info" />
-              <span>内部备注：{{ teamProfile.internalNote || '未填写' }}</span>
-            </div>
-            <Button type="link" size="small" @click="openTeamProfileEditor('internal_note')">
-              <IconifyIcon icon="lucide:file-pen-line" />
-              <span>编辑</span>
-            </Button>
-          </div>
-          <div class="internal-note-metrics">
-            <span>人均坑位：¥0</span>
-            <span>自费加点率：0%</span>
-            <span>人均购物：¥0</span>
-          </div>
-        </div>
+        <FormalTeamPageHeader
+          :actions="formalHeaderActions"
+          :badges="formalHeaderBadges"
+          :metrics="teamMetricItems"
+          :note="teamProfile.internalNote || '未填写'"
+          :note-metrics="formalHeaderNoteMetrics"
+          :stages="arrangementStages"
+          :title="formState.productName || '未命名产品'"
+          @action-click="handleFormalHeaderAction"
+          @badge-click="handleFormalHeaderBadge"
+          @note-edit="openTeamProfileEditor('internal_note')"
+        />
 
         <div class="formal-cost-overview-title">
           <div>
@@ -2068,11 +2076,11 @@ onMounted(loadDetail);
                   v-for="item in arrangementOverviewColumns"
                   :key="`${item.value}-amount`"
                 >
-                  <td :class="costAmountClass(arrangementSettlementTotal(item.value, 'cash'))">
-                    {{ formatMoney(arrangementSettlementTotal(item.value, 'cash')) }}
+                  <td :class="costAmountClass(arrangementSettlementTotal(item.value, 'cash'), 'cost-amount-cash')">
+                    {{ formatCostCashMoney(arrangementSettlementTotal(item.value, 'cash')) }}
                   </td>
-                  <td :class="costAmountClass(arrangementSettlementTotal(item.value, 'credit'))">
-                    {{ formatMoney(arrangementSettlementTotal(item.value, 'credit')) }}
+                  <td :class="costAmountClass(arrangementSettlementTotal(item.value, 'credit'), 'cost-amount-credit')">
+                    {{ formatCostDetailMoney(arrangementSettlementTotal(item.value, 'credit')) }}
                   </td>
                 </template>
               </tr>
@@ -2203,12 +2211,53 @@ onMounted(loadDetail);
         centered
         destroy-on-close
         :title="activeQuickProfileEditor.title"
-        :width="460"
+        :width="quickProfileEditorType === 'internal_note' ? 760 : 460"
         :footer="null"
       >
         <Spin :spinning="teamProfileOptionsLoading || saving">
           <Form layout="vertical" class="quick-profile-form">
-            <Form.Item :label="activeQuickProfileEditor.label" :required="activeQuickProfileEditor.required">
+            <template v-if="quickProfileEditorType === 'internal_note'">
+              <Form.Item label="内部备注">
+                <Textarea
+                  v-model:value="teamProfile.internalNote"
+                  class="inside-memo-textarea"
+                  :auto-size="{ minRows: 10, maxRows: 16 }"
+                  :maxlength="500"
+                  :placeholder="activeQuickProfileEditor.placeholder"
+                  show-count
+                />
+              </Form.Item>
+              <div class="inside-memo-edit-grid">
+                <Form.Item label="人均坑位">
+                  <InputNumber
+                    v-model:value="teamProfile.perCapitaPitAmount"
+                    :min="0"
+                    :precision="2"
+                    addon-before="¥"
+                    class="inside-memo-number-input"
+                  />
+                </Form.Item>
+                <Form.Item label="自费加点率">
+                  <InputNumber
+                    v-model:value="teamProfile.optionalMarkupRate"
+                    :min="0"
+                    :precision="2"
+                    addon-after="%"
+                    class="inside-memo-number-input"
+                  />
+                </Form.Item>
+                <Form.Item label="人均购物">
+                  <InputNumber
+                    v-model:value="teamProfile.perCapitaShoppingAmount"
+                    :min="0"
+                    :precision="2"
+                    addon-before="¥"
+                    class="inside-memo-number-input"
+                  />
+                </Form.Item>
+              </div>
+            </template>
+            <Form.Item v-else :label="activeQuickProfileEditor.label" :required="activeQuickProfileEditor.required">
               <template v-if="activeQuickProfileEditor.inputType === 'select'">
                 <Select
                   v-model:value="quickProfileEditorModel"
@@ -2222,7 +2271,7 @@ onMounted(loadDetail);
                 v-else
                 v-model:value="quickProfileEditorModel"
                 :auto-size="{ minRows: 4, maxRows: 6 }"
-                :maxlength="100"
+                :maxlength="quickProfileEditorTextMaxLength"
                 :placeholder="activeQuickProfileEditor.placeholder"
                 show-count
               />
@@ -2312,6 +2361,21 @@ onMounted(loadDetail);
 .quick-profile-form :deep(.ant-input) {
   border-color: #dbe4f0;
   border-radius: 5px;
+}
+
+.inside-memo-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.inside-memo-textarea {
+  line-height: 1.7;
+}
+
+.inside-memo-number-input {
+  width: 100%;
 }
 
 .traffic-modal-body {

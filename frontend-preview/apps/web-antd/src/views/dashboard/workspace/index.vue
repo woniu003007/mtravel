@@ -41,12 +41,6 @@ const storySteps = [
     title: '销售维护产品资料',
   },
   {
-    description: '维护自控房源、房型、房间和每日房态，为后续排房联动做准备。',
-    path: '/dispatch/room-status',
-    role: '计调',
-    title: '计调维护房态库存',
-  },
-  {
     description: '维护外部资源、供应商、采购关系和合同，给产品和计调提供可选资源。',
     path: '/purchase/resource',
     role: '采购',
@@ -78,15 +72,6 @@ const roleCards = [
     path: '/sales/product',
     role: '销售产品',
     value: '先把产品、行程和团队安排模板做成可复用基础。',
-  },
-  {
-    color: '#dc2626',
-    icon: 'lucide:hotel',
-    pages: ['自控房源', '房型', '房间', '房态库存'],
-    pain: '自营房源如果没有每日库存，后面排房就无法自动联动。',
-    path: '/dispatch/room-status',
-    role: '计调',
-    value: '维护自控房源和房态，为后续排房做基础。',
   },
   {
     color: '#7c3aed',
@@ -124,11 +109,6 @@ const demoRows = [
     confirm: '确认件、合同、附件哪些必填？',
     customerWords: '先把产品资料、行程内容和团队安排模板维护好，后面建团不用重复录。',
     scene: '产品管理',
-  },
-  {
-    confirm: '自控房源是否按酒店、房型、日期维护？',
-    customerWords: '自营房源可以先做每日房态，后续排房时才能锁房、占房、释放。',
-    scene: '房态库存',
   },
   {
     confirm: '资源、供应商、采购关系字段是否够用？',
@@ -176,9 +156,6 @@ function navTo(path: string) {
           <Space wrap>
             <Button type="primary" @click="navTo('/sales/product')">
               从产品管理开始演示
-            </Button>
-            <Button @click="navTo('/dispatch/room-status')">
-              看房态库存
             </Button>
             <Button @click="navTo('/purchase/resource')">
               看资源采购

@@ -147,6 +147,66 @@ export namespace SalesBookingApi {
     validCount?: number;
     warnings?: string[];
   }
+
+  export interface PageResult<T> {
+    items: T[];
+    total: number;
+  }
+
+  export interface OrderManageRow {
+    balanceAmount?: string;
+    bookedInfo?: string;
+    bookingInfo?: string;
+    departureDate?: string;
+    dropoffInfo?: string;
+    feeRemark?: string;
+    guestCount?: number;
+    guestCountText?: string;
+    guestName?: string;
+    guideRemark?: string;
+    hasOrderFile?: boolean;
+    hotelInfo?: string;
+    id: number;
+    orderInfo?: string;
+    orderNo?: string;
+    orderRemark?: string;
+    orderRole?: string;
+    orderRoleLabel?: string;
+    pickupInfo?: string;
+    pickupRemark?: string;
+    priceDetail?: string;
+    productName?: string;
+    receivableAmount?: string;
+    receivedAmount?: string;
+    sourcePlace?: string;
+    status?: string;
+    statusValue?: OrderStatus;
+    tagging?: boolean;
+    teamId?: number;
+    teamNo?: string;
+    teamType?: string;
+    teamTypeLabel?: string;
+  }
+
+  export interface OrderManageQueryParams {
+    bookedBy?: string;
+    buyerOrSalespersonKeyword?: string;
+    customerTeamNo?: string;
+    endDate?: string;
+    groupNo?: string;
+    guestKeyword?: string;
+    hasOrderFile?: boolean;
+    orderByType?: 'booked' | 'departure';
+    page?: number;
+    pageSize?: number;
+    priceAll?: number;
+    productKeyword?: string;
+    startDate?: string;
+    status?: OrderStatus;
+    tagging?: boolean;
+    teamType?: string;
+    trafficOrPickupRemark?: string;
+  }
 }
 
 /** 查询新增收客订单需要的团队草稿。 */
@@ -215,4 +275,21 @@ export function importSalesBookingGuestsPreview(data: FormData) {
       headers: { 'Content-Type': 'multipart/form-data' },
     },
   );
+}
+
+/** 查询全局订单管理列表。 */
+export function getSalesBookingOrderPage(
+  params: SalesBookingApi.OrderManageQueryParams,
+) {
+  return requestClient.get<SalesBookingApi.PageResult<SalesBookingApi.OrderManageRow>>(
+    '/sales/booking/orders/page',
+    { params },
+  );
+}
+
+/** 更新订单管理页标记状态。 */
+export function updateSalesBookingOrderTagging(id: number, tagging: boolean) {
+  return requestClient.post<void>(`/sales/booking/orders/${id}/tagging`, {
+    tagging,
+  });
 }

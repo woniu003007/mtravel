@@ -6,6 +6,7 @@ import com.mtravel.platform.sales.product.entity.SalesProductItineraryDayEntity;
 import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
 import com.mtravel.platform.sales.team.enums.SalesTeamStatus;
 import com.mtravel.platform.sales.team.enums.SalesTeamType;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Objects;
@@ -79,7 +80,10 @@ public record SalesTeamOperationResponse(
     public record ContentInfo(
             String productDescription,
             String bookingNotice,
-            String internalRemark
+            String internalRemark,
+            BigDecimal perCapitaPitAmount,
+            BigDecimal optionalMarkupRate,
+            BigDecimal perCapitaShoppingAmount
     ) {
     }
 
@@ -199,6 +203,20 @@ public record SalesTeamOperationResponse(
             List<SalesProductItineraryDayEntity> itineraryDays,
             List<OrderRow> orders
     ) {
+        return from(team, product, description, prices, itineraryDays, orders, null, null);
+    }
+
+    /** 将团队操作页详情组装为返回对象，并带上执行页顶部的导游和领队摘要。 */
+    public static SalesTeamOperationResponse from(
+            SalesTeamEntity team,
+            SalesProductEntity product,
+            SalesProductDescriptionEntity description,
+            List<SalesTeamPriceResponse> prices,
+            List<SalesProductItineraryDayEntity> itineraryDays,
+            List<OrderRow> orders,
+            String guideSummary,
+            String leaderSummary
+    ) {
         Integer travelDays = resolveTravelDays(product);
         LocalDate endDate = team.getDepartureDate() == null ? null : team.getDepartureDate().plusDays(travelDays - 1L);
         List<ItineraryDayInfo> dayInfos = toItineraryDayInfos(itineraryDays);
@@ -225,8 +243,8 @@ public record SalesTeamOperationResponse(
                         team.getRemainingSeats(),
                         travelDays,
                         team.getCloseDaysBefore(),
-                        null,
-                        null,
+                        guideSummary,
+                        leaderSummary,
                         team.getEscortEmployeeName()
                 ),
                 product == null ? null : new ProductInfo(
@@ -241,7 +259,10 @@ public record SalesTeamOperationResponse(
                 new ContentInfo(
                         description == null ? null : description.getProductDescription(),
                         description == null ? null : description.getBookingNotice(),
-                        team.getRemark()
+                        team.getRemark(),
+                        team.getPerCapitaPitAmount(),
+                        team.getOptionalMarkupRate(),
+                        team.getPerCapitaShoppingAmount()
                 ),
                 routeSummary(dayInfos),
                 dayInfos,
@@ -333,6 +354,7 @@ public record SalesTeamOperationResponse(
                 new ActionInfo("bookingOrder", "收客订单", "business", true, null, "收客订单页待接入"),
                 new ActionInfo("cancelTeam", "取消团队", "danger", true, null, "状态动作待接入"),
                 new ActionInfo("teamArrangement", "团队安排", "business", true, null, "跳转团队安排"),
+                new ActionInfo("shoppingReconciliation", "购物核对/补佣", "business", true, null, "录入购物店实际反馈并计算公司补佣"),
                 new ActionInfo("guideBill", "导游报账", "business", true, null, "导游报账页待接入")
         );
     }

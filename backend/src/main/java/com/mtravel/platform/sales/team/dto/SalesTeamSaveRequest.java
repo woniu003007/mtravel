@@ -24,5 +24,8 @@ public record SalesTeamSaveRequest(
         @Size(max = 100) String escortEmployeeName,
         @Min(value = 0, message = "总位数不能小于0") Integer totalSeats,
         @DecimalMin(value = "0", message = "单房差不能小于0") BigDecimal singleRoomDifference,
-        @Size(max = 500) String remark
+        @Size(max = 500) String remark,
+        @DecimalMin(value = "0", message = "人均坑位不能小于0") BigDecimal perCapitaPitAmount,
+        @DecimalMin(value = "0", message = "自费加点率不能小于0") BigDecimal optionalMarkupRate,
+        @DecimalMin(value = "0", message = "人均购物不能小于0") BigDecimal perCapitaShoppingAmount
 ) {}

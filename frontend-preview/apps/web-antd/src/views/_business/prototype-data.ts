@@ -131,7 +131,6 @@ export const prototypeSpecs: PrototypeSpec[] = [
   spec({ key: 'dispatch-team-audit', module: 'dispatch', title: '计调团队审核', routePath: '/dispatch/team-audit', icon: 'lucide:check-circle', phase: 'P0', oldMenu: '团队审核', buildMode: '保留增强', objective: '统一审核团队安排、资源成本和异常退回。', featureText: '团队安排核对、资源成本核对、异常退回、审核意见', problem: '计调审核需要统一流转和留痕。', delivery: '纳入统一审核流程。', confirmPoints: ['审核节点和责任人', '退回后是否保留意见', '审核通过后是否进入财务审核'] }),
   spec({ key: 'dispatch-guide-schedule', module: 'dispatch', title: '导游排班汇总', routePath: '/dispatch/guide-schedule', icon: 'lucide:calendar-days', phase: 'P1', oldMenu: '导游排班汇总', buildMode: '保留增强', objective: '把导游日历、团队任务、冲突提醒和报账状态联动。', featureText: '导游日历、团队任务、冲突提醒、报账状态', problem: '导游安排和报账状态需要联动。', delivery: '导游排班与团队安排、导游报账打通。', confirmPoints: ['导游冲突判断规则', '排班日历查看粒度', '报账状态是否展示在排班中'] }),
   spec({ key: 'dispatch-transfer-info', module: 'dispatch', title: '接送信息', routePath: '/dispatch/transfer-info', icon: 'lucide:bus', phase: 'P1', oldMenu: '接送信息', buildMode: '保留增强', objective: '统一管理团队接送站点、时间、车次和通知状态。', featureText: '接送站、车次航班、接送时间、导游司机、通知状态', problem: '接送信息分散记录，容易漏通知。', delivery: '接送信息和团队安排、车辆、导游任务联动。', confirmPoints: ['接送站基础资料', '通知对象', '变更提醒规则'] }),
-  spec({ key: 'dispatch-room-status', module: 'dispatch', title: '酒店房间与房态库存', routePath: '/dispatch/room-status', icon: 'lucide:bed', phase: 'P0', oldMenu: '团队管理/住宿安排/酒店房源管理', buildMode: '新增改造', objective: '做成内部酒店房源管理系统。', featureText: '酒店房源、日期、房型、可用间数、已占用间数、买断房、保留房、团队占房、库存扣减、变更释放、库存不足提醒', problem: '计调安排住宿需要直接看到哪些酒店、哪些日期、哪些房型还有房。', delivery: '在团队管理-住宿节点选择酒店房间后自动占用库存，团队取消或变更后释放/调整库存。', confirmPoints: ['库存维护责任人', '买断房/保留房口径', '库存不足是否拦截排团'] }),
   spec({ key: 'dispatch-guide-expense', module: 'dispatch', title: '导游报账流程', routePath: '/dispatch/guide-expense', icon: 'lucide:receipt-text', phase: 'P0', oldMenu: '团队安排/导游报账', buildMode: '新增改造', objective: '围绕排团-导游报账-计调审核-财务审核四状态升级。', featureText: '导游上传支款凭证、发票、报账明细、计调初审、财务复审', problem: '导游报账和凭证核对依赖人工。', delivery: '导游报账进入计调初审和财务复审闭环。', confirmPoints: ['导游上传端形态', '凭证必传规则', '计调初审和财务复审差异'] }),
   spec({ key: 'dispatch-car-inquiry', module: 'dispatch', title: '车调询价与派车', routePath: '/dispatch/car-inquiry', icon: 'lucide:route', phase: 'P0', oldMenu: '团队管理/用车/车调询价', buildMode: '新增改造', objective: '建立统一询价、比价、确认派车和成本回写流程。', featureText: '按团队行程发起用车询价、行程公里数、车型需求、用车日期、基础价格带入、车队报价、多家比价、选定车队/车辆/司机、派车确认、成本回写、询价记录', problem: '车价靠人工问车队和经验判断，缺少统一询价、比价、留痕。', delivery: '把确认车价写入团队成本、应付和财务审核。', confirmPoints: ['询价供应商范围', '车队报价有效期', '确认派车后是否锁定成本'] }),
   spec({ key: 'finance-team-audit', module: 'finance', title: '财务团队审核', routePath: '/finance/team-audit', icon: 'lucide:badge-check', phase: 'P0', oldMenu: '团队审核', buildMode: '保留增强', objective: '审核团队应收、应付、成本、利润、报账和异常项。', featureText: '团队应收、应付、成本、利润、报账、异常项审核', problem: '财务只在后期审账，前置风控不足。', delivery: '保留财务团队审核，并提前可见风险。', confirmPoints: ['财务审核前置到哪个节点', '哪些异常可退回计调', '审核通过后生成哪些账款'], scenarioRows: p0Rows['finance-team-audit'] }),
@@ -144,7 +143,7 @@ export const prototypeSpecs: PrototypeSpec[] = [
   spec({ key: 'finance-cost-preview', module: 'finance', title: '预算成本与实际成本', routePath: '/finance/cost-preview', icon: 'lucide:eye', phase: 'P1', oldMenu: '成本明细预览', buildMode: '保留增强', objective: '过程化控制预算成本和实际成本偏差。', featureText: '预算成本、实际成本、差异金额、差异原因、异常标记', problem: '成本只在后期才看到，无法过程控制。', delivery: '计调安排形成预算成本，报账后形成实际成本。', confirmPoints: ['成本超预算阈值', '差异原因必填规则', '预算成本锁定时点'] }),
   spec({ key: 'finance-guide-advance', module: 'finance', title: '导游备用金闭环', routePath: '/finance/guide-advance', icon: 'lucide:hand-coins', phase: 'P0', oldMenu: '导游备用金/团队预付款', buildMode: '保留增强', objective: '建立预算申请-审批发放-支付宝付款-导游报账-计调初审-财务复审-核销退补闭环。', featureText: '预算申请、审批发放、支付宝付款、导游报账、计调初审、财务复审、核销、差额退补、偏差分析', problem: '备用金申请、发放、使用、凭证、报账和核销没有形成闭环。', delivery: '默认按支付宝方式发放备用金，核销后自动更新团队成本和财务结算状态。', confirmPoints: ['支付宝账号维护方式', '备用金审批节点', '差额退补流程'] }),
   spec({ key: 'finance-guide-settlement', module: 'finance', title: '导游结算', routePath: '/finance/guide-settlement', icon: 'lucide:calculator', phase: 'P0', oldMenu: '导游结算', buildMode: '保留增强', objective: '导游结算和报账、凭证、发票联动。', featureText: '导游收入、导游上交、现收现退、发票、结算确认', problem: '导游结算需要和报账、凭证、发票联动。', delivery: '财务复审后进入导游结算。', confirmPoints: ['导游收入来源', '现收现退字段', '结算确认责任人'] }),
-  spec({ key: 'finance-shop-rebate', module: 'finance', title: '购物返佣', routePath: '/finance/shop-rebate', icon: 'lucide:percent', phase: 'P2', oldMenu: '购物返佣', buildMode: '保留增强', objective: '保留购物返佣独立收益模块。', featureText: '购物点、返佣金额、导游、团队、结算状态', problem: '购物返佣是独立收益模块，不能丢。', delivery: '保留原功能并纳入利润统计。', confirmPoints: ['返佣归属团队', '导游关联方式', '是否进入利润统计'] }),
+  spec({ key: 'finance-shop-rebate', module: 'finance', title: '购物返佣', routePath: '/finance/shop-rebate', icon: 'lucide:percent', phase: 'P2', oldMenu: '购物返佣', buildMode: '保留增强', objective: '后续作为财务购物返佣统计和收款核对入口。', featureText: '购物点、返佣金额、导游、团队、结算状态', problem: '购物实际反馈先在单团审核里录入，财务后续需要批量统计和收款核对。', delivery: '本次不作为购物业绩录入口，后续统计页读取购物反馈和结算快照。', confirmPoints: ['返佣归属团队', '导游关联方式', '是否进入利润统计'] }),
   spec({ key: 'finance-income-record', module: 'finance', title: '收款记录', routePath: '/finance/income-record', icon: 'lucide:plus-circle', phase: 'P1', oldMenu: '收款记录', buildMode: '保留增强', objective: '收款登记和确认件金额匹配。', featureText: '收款登记、确认件上传、金额匹配、差异提醒、人工确认', problem: '应收录入和对方确认件分离，系统无法自动匹配金额。', delivery: '先做上传和金额校验，OCR 后置。', confirmPoints: ['确认件必传规则', '金额差异处理', '收款抵扣顺序'] }),
   spec({ key: 'finance-payment-record', module: 'finance', title: '付款记录', routePath: '/finance/payment-record', icon: 'lucide:minus-circle', phase: 'P1', oldMenu: '付款记录', buildMode: '保留增强', objective: '付款记录关联应付来源、供应商、导游和地接。', featureText: '付款申请、付款登记、供应商/导游/地接关联、付款状态', problem: '付款需要和应付、发票、供应商结算联动。', delivery: '保留付款记录并关联应付来源。', confirmPoints: ['付款申请是否先审批', '付款对象类型', '付款后是否更新应付余额'] }),
   spec({ key: 'finance-invoice', module: 'finance', title: '发票记录', routePath: '/finance/invoice', icon: 'lucide:file-text', phase: 'P1', oldMenu: '发票记录', buildMode: '保留增强', objective: '销项/进项发票和应收应付、报账金额校验。', featureText: '销项发票、进项发票、发票金额校验、发票附件', problem: '发票和应收应付、报账之间缺少校验。', delivery: '发票金额与应收/应付/报账金额校验。', confirmPoints: ['发票类型字段', '金额校验规则', '附件格式'] }),
@@ -314,7 +313,6 @@ export const coreDemoLinks = [
   { path: '/workspace', title: '业务工作台' },
   { path: '/customer/credit', title: '客户授信' },
   { path: '/sales/product', title: '产品管理' },
-  { path: '/dispatch/room-status', title: '房态库存' },
   { path: '/purchase/resource', title: '资源总览' },
   { path: '/enterprise/guide', title: '导游管理' },
 ];
@@ -322,7 +320,6 @@ export const coreDemoLinks = [
 export const workbenchAlerts = [
   { count: 7, label: '客户授信预警', path: '/customer/credit', status: 'P0' },
   { count: 5, label: '产品资料待完善', path: '/sales/product', status: 'P0' },
-  { count: 3, label: '房态库存异常', path: '/dispatch/room-status', status: 'P0' },
   { count: 4, label: '采购关系待维护', path: '/purchase/relation', status: 'P1' },
   { count: 6, label: '导游资料待补齐', path: '/enterprise/guide', status: 'P1' },
   { count: 12, label: '合同到期提醒', path: '/customer/contract', status: 'P1' },
@@ -332,6 +329,6 @@ export const deliveryScope = [
   { module: '客户管理', p0: 5, p1: 1, p2: 0, focus: '客户主体、授信、合同校验' },
   { module: '采购管理', p0: 0, p1: 4, p2: 0, focus: '资源、供应商、采购关系、合同' },
   { module: '销售管理', p0: 1, p1: 0, p2: 0, focus: '产品资料、行程、团队安排模板' },
-  { module: '计调操作', p0: 0, p1: 1, p2: 0, focus: '自控房源、房态、锁房、释放' },
+  { module: '计调操作', p0: 0, p1: 1, p2: 0, focus: '用车报价、导游排班、导游请假' },
   { module: '企业资料', p0: 3, p1: 5, p2: 0, focus: '公司、部门、角色、员工、导游、费用字典' },
 ];

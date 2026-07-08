@@ -3,12 +3,18 @@ package com.mtravel.platform.sales.team.service;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.mtravel.platform.common.BizException;
+import com.mtravel.platform.dispatch.guide.entity.DispatchTeamGuideEntity;
+import com.mtravel.platform.dispatch.guide.mapper.DispatchTeamGuideMapper;
 import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementEntity;
 import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementOrderAllocationEntity;
 import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementPriceLineEntity;
+import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementSectionStatusEntity;
 import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementMapper;
 import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementOrderAllocationMapper;
 import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementPriceLineMapper;
+import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementSectionStatusMapper;
+import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderEntity;
+import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderMapper;
 import com.mtravel.platform.sales.product.entity.SalesProductArrangementItemEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductArrangementPriceLineEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductDescriptionEntity;
@@ -130,7 +136,7 @@ class SalesTeamScheduleServiceTest {
         product.setBusinessType("疗休养");
         product.setRemark("""
                 产品内部备注
-                [[TEAM_PROFILE_JSON]]{"businessType":"亲子主题","departmentName":"计调一部","operatorName":"产品默认计调","escortName":"王全陪"}
+                [[TEAM_PROFILE_JSON]]{"businessType":"亲子主题","departmentName":"计调一部","operatorName":"产品默认计调","escortName":"王全陪","perCapitaPitAmount":40,"optionalMarkupRate":70,"perCapitaShoppingAmount":500}
                 """);
         when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product);
         when(teamMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
@@ -166,10 +172,14 @@ class SalesTeamScheduleServiceTest {
         assertThat(created.getDepartmentName()).isEqualTo("计调一部");
         assertThat(created.getOperatorEmployeeName()).isEqualTo("产品默认计调");
         assertThat(created.getEscortEmployeeName()).isEqualTo("王全陪");
+        assertThat(created.getRemark()).isEqualTo("产品内部备注");
+        assertThat(created.getPerCapitaPitAmount()).isEqualByComparingTo("40");
+        assertThat(created.getOptionalMarkupRate()).isEqualByComparingTo("70");
+        assertThat(created.getPerCapitaShoppingAmount()).isEqualByComparingTo("500");
     }
 
     @Test
-    void batchCreateShouldCopyProductArrangementTemplateToFormalTeamArrangements() {
+    void batchCreateShouldCopyProductArrangementTemplateAsReferenceWithoutPeopleOrAmount() {
         SalesProductMapper productMapper = mock(SalesProductMapper.class);
         SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
         SalesTeamPriceMapper priceMapper = mock(SalesTeamPriceMapper.class);
@@ -251,26 +261,30 @@ class SalesTeamScheduleServiceTest {
         assertThat(arrangement.getSettlementType()).isEqualTo("credit");
         assertThat(arrangement.getMealType()).isEqualTo("自助早");
         assertThat(arrangement.getFundIncluded()).isEqualTo("含");
-        assertThat(arrangement.getConfirmed()).isTrue();
+        assertThat(arrangement.getConfirmed()).isFalse();
         assertThat(arrangement.getConfirmationNo()).isEqualTo("CN-PRODUCT-1");
         assertThat(arrangement.getGuideId()).isEqualTo(66L);
         assertThat(arrangement.getGuideName()).isEqualTo("产品导游");
-        assertThat(arrangement.getTotalAmount()).isEqualByComparingTo("1200.00");
+        assertThat(arrangement.getTotalAmount()).isEqualByComparingTo("0.00");
         assertThat(arrangement.getCashAmount()).isEqualByComparingTo("0.00");
-        assertThat(arrangement.getCreditAmount()).isEqualByComparingTo("1200.00");
+        assertThat(arrangement.getCreditAmount()).isEqualByComparingTo("0.00");
+        assertThat(arrangement.getCostAmount()).isEqualByComparingTo("0.00");
+        assertThat(arrangement.getPeopleCount()).isEqualByComparingTo("0.00");
         assertThat(arrangement.getNoGuideReport()).isFalse();
 
         verify(teamPriceLineMapper).insert(priceLineCaptor.capture());
         assertThat(priceLineCaptor.getValue().getArrangementId()).isEqualTo(9001L);
         assertThat(priceLineCaptor.getValue().getProjectName()).isEqualTo("成人机票");
         assertThat(priceLineCaptor.getValue().getUnitPrice()).isEqualByComparingTo("120.00");
-        assertThat(priceLineCaptor.getValue().getQuantity()).isEqualByComparingTo("10.00");
-        assertThat(priceLineCaptor.getValue().getAmount()).isEqualByComparingTo("1200.00");
+        assertThat(priceLineCaptor.getValue().getQuantity()).isEqualByComparingTo("0.00");
+        assertThat(priceLineCaptor.getValue().getAmount()).isEqualByComparingTo("0.00");
+        assertThat(priceLineCaptor.getValue().getCashAmount()).isEqualByComparingTo("0.00");
+        assertThat(priceLineCaptor.getValue().getCreditAmount()).isEqualByComparingTo("0.00");
 
         verify(allocationMapper).insert(allocationCaptor.capture());
         assertThat(allocationCaptor.getValue().getAllocationScope()).isEqualTo("team");
         assertThat(allocationCaptor.getValue().getOrderId()).isNull();
-        assertThat(allocationCaptor.getValue().getAllocationAmount()).isEqualByComparingTo("1200.00");
+        assertThat(allocationCaptor.getValue().getAllocationAmount()).isEqualByComparingTo("0.00");
     }
 
     @Test
@@ -1054,11 +1068,28 @@ class SalesTeamScheduleServiceTest {
         SalesProductMapper productMapper = mock(SalesProductMapper.class);
         SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
         SalesTeamPriceMapper priceMapper = mock(SalesTeamPriceMapper.class);
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        DispatchTeamArrangementMapper teamArrangementMapper = mock(DispatchTeamArrangementMapper.class);
+        DispatchTeamArrangementSectionStatusMapper sectionStatusMapper = mock(DispatchTeamArrangementSectionStatusMapper.class);
+        DispatchTeamGuideMapper guideMapper = mock(DispatchTeamGuideMapper.class);
         SalesTeamScheduleService service = new SalesTeamScheduleService(
                 productMapper,
+                null,
+                null,
+                null,
+                null,
+                null,
                 teamMapper,
                 priceMapper,
-                mock(SalesTeamStatusLogMapper.class)
+                mock(SalesTeamStatusLogMapper.class),
+                null,
+                null,
+                orderMapper,
+                teamArrangementMapper,
+                null,
+                null,
+                sectionStatusMapper,
+                guideMapper
         );
         SalesTeamEntity team = existingTeam("CS-SP-BK-260701A");
         team.setId(1001L);
@@ -1067,10 +1098,32 @@ class SalesTeamScheduleServiceTest {
         team.setRemainingSeats(26);
         when(teamMapper.selectPage(any(), any(Wrapper.class))).thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<SalesTeamEntity>(1, 20, 1).setRecords(List.of(team)));
         when(productMapper.selectList(any(Wrapper.class))).thenReturn(List.of(product()));
+        when(teamArrangementMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                teamArrangement(1001L, "traffic", true, "active"),
+                teamArrangement(1001L, "hotel", false, "active"),
+                teamArrangement(1001L, "vehicle", true, "cancelled")
+        ));
+        when(sectionStatusMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                teamSectionStatus(1001L, "traffic", "done"),
+                teamSectionStatus(1001L, "hotel", "pending"),
+                teamSectionStatus(1001L, "scenic", "none")
+        ));
+        when(guideMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                teamGuide(1001L, "测试导游", "13800138000", false, "active"),
+                teamGuide(1001L, "备用导游", "13900139000", true, "active")
+        ));
+        when(orderMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                teamOrder(1001L, "测试地接社", "confirmed", "normal"),
+                teamOrder(1001L, "游天下", "pending", "merge_child"),
+                teamOrder(1001L, "测试地接社", "confirmed", "normal"),
+                teamOrder(1001L, "已取消客户", "cancelled", "normal"),
+                teamOrder(1001L, "拼团来源客户", "confirmed", "merge_source")
+        ));
 
         var result = service.globalPage(
                 1L,
                 "sanpin",
+                null,
                 null,
                 null,
                 null,
@@ -1094,8 +1147,76 @@ class SalesTeamScheduleServiceTest {
         assertThat(item.departurePlace()).isEqualTo("浙江省杭州市西湖区");
         assertThat(item.totalSeats()).isEqualTo(30);
         assertThat(item.usedSeats()).isEqualTo(4);
+        assertThat(item.customerSummary()).isEqualTo("测试地接社、游天下");
+        assertThat(item.guideSummary()).isEqualTo("测试导游[Tel:13800138000]、备用导游[Tel:13900139000]");
+        assertThat(item.guidePlan()).isEqualTo("confirmed");
+        assertThat(item.trafficPlan()).isEqualTo("confirmed");
+        assertThat(item.hotelPlan()).isEqualTo("pending");
+        assertThat(item.vehiclePlan()).isEqualTo("none");
+        assertThat(item.scenicPlan()).isEqualTo("none");
         verify(productMapper, times(1)).selectList(any(Wrapper.class));
+        verify(orderMapper, times(1)).selectList(any(Wrapper.class));
         verify(priceMapper, never()).selectList(any(Wrapper.class));
+        verify(teamArrangementMapper, times(1)).selectList(any(Wrapper.class));
+        verify(sectionStatusMapper, times(1)).selectList(any(Wrapper.class));
+        verify(guideMapper, times(1)).selectList(any(Wrapper.class));
+    }
+
+    @Test
+    void globalTeamPageShouldApplyAdvancedSearchFilters() {
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesTeamScheduleService service = new SalesTeamScheduleService(
+                mock(SalesProductMapper.class),
+                null,
+                null,
+                null,
+                null,
+                null,
+                teamMapper,
+                mock(SalesTeamPriceMapper.class),
+                mock(SalesTeamStatusLogMapper.class),
+                null,
+                null,
+                mock(SalesBookingOrderMapper.class),
+                mock(DispatchTeamArrangementMapper.class),
+                null,
+                null,
+                mock(DispatchTeamArrangementSectionStatusMapper.class),
+                mock(DispatchTeamGuideMapper.class)
+        );
+        ArgumentCaptor<Wrapper<SalesTeamEntity>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+        when(teamMapper.selectPage(any(), any(Wrapper.class)))
+                .thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<SalesTeamEntity>(1, 20, 0));
+
+        service.globalPage(
+                1L,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "王导",
+                "计调一部",
+                "confirmed",
+                LocalDate.of(2026, 7, 8),
+                1,
+                20
+        );
+
+        verify(teamMapper).selectPage(any(), wrapperCaptor.capture());
+        String sqlSegment = wrapperCaptor.getValue().getSqlSegment();
+        assertThat(sqlSegment).contains("dispatch_team_guides");
+        assertThat(sqlSegment).contains("guide_name");
+        assertThat(sqlSegment).contains("guide_mobile");
+        assertThat(sqlSegment).contains("department_name");
+        assertThat(sqlSegment).contains("sales_orders");
+        assertThat(sqlSegment).contains("status =");
+        assertThat(sqlSegment).contains("created_at");
     }
 
     @Test
@@ -1127,6 +1248,9 @@ class SalesTeamScheduleServiceTest {
         team.setUsedSeats(11);
         team.setRemainingSeats(20);
         team.setRemark("导游确认酒店和用车要求");
+        team.setPerCapitaPitAmount(new BigDecimal("10"));
+        team.setOptionalMarkupRate(new BigDecimal("70"));
+        team.setPerCapitaShoppingAmount(new BigDecimal("600"));
         SalesProductDescriptionEntity description = new SalesProductDescriptionEntity();
         description.setProductId(88L);
         description.setProductDescription("产品说明正文");
@@ -1166,6 +1290,9 @@ class SalesTeamScheduleServiceTest {
         assertThat(result.content().productDescription()).isEqualTo("产品说明正文");
         assertThat(result.content().bookingNotice()).isEqualTo("收客须知正文");
         assertThat(result.content().internalRemark()).isEqualTo("导游确认酒店和用车要求");
+        assertThat(result.content().perCapitaPitAmount()).isEqualByComparingTo("10");
+        assertThat(result.content().optionalMarkupRate()).isEqualByComparingTo("70");
+        assertThat(result.content().perCapitaShoppingAmount()).isEqualByComparingTo("600");
         assertThat(result.prices()).extracting("customerCategoryName").containsExactly("默认", "B类客户");
         assertThat(result.itineraryDays()).extracting("dayNo").containsExactly(1, 2, 3);
         assertThat(result.itineraryDays().getFirst().dayTitle()).isEqualTo("DAY-1：杭州接站");
@@ -1204,6 +1331,9 @@ class SalesTeamScheduleServiceTest {
         latest.setUsedSeats(2);
         latest.setRemainingSeats(28);
         latest.setRemark("顶部信息已确认");
+        latest.setPerCapitaPitAmount(new BigDecimal("10"));
+        latest.setOptionalMarkupRate(new BigDecimal("70"));
+        latest.setPerCapitaShoppingAmount(new BigDecimal("600"));
         when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(current, latest);
         when(teamMapper.update(any(SalesTeamEntity.class), any(Wrapper.class))).thenReturn(1);
         ArgumentCaptor<SalesTeamEntity> updateCaptor = ArgumentCaptor.forClass(SalesTeamEntity.class);
@@ -1223,7 +1353,10 @@ class SalesTeamScheduleServiceTest {
                         "王全陪",
                         null,
                         null,
-                        "顶部信息已确认"
+                        "顶部信息已确认",
+                        new BigDecimal("10"),
+                        new BigDecimal("70"),
+                        new BigDecimal("600")
                 ),
                 1L,
                 "admin"
@@ -1240,9 +1373,15 @@ class SalesTeamScheduleServiceTest {
                 "operator_employee_name",
                 "escort_employee_id",
                 "escort_employee_name",
-                "remark"
+                "remark",
+                "per_capita_pit_amount",
+                "optional_markup_rate",
+                "per_capita_shopping_amount"
         );
         assertThat(response.teamType()).isEqualTo("zhengtuan");
+        assertThat(response.perCapitaPitAmount()).isEqualByComparingTo("10");
+        assertThat(response.optionalMarkupRate()).isEqualByComparingTo("70");
+        assertThat(response.perCapitaShoppingAmount()).isEqualByComparingTo("600");
     }
 
     @Test
@@ -1283,7 +1422,10 @@ class SalesTeamScheduleServiceTest {
                         "",
                         null,
                         null,
-                        ""
+                        "",
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO
                 ),
                 1L,
                 "admin"
@@ -1299,7 +1441,10 @@ class SalesTeamScheduleServiceTest {
                 "operator_employee_name",
                 "escort_employee_id",
                 "escort_employee_name",
-                "remark"
+                "remark",
+                "per_capita_pit_amount",
+                "optional_markup_rate",
+                "per_capita_shopping_amount"
         );
     }
 
@@ -1411,6 +1556,55 @@ class SalesTeamScheduleServiceTest {
         line.setSortOrder(1);
         line.setIsDeleted(false);
         return line;
+    }
+
+    private DispatchTeamArrangementEntity teamArrangement(Long teamId, String arrangementType, boolean confirmed, String status) {
+        DispatchTeamArrangementEntity entity = new DispatchTeamArrangementEntity();
+        entity.setTenantId(1L);
+        entity.setTeamId(teamId);
+        entity.setArrangementType(arrangementType);
+        entity.setConfirmed(confirmed);
+        entity.setStatus(status);
+        entity.setIsDeleted(false);
+        return entity;
+    }
+
+    private DispatchTeamGuideEntity teamGuide(Long teamId, boolean tentative, String status) {
+        return teamGuide(teamId, "测试导游", null, tentative, status);
+    }
+
+    private DispatchTeamGuideEntity teamGuide(Long teamId, String guideName, String guideMobile, boolean tentative, String status) {
+        DispatchTeamGuideEntity entity = new DispatchTeamGuideEntity();
+        entity.setTenantId(1L);
+        entity.setTeamId(teamId);
+        entity.setGuideId(66L);
+        entity.setGuideName(guideName);
+        entity.setGuideMobile(guideMobile);
+        entity.setIsTentative(tentative);
+        entity.setStatus(status);
+        entity.setIsDeleted(false);
+        return entity;
+    }
+
+    private SalesBookingOrderEntity teamOrder(Long teamId, String customerName, String status, String orderRole) {
+        SalesBookingOrderEntity entity = new SalesBookingOrderEntity();
+        entity.setTenantId(1L);
+        entity.setTeamId(teamId);
+        entity.setCustomerName(customerName);
+        entity.setStatus(status);
+        entity.setOrderRole(orderRole);
+        entity.setIsDeleted(false);
+        return entity;
+    }
+
+    private DispatchTeamArrangementSectionStatusEntity teamSectionStatus(Long teamId, String arrangementType, String status) {
+        DispatchTeamArrangementSectionStatusEntity entity = new DispatchTeamArrangementSectionStatusEntity();
+        entity.setTenantId(1L);
+        entity.setTeamId(teamId);
+        entity.setArrangementType(arrangementType);
+        entity.setStatus(status);
+        entity.setIsDeleted(false);
+        return entity;
     }
 
     private SalesTeamEntity existingTeam(String teamNo) {

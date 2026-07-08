@@ -77,11 +77,9 @@ public class MenuController {
                 Map.of(
                         "name", "Dispatch",
                         "path", "/dispatch",
-                        "redirect", "/dispatch/room-status",
+                        "redirect", "/dispatch/vehicle-quote",
                         "meta", Map.of("title", "计调操作", "icon", "lucide:clipboard-check", "order", 4),
                         "children", List.of(
-                                Map.of("name", "RoomStatus", "path", "/dispatch/room-status", "component", "/dispatch/room-status/index",
-                                        "meta", Map.of("title", "自控房源与房态库存", "icon", "lucide:bed")),
                                 Map.of("name", "VehicleQuote", "path", "/dispatch/vehicle-quote", "component", "/dispatch/vehicle-quote/index",
                                         "meta", Map.of("title", "用车报价测算", "icon", "lucide:calculator"))
                         )

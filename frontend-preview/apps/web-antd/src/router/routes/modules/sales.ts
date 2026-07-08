@@ -21,6 +21,7 @@ const routes: RouteRecordRaw[] = [
     children: [
       { name: 'Product', path: '/sales/product', component: ProductPage, meta: { icon: 'lucide:package', title: '产品管理' } },
       { name: 'SalesTeam', path: '/sales/team', component: TeamPage, meta: { icon: 'lucide:users-round', title: '团队管理' } },
+      { name: 'SalesOrder', path: '/sales/order', component: SalesOrderPage, meta: { icon: 'lucide:file-text', title: '订单管理' } },
       { name: 'ProductCreate', path: '/sales/product/create', component: ProductFormPage, meta: { hideInMenu: true, title: '新增产品' } },
       { name: 'ProductEdit', path: '/sales/product/edit/:id', component: ProductFormPage, meta: { hideInMenu: true, title: '修改产品' } },
       { name: 'ProductSchedule', path: '/sales/product/schedule/:id', component: ProductSchedulePage, meta: { hideInMenu: true, title: '团期管理' } },
@@ -32,7 +33,6 @@ const routes: RouteRecordRaw[] = [
       { name: 'SalesTeamOperation', path: '/sales/team/operation/:id', component: TeamOperationPage, meta: { hideInMenu: true, title: '团队操作' } },
       { name: 'SalesTeamBookingCreate', path: '/sales/team/booking/:teamId', component: SalesBookingFormPage, meta: { hideInMenu: true, title: '新增收客订单' } },
       { name: 'SalesTeamBookingEdit', path: '/sales/team/booking/:teamId/:orderId', component: SalesBookingFormPage, meta: { hideInMenu: true, title: '修改收客订单' } },
-      { name: 'SalesOrder', path: '/sales/order', component: SalesOrderPage, meta: { hideInMenu: true, title: '订单管理' } },
     ],
   },
 ];

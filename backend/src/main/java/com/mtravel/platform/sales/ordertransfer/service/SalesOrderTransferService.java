@@ -99,6 +99,7 @@ public class SalesOrderTransferService {
         SalesTeamEntity sourceTeam = requireTeam(currentTeamId, tenantId);
         SalesTeamEntity targetTeam = requireTargetTeam(request.targetTeamId(), tenantId);
         assertTeamCanReceive(targetTeam);
+        assertMergeTargetTeamType(targetTeam);
         for (Long orderId : orderIds) {
             SalesBookingOrderEntity sourceOrder = requireOrder(orderId, tenantId);
             assertOrderCanMerge(sourceOrder, currentTeamId);
@@ -504,6 +505,20 @@ public class SalesOrderTransferService {
         }
         if (SalesTeamStatus.STOPPED.getValue().equals(team.getStatus())) {
             throw new BizException("停售团队不能接收订单");
+        }
+    }
+
+    /**
+     * 校验拼团目标团队类型。
+     *
+     * <p>老系统拼团目标列表只提供散拼团队。这里在服务层同步兜底，避免绕过前端接口把订单拼到整团、
+     * 散团或单项团队，导致后续团队收入、成本和毛利归属混乱。</p>
+     *
+     * @param team 待接收拼团订单的目标团队
+     */
+    private void assertMergeTargetTeamType(SalesTeamEntity team) {
+        if (!SalesTeamType.SANPIN.getValue().equals(team.getTeamType())) {
+            throw new BizException("拼团目标团队必须是散拼团队");
         }
     }
 

@@ -3,16 +3,21 @@ package com.mtravel.platform.dispatch.teamarrangement.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.mtravel.platform.common.BizException;
+import com.mtravel.platform.dispatch.guide.entity.DispatchTeamGuideEntity;
+import com.mtravel.platform.dispatch.guide.mapper.DispatchTeamGuideMapper;
 import com.mtravel.platform.dispatch.teamarrangement.dto.TeamArrangementOrderAllocationResponse;
 import com.mtravel.platform.dispatch.teamarrangement.dto.TeamArrangementPriceLineRequest;
 import com.mtravel.platform.dispatch.teamarrangement.dto.TeamArrangementPriceLineResponse;
 import com.mtravel.platform.dispatch.teamarrangement.dto.TeamArrangementResponse;
 import com.mtravel.platform.dispatch.teamarrangement.dto.TeamArrangementSaveRequest;
 import com.mtravel.platform.dispatch.teamarrangement.dto.TeamArrangementSaveResponse;
+import com.mtravel.platform.dispatch.teamarrangement.dto.TeamArrangementSectionStatusResponse;
+import com.mtravel.platform.dispatch.teamarrangement.dto.TeamArrangementSummaryResponse;
 import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementEntity;
 import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementFlowRecordEntity;
 import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementOrderAllocationEntity;
 import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementPriceLineEntity;
+import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementSectionStatusEntity;
 import com.mtravel.platform.dispatch.teamarrangement.enums.DispatchArrangementAllocationMode;
 import com.mtravel.platform.dispatch.teamarrangement.enums.DispatchArrangementFlowType;
 import com.mtravel.platform.dispatch.teamarrangement.enums.DispatchArrangementSettlementType;
@@ -22,7 +27,12 @@ import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangem
 import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementMapper;
 import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementOrderAllocationMapper;
 import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementPriceLineMapper;
+import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementSectionStatusMapper;
+import com.mtravel.platform.finance.shopping.entity.FinanceShoppingSettlementEntity;
+import com.mtravel.platform.finance.shopping.mapper.FinanceShoppingSettlementMapper;
 import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderEntity;
+import com.mtravel.platform.sales.booking.order.enums.SalesBookingOrderRole;
+import com.mtravel.platform.sales.booking.order.enums.SalesBookingOrderStatus;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderMapper;
 import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
 import com.mtravel.platform.sales.team.mapper.SalesTeamMapper;
@@ -34,9 +44,11 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
@@ -53,16 +65,39 @@ public class DispatchTeamArrangementService {
 
     private static final BigDecimal ZERO = BigDecimal.ZERO.setScale(2);
     private static final String STATUS_ACTIVE = "active";
+    private static final List<String> SECTION_STATUSES = List.of("pending", "none", "done");
     private static final String STAGE_ARRANGEMENT = "arrangement";
     private static final String FLOW_STATUS_SYNCED = "synced";
     private static final String FLOW_SYNC_NO_GUIDE_REPORT = "no_guide_report";
+    private static final List<String> SUMMARY_TYPES = List.of(
+            "traffic", "hotel", "vehicle", "scenic", "meal", "other",
+            "ground_agent", "extra_fee", "optional", "shopping"
+    );
+    private static final List<String> REGULAR_COST_TYPES = List.of(
+            "traffic", "hotel", "vehicle", "scenic", "meal", "other", "ground_agent", "extra_fee"
+    );
+    private static final Map<String, String> SUMMARY_TYPE_LABELS = Map.ofEntries(
+            Map.entry("traffic", "大交通"),
+            Map.entry("hotel", "住宿"),
+            Map.entry("vehicle", "用车"),
+            Map.entry("scenic", "景区"),
+            Map.entry("meal", "用餐"),
+            Map.entry("other", "其它"),
+            Map.entry("ground_agent", "地接"),
+            Map.entry("extra_fee", "附加"),
+            Map.entry("optional", "自费"),
+            Map.entry("shopping", "购物")
+    );
 
     private final DispatchTeamArrangementMapper arrangementMapper;
     private final DispatchTeamArrangementPriceLineMapper priceLineMapper;
     private final DispatchTeamArrangementOrderAllocationMapper allocationMapper;
     private final DispatchTeamArrangementFlowRecordMapper flowRecordMapper;
+    private final DispatchTeamArrangementSectionStatusMapper sectionStatusMapper;
     private final SalesTeamMapper teamMapper;
     private final SalesBookingOrderMapper orderMapper;
+    private final DispatchTeamGuideMapper guideMapper;
+    private final FinanceShoppingSettlementMapper shoppingSettlementMapper;
 
     /**
      * 构造正式团队安排成本服务。
@@ -75,12 +110,69 @@ public class DispatchTeamArrangementService {
             SalesTeamMapper teamMapper,
             SalesBookingOrderMapper orderMapper
     ) {
+        this(
+                arrangementMapper,
+                priceLineMapper,
+                allocationMapper,
+                flowRecordMapper,
+                null,
+                teamMapper,
+                orderMapper,
+                null,
+                null
+        );
+    }
+
+    /**
+     * 构造正式团队安排成本服务。
+     */
+    public DispatchTeamArrangementService(
+            DispatchTeamArrangementMapper arrangementMapper,
+            DispatchTeamArrangementPriceLineMapper priceLineMapper,
+            DispatchTeamArrangementOrderAllocationMapper allocationMapper,
+            DispatchTeamArrangementFlowRecordMapper flowRecordMapper,
+            DispatchTeamArrangementSectionStatusMapper sectionStatusMapper,
+            SalesTeamMapper teamMapper,
+            SalesBookingOrderMapper orderMapper,
+            DispatchTeamGuideMapper guideMapper
+    ) {
+        this(
+                arrangementMapper,
+                priceLineMapper,
+                allocationMapper,
+                flowRecordMapper,
+                sectionStatusMapper,
+                teamMapper,
+                orderMapper,
+                guideMapper,
+                null
+        );
+    }
+
+    /**
+     * 构造正式团队安排成本服务。
+     */
+    @Autowired
+    public DispatchTeamArrangementService(
+            DispatchTeamArrangementMapper arrangementMapper,
+            DispatchTeamArrangementPriceLineMapper priceLineMapper,
+            DispatchTeamArrangementOrderAllocationMapper allocationMapper,
+            DispatchTeamArrangementFlowRecordMapper flowRecordMapper,
+            DispatchTeamArrangementSectionStatusMapper sectionStatusMapper,
+            SalesTeamMapper teamMapper,
+            SalesBookingOrderMapper orderMapper,
+            DispatchTeamGuideMapper guideMapper,
+            FinanceShoppingSettlementMapper shoppingSettlementMapper
+    ) {
         this.arrangementMapper = arrangementMapper;
         this.priceLineMapper = priceLineMapper;
         this.allocationMapper = allocationMapper;
         this.flowRecordMapper = flowRecordMapper;
+        this.sectionStatusMapper = sectionStatusMapper;
         this.teamMapper = teamMapper;
         this.orderMapper = orderMapper;
+        this.guideMapper = guideMapper;
+        this.shoppingSettlementMapper = shoppingSettlementMapper;
     }
 
     /**
@@ -153,6 +245,99 @@ public class DispatchTeamArrangementService {
     }
 
     /**
+     * 查询团队安排页后端权威金额汇总。
+     *
+     * <p>团队安排页的应收、成本总览和预算利润属于敏感经营金额，不能由前端按页面数组自行聚合。
+     * 这里统一套用老系统预算利润口径，并过滤取消订单和拼出来源订单，避免重复计入收入。</p>
+     *
+     * @param teamId 团队 ID
+     * @param tenantId 当前租户 ID
+     * @return 团队安排页金额汇总
+     */
+    public TeamArrangementSummaryResponse summary(Long teamId, Long tenantId) {
+        requireTeam(teamId, tenantId);
+        List<SalesBookingOrderEntity> orders = effectiveOrders(teamId, tenantId);
+        List<DispatchTeamArrangementEntity> arrangements = summaryArrangements(teamId, tenantId);
+        List<DispatchTeamGuideEntity> guides = summaryGuides(teamId, tenantId);
+
+        BigDecimal orderReceivable = sumOrders(orders, SalesBookingOrderEntity::getReceivableAmount);
+        BigDecimal orderReceived = sumOrders(orders, SalesBookingOrderEntity::getReceivedAmount);
+        BigDecimal orderBalance = sumOrders(orders, SalesBookingOrderEntity::getBalanceAmount);
+        BigDecimal regularCost = arrangements.stream()
+                .filter(item -> REGULAR_COST_TYPES.contains(item.getArrangementType()))
+                .map(this::arrangementTotal)
+                .reduce(ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal optionalProfit = arrangements.stream()
+                .filter(item -> "optional".equals(item.getArrangementType()))
+                .map(item -> money(item.getSaleAmount())
+                        .subtract(money(item.getCostAmount()))
+                        .subtract(money(item.getGuideCommissionAmount())))
+                .reduce(ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal shoppingProfit = shoppingProfitAmount(teamId, tenantId, arrangements);
+        BigDecimal guideFee = sumGuides(guides, DispatchTeamGuideEntity::getGuideFee);
+        BigDecimal guideOperationFee = sumGuides(guides, DispatchTeamGuideEntity::getOperationFee);
+        BigDecimal guideImprest = sumGuides(guides, DispatchTeamGuideEntity::getImprestAmount);
+        BigDecimal budgetProfit = orderReceivable
+                .add(optionalProfit)
+                .add(shoppingProfit)
+                .subtract(regularCost)
+                .subtract(guideFee)
+                .setScale(2, RoundingMode.HALF_UP);
+
+        return new TeamArrangementSummaryResponse(
+                orderReceivable,
+                orderReceived,
+                orderBalance,
+                regularCost,
+                optionalProfit,
+                shoppingProfit,
+                guideFee,
+                guideOperationFee,
+                guideImprest,
+                budgetProfit,
+                costColumns(arrangements, guideFee, guideOperationFee, guideImprest),
+                sectionSummaries(arrangements)
+        );
+    }
+
+    /**
+     * 计算购物公司利润。
+     *
+     * <p>购物店反馈完成并生成结算快照后，优先使用结算快照中的内账利润。还没有结算快照时，
+     * 回退到团队安排中的购物预估利润，保证排团阶段预算利润仍可展示。</p>
+     */
+    private BigDecimal shoppingProfitAmount(
+            Long teamId,
+            Long tenantId,
+            List<DispatchTeamArrangementEntity> arrangements
+    ) {
+        if (shoppingSettlementMapper != null) {
+            FinanceShoppingSettlementEntity settlement = shoppingSettlementMapper.selectOne(
+                    new QueryWrapper<FinanceShoppingSettlementEntity>()
+                            .eq("tenant_id", tenantId)
+                            .eq("team_id", teamId)
+                            .eq("is_deleted", false)
+                            .eq("status", STATUS_ACTIVE)
+                            .orderByDesc("calculated_at")
+                            .orderByDesc("id")
+                            .last("limit 1")
+            );
+            if (settlement != null) {
+                return money(settlement.getInternalCompanyProfitAmount());
+            }
+        }
+        return arrangements.stream()
+                .filter(item -> "shopping".equals(item.getArrangementType()))
+                .map(item -> money(item.getHeadFeeAmount())
+                        .add(money(item.getCompanyRebateAmount()))
+                        .subtract(money(item.getGuideCommissionAmount())))
+                .reduce(ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /**
      * 保存正式团队安排。
      *
      * @param teamId 团队 ID
@@ -215,6 +400,75 @@ public class DispatchTeamArrangementService {
             throw new BizException("该安排已进入人工导游报账或审核流程，不能直接删除");
         }
         softDeleteArrangementTree(teamId, arrangementId, tenantId, operator);
+    }
+
+    /**
+     * 查询团队安排分类流程状态。
+     *
+     * @param teamId 团队 ID
+     * @param tenantId 当前租户 ID
+     * @return 已保存的分类流程状态
+     */
+    public List<TeamArrangementSectionStatusResponse> listSectionStatuses(Long teamId, Long tenantId) {
+        requireTeam(teamId, tenantId);
+        if (sectionStatusMapper == null) {
+            return List.of();
+        }
+        return sectionStatusMapper.selectList(baseSectionStatusQuery(tenantId)
+                        .eq("team_id", teamId)
+                        .orderByAsc("arrangement_type")
+                        .orderByAsc("id"))
+                .stream()
+                .map(TeamArrangementSectionStatusResponse::fromEntity)
+                .toList();
+    }
+
+    /**
+     * 保存团队安排分类流程状态。
+     *
+     * <p>该状态驱动团队管理列表的绿色/黄色标记；资源确认字段 confirmed 只表示供应商确认。</p>
+     */
+    @Transactional
+    public TeamArrangementSectionStatusResponse saveSectionStatus(
+            Long teamId,
+            String arrangementType,
+            String status,
+            Long tenantId,
+            String operator
+    ) {
+        SalesTeamEntity team = requireTeam(teamId, tenantId);
+        DispatchArrangementType type = DispatchArrangementType.fromValue(arrangementType);
+        String cleanStatus = cleanRequired(status);
+        if (!SECTION_STATUSES.contains(cleanStatus)) {
+            throw new BizException("团队安排分类状态不合法");
+        }
+        if (sectionStatusMapper == null) {
+            throw new BizException("团队安排分类状态未接入");
+        }
+        DispatchTeamArrangementSectionStatusEntity current = sectionStatusMapper.selectOne(baseSectionStatusQuery(tenantId)
+                .eq("team_id", teamId)
+                .eq("arrangement_type", type.getValue()));
+        if (current == null) {
+            DispatchTeamArrangementSectionStatusEntity entity = new DispatchTeamArrangementSectionStatusEntity();
+            entity.setTenantId(tenantId);
+            entity.setTeamId(team.getId());
+            entity.setTeamNo(team.getTeamNo());
+            entity.setTeamType(team.getTeamType());
+            entity.setArrangementType(type.getValue());
+            entity.setStatus(cleanStatus);
+            entity.setCreatedBy(operator);
+            entity.setIsDeleted(false);
+            sectionStatusMapper.insert(entity);
+            return TeamArrangementSectionStatusResponse.fromEntity(entity);
+        }
+        DispatchTeamArrangementSectionStatusEntity update = new DispatchTeamArrangementSectionStatusEntity();
+        update.setStatus(cleanStatus);
+        sectionStatusMapper.update(update, new UpdateWrapper<DispatchTeamArrangementSectionStatusEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("id", current.getId())
+                .eq("is_deleted", false));
+        current.setStatus(cleanStatus);
+        return TeamArrangementSectionStatusResponse.fromEntity(current);
     }
 
     /** 保存多订单均摊成本，按旧系统口径拆成多条单订单成本记录。 */
@@ -547,6 +801,163 @@ public class DispatchTeamArrangementService {
         return ids.stream().map(orderById::get).filter(item -> item != null).toList();
     }
 
+    /** 查询团队安排金额汇总使用的有效订单。 */
+    private List<SalesBookingOrderEntity> effectiveOrders(Long teamId, Long tenantId) {
+        List<SalesBookingOrderEntity> orders = orderMapper.selectList(new QueryWrapper<SalesBookingOrderEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("team_id", teamId)
+                .eq("is_deleted", false)
+                .orderByAsc("id"));
+        return Objects.requireNonNullElse(orders, List.<SalesBookingOrderEntity>of())
+                .stream()
+                .filter(this::isEffectiveOrder)
+                .toList();
+    }
+
+    /** 订单收入统计只包含未取消的普通订单和拼入订单，拼出来源订单只作留痕不重复计入。 */
+    private boolean isEffectiveOrder(SalesBookingOrderEntity order) {
+        String status = order.getStatus();
+        boolean activeStatus = Objects.equals(status, SalesBookingOrderStatus.PENDING.value())
+                || Objects.equals(status, SalesBookingOrderStatus.CONFIRMED.value());
+        String role = StringUtils.hasText(order.getOrderRole())
+                ? order.getOrderRole()
+                : SalesBookingOrderRole.NORMAL.value();
+        boolean activeRole = Objects.equals(role, SalesBookingOrderRole.NORMAL.value())
+                || Objects.equals(role, SalesBookingOrderRole.MERGE_CHILD.value());
+        return activeStatus && activeRole;
+    }
+
+    /** 查询团队安排金额汇总使用的安排明细。 */
+    private List<DispatchTeamArrangementEntity> summaryArrangements(Long teamId, Long tenantId) {
+        List<DispatchTeamArrangementEntity> arrangements = arrangementMapper.selectList(baseArrangementQuery(tenantId)
+                .eq("team_id", teamId)
+                .orderByAsc("arrangement_type")
+                .orderByAsc("business_date")
+                .orderByAsc("id"));
+        return Objects.requireNonNullElse(arrangements, List.of());
+    }
+
+    /** 查询团队安排金额汇总使用的导游费用。 */
+    private List<DispatchTeamGuideEntity> summaryGuides(Long teamId, Long tenantId) {
+        if (guideMapper == null) {
+            return List.of();
+        }
+        List<DispatchTeamGuideEntity> guides = guideMapper.selectList(new QueryWrapper<DispatchTeamGuideEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("team_id", teamId)
+                .eq("is_deleted", false)
+                .eq("status", STATUS_ACTIVE)
+                .orderByAsc("id"));
+        return Objects.requireNonNullElse(guides, List.of());
+    }
+
+    /** 生成成本总览列，现结/挂账由后端统一汇总。 */
+    private List<TeamArrangementSummaryResponse.CostColumn> costColumns(
+            List<DispatchTeamArrangementEntity> arrangements,
+            BigDecimal guideFee,
+            BigDecimal guideOperationFee,
+            BigDecimal guideImprest
+    ) {
+        List<TeamArrangementSummaryResponse.CostColumn> base = SUMMARY_TYPES.stream()
+                .map(type -> new TeamArrangementSummaryResponse.CostColumn(
+                        type,
+                        SUMMARY_TYPE_LABELS.getOrDefault(type, type),
+                        sumArrangements(arrangements, type, DispatchTeamArrangementEntity::getCashAmount),
+                        sumArrangements(arrangements, type, DispatchTeamArrangementEntity::getCreditAmount)
+                ))
+                .toList();
+        BigDecimal cashTotal = base.stream()
+                .map(TeamArrangementSummaryResponse.CostColumn::cashAmount)
+                .reduce(ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal creditTotal = base.stream()
+                .map(TeamArrangementSummaryResponse.CostColumn::creditAmount)
+                .reduce(ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+        List<TeamArrangementSummaryResponse.CostColumn> result = new ArrayList<>(base);
+        result.add(new TeamArrangementSummaryResponse.CostColumn("total", "合计", cashTotal, creditTotal));
+        result.add(new TeamArrangementSummaryResponse.CostColumn("guide_service", "导服", guideFee, ZERO));
+        result.add(new TeamArrangementSummaryResponse.CostColumn("operation_fee", "操作费", guideOperationFee, ZERO));
+        result.add(new TeamArrangementSummaryResponse.CostColumn("reserve_fund", "备用金", guideImprest, ZERO));
+        return result;
+    }
+
+    /** 生成每个安排分类的小计。 */
+    private List<TeamArrangementSummaryResponse.SectionSummary> sectionSummaries(
+            List<DispatchTeamArrangementEntity> arrangements
+    ) {
+        return SUMMARY_TYPES.stream()
+                .map(type -> {
+                    List<DispatchTeamArrangementEntity> records = arrangements.stream()
+                            .filter(item -> type.equals(item.getArrangementType()))
+                            .toList();
+                    BigDecimal costAmount = records.stream()
+                            .map(this::arrangementTotal)
+                            .reduce(ZERO, BigDecimal::add)
+                            .setScale(2, RoundingMode.HALF_UP);
+                    return new TeamArrangementSummaryResponse.SectionSummary(
+                            type,
+                            records.size(),
+                            costAmount,
+                            sumMoney(records, DispatchTeamArrangementEntity::getCashAmount),
+                            sumMoney(records, DispatchTeamArrangementEntity::getCreditAmount)
+                    );
+                })
+                .toList();
+    }
+
+    /** 读取安排合计金额，优先 total_amount，兼容旧数据 cost_amount。 */
+    private BigDecimal arrangementTotal(DispatchTeamArrangementEntity item) {
+        BigDecimal total = money(item.getTotalAmount());
+        return total.compareTo(ZERO) != 0 ? total : money(item.getCostAmount());
+    }
+
+    private BigDecimal sumOrders(
+            List<SalesBookingOrderEntity> orders,
+            Function<SalesBookingOrderEntity, BigDecimal> mapper
+    ) {
+        return orders.stream()
+                .map(mapper)
+                .map(this::money)
+                .reduce(ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal sumGuides(
+            List<DispatchTeamGuideEntity> guides,
+            Function<DispatchTeamGuideEntity, BigDecimal> mapper
+    ) {
+        return guides.stream()
+                .map(mapper)
+                .map(this::money)
+                .reduce(ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal sumArrangements(
+            List<DispatchTeamArrangementEntity> arrangements,
+            String type,
+            Function<DispatchTeamArrangementEntity, BigDecimal> mapper
+    ) {
+        return arrangements.stream()
+                .filter(item -> type.equals(item.getArrangementType()))
+                .map(mapper)
+                .map(this::money)
+                .reduce(ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal sumMoney(
+            List<DispatchTeamArrangementEntity> arrangements,
+            Function<DispatchTeamArrangementEntity, BigDecimal> mapper
+    ) {
+        return arrangements.stream()
+                .map(mapper)
+                .map(this::money)
+                .reduce(ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+    }
+
     /** 按规则拆分多订单均摊金额。 */
     private List<BigDecimal> splitAmounts(BigDecimal total, List<SalesBookingOrderEntity> orders, DispatchArrangementSplitMode splitMode) {
         List<BigDecimal> result = new ArrayList<>();
@@ -628,6 +1039,12 @@ public class DispatchTeamArrangementService {
 
     private QueryWrapper<DispatchTeamArrangementEntity> baseArrangementQuery(Long tenantId) {
         return new QueryWrapper<DispatchTeamArrangementEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false);
+    }
+
+    private QueryWrapper<DispatchTeamArrangementSectionStatusEntity> baseSectionStatusQuery(Long tenantId) {
+        return new QueryWrapper<DispatchTeamArrangementSectionStatusEntity>()
                 .eq("tenant_id", tenantId)
                 .eq("is_deleted", false);
     }

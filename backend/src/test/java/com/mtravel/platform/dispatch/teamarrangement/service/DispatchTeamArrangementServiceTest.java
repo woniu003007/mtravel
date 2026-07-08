@@ -3,26 +3,35 @@ package com.mtravel.platform.dispatch.teamarrangement.service;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.AbstractWrapper;
 import com.mtravel.platform.common.BizException;
+import com.mtravel.platform.dispatch.guide.entity.DispatchTeamGuideEntity;
+import com.mtravel.platform.dispatch.guide.mapper.DispatchTeamGuideMapper;
+import com.mtravel.platform.dispatch.teamarrangement.dto.TeamArrangementSummaryResponse;
 import com.mtravel.platform.dispatch.teamarrangement.dto.TeamArrangementPriceLineRequest;
 import com.mtravel.platform.dispatch.teamarrangement.dto.TeamArrangementSaveRequest;
 import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementEntity;
 import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementFlowRecordEntity;
 import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementOrderAllocationEntity;
 import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementPriceLineEntity;
+import com.mtravel.platform.dispatch.teamarrangement.entity.DispatchTeamArrangementSectionStatusEntity;
 import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementFlowRecordMapper;
 import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementMapper;
 import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementOrderAllocationMapper;
 import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementPriceLineMapper;
+import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementSectionStatusMapper;
+import com.mtravel.platform.finance.shopping.entity.FinanceShoppingSettlementEntity;
+import com.mtravel.platform.finance.shopping.mapper.FinanceShoppingSettlementMapper;
 import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderEntity;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderMapper;
 import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
 import com.mtravel.platform.sales.team.mapper.SalesTeamMapper;
+import java.lang.reflect.Constructor;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.stubbing.Answer;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -39,6 +48,50 @@ import static org.mockito.Mockito.when;
  * 后续应付、导游报账、计调审核、财务审核和利润统计，不能只测试页面能保存。</p>
  */
 class DispatchTeamArrangementServiceTest {
+
+    @Test
+    void runtimeConstructorShouldBeAutowiredForSpringInjection() throws NoSuchMethodException {
+        Constructor<DispatchTeamArrangementService> constructor = DispatchTeamArrangementService.class.getConstructor(
+                DispatchTeamArrangementMapper.class,
+                DispatchTeamArrangementPriceLineMapper.class,
+                DispatchTeamArrangementOrderAllocationMapper.class,
+                DispatchTeamArrangementFlowRecordMapper.class,
+                DispatchTeamArrangementSectionStatusMapper.class,
+                SalesTeamMapper.class,
+                SalesBookingOrderMapper.class,
+                DispatchTeamGuideMapper.class,
+                FinanceShoppingSettlementMapper.class
+        );
+
+        assertThat(constructor.getAnnotation(Autowired.class)).isNotNull();
+    }
+
+    @Test
+    void saveSectionStatusShouldPersistAndListByTeam() {
+        DispatchTeamArrangementMapper arrangementMapper = mock(DispatchTeamArrangementMapper.class);
+        DispatchTeamArrangementSectionStatusMapper sectionStatusMapper = mock(DispatchTeamArrangementSectionStatusMapper.class);
+        DispatchTeamArrangementService service = service(
+                arrangementMapper,
+                mock(DispatchTeamArrangementPriceLineMapper.class),
+                mock(DispatchTeamArrangementOrderAllocationMapper.class),
+                mock(DispatchTeamArrangementFlowRecordMapper.class),
+                mock(SalesBookingOrderMapper.class),
+                sectionStatusMapper
+        );
+        when(sectionStatusMapper.selectOne(any(Wrapper.class))).thenReturn(null);
+        ArgumentCaptor<DispatchTeamArrangementSectionStatusEntity> statusCaptor =
+                ArgumentCaptor.forClass(DispatchTeamArrangementSectionStatusEntity.class);
+
+        service.saveSectionStatus(21L, "hotel", "done", 1L, "dispatcher");
+
+        verify(sectionStatusMapper).insert(statusCaptor.capture());
+        DispatchTeamArrangementSectionStatusEntity saved = statusCaptor.getValue();
+        assertThat(saved.getTeamId()).isEqualTo(21L);
+        assertThat(saved.getTeamNo()).isEqualTo("CS-SP-BK-260701A");
+        assertThat(saved.getArrangementType()).isEqualTo("hotel");
+        assertThat(saved.getStatus()).isEqualTo("done");
+        assertThat(saved.getIsDeleted()).isFalse();
+    }
 
     @Test
     void saveShouldSplitMultiOrderAverageByOrderAndKeepBatchNo() {
@@ -293,12 +346,186 @@ class DispatchTeamArrangementServiceTest {
                 .contains("no_guide_report");
     }
 
+    @Test
+    void summaryShouldCalculateSensitiveMoneyOnBackend() {
+        DispatchTeamArrangementMapper arrangementMapper = mock(DispatchTeamArrangementMapper.class);
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        DispatchTeamGuideMapper guideMapper = mock(DispatchTeamGuideMapper.class);
+        DispatchTeamArrangementService service = service(
+                arrangementMapper,
+                mock(DispatchTeamArrangementPriceLineMapper.class),
+                mock(DispatchTeamArrangementOrderAllocationMapper.class),
+                mock(DispatchTeamArrangementFlowRecordMapper.class),
+                orderMapper,
+                guideMapper
+        );
+        when(orderMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                moneyOrder(101L, "1200", "800", "400", "normal", "confirmed"),
+                moneyOrder(102L, "300", "100", "200", "merge_child", "confirmed"),
+                moneyOrder(103L, "999", "0", "999", "merge_source", "confirmed"),
+                moneyOrder(104L, "888", "0", "888", "normal", "cancelled")
+        ));
+        when(arrangementMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                moneyArrangement("traffic", "600", "200", "400"),
+                moneyArrangement("hotel", "300", "0", "300"),
+                moneyArrangement("optional", "500", "0", "500", "900", "80", "0", "0", "0"),
+                moneyArrangement("shopping", "0", "0", "0", "0", "70", "50", "100", "20")
+        ));
+        when(guideMapper.selectList(any(Wrapper.class))).thenReturn(List.of(guide("0", "0", "0")));
+
+        TeamArrangementSummaryResponse summary = service.summary(21L, 1L);
+
+        assertThat(summary.orderReceivableAmount()).isEqualByComparingTo("1500.00");
+        assertThat(summary.orderReceivedAmount()).isEqualByComparingTo("900.00");
+        assertThat(summary.orderBalanceAmount()).isEqualByComparingTo("600.00");
+        assertThat(summary.regularCostAmount()).isEqualByComparingTo("900.00");
+        assertThat(summary.optionalCompanyProfitAmount()).isEqualByComparingTo("320.00");
+        assertThat(summary.shoppingCompanyProfitAmount()).isEqualByComparingTo("80.00");
+        assertThat(summary.guideFeeAmount()).isEqualByComparingTo("0.00");
+        assertThat(summary.budgetProfitAmount()).isEqualByComparingTo("1000.00");
+        assertThat(summary.costColumns())
+                .filteredOn(item -> "traffic".equals(item.key()))
+                .singleElement()
+                .satisfies(item -> {
+                    assertThat(item.cashAmount()).isEqualByComparingTo("200.00");
+                    assertThat(item.creditAmount()).isEqualByComparingTo("400.00");
+                });
+        assertThat(summary.costColumns())
+                .filteredOn(item -> "total".equals(item.key()))
+                .singleElement()
+                .satisfies(item -> {
+                    assertThat(item.cashAmount()).isEqualByComparingTo("200.00");
+                    assertThat(item.creditAmount()).isEqualByComparingTo("1200.00");
+                });
+        assertThat(summary.sectionSummaries())
+                .filteredOn(item -> "optional".equals(item.arrangementType()))
+                .singleElement()
+                .satisfies(item -> {
+                    assertThat(item.count()).isEqualTo(1);
+                    assertThat(item.costAmount()).isEqualByComparingTo("500.00");
+                    assertThat(item.creditAmount()).isEqualByComparingTo("500.00");
+                });
+    }
+
+    @Test
+    void summaryShouldPreferActiveShoppingSettlementProfitWhenAvailable() {
+        DispatchTeamArrangementMapper arrangementMapper = mock(DispatchTeamArrangementMapper.class);
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        DispatchTeamGuideMapper guideMapper = mock(DispatchTeamGuideMapper.class);
+        FinanceShoppingSettlementMapper shoppingSettlementMapper = mock(FinanceShoppingSettlementMapper.class);
+        DispatchTeamArrangementService service = service(
+                arrangementMapper,
+                mock(DispatchTeamArrangementPriceLineMapper.class),
+                mock(DispatchTeamArrangementOrderAllocationMapper.class),
+                mock(DispatchTeamArrangementFlowRecordMapper.class),
+                orderMapper,
+                mock(DispatchTeamArrangementSectionStatusMapper.class),
+                guideMapper,
+                shoppingSettlementMapper
+        );
+        when(orderMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                moneyOrder(101L, "1500", "900", "600", "normal", "confirmed")
+        ));
+        when(arrangementMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                moneyArrangement("traffic", "600", "200", "400"),
+                moneyArrangement("shopping", "0", "0", "0", "0", "70", "50", "100", "20")
+        ));
+        when(guideMapper.selectList(any(Wrapper.class))).thenReturn(List.of(guide("0", "0", "0")));
+        FinanceShoppingSettlementEntity settlement = new FinanceShoppingSettlementEntity();
+        settlement.setInternalCompanyProfitAmount(new BigDecimal("300.00"));
+        when(shoppingSettlementMapper.selectOne(any(Wrapper.class))).thenReturn(settlement);
+
+        TeamArrangementSummaryResponse summary = service.summary(21L, 1L);
+
+        assertThat(summary.shoppingCompanyProfitAmount()).isEqualByComparingTo("300.00");
+        assertThat(summary.budgetProfitAmount()).isEqualByComparingTo("1200.00");
+    }
+
     private DispatchTeamArrangementService service(
             DispatchTeamArrangementMapper arrangementMapper,
             DispatchTeamArrangementPriceLineMapper priceLineMapper,
             DispatchTeamArrangementOrderAllocationMapper allocationMapper,
             DispatchTeamArrangementFlowRecordMapper flowMapper,
             SalesBookingOrderMapper orderMapper
+    ) {
+        return service(
+                arrangementMapper,
+                priceLineMapper,
+                allocationMapper,
+                flowMapper,
+                orderMapper,
+                mock(DispatchTeamArrangementSectionStatusMapper.class)
+        );
+    }
+
+    private DispatchTeamArrangementService service(
+            DispatchTeamArrangementMapper arrangementMapper,
+            DispatchTeamArrangementPriceLineMapper priceLineMapper,
+            DispatchTeamArrangementOrderAllocationMapper allocationMapper,
+            DispatchTeamArrangementFlowRecordMapper flowMapper,
+            SalesBookingOrderMapper orderMapper,
+            DispatchTeamArrangementSectionStatusMapper sectionStatusMapper
+    ) {
+        return service(
+                arrangementMapper,
+                priceLineMapper,
+                allocationMapper,
+                flowMapper,
+                orderMapper,
+                sectionStatusMapper,
+                mock(DispatchTeamGuideMapper.class)
+        );
+    }
+
+    private DispatchTeamArrangementService service(
+            DispatchTeamArrangementMapper arrangementMapper,
+            DispatchTeamArrangementPriceLineMapper priceLineMapper,
+            DispatchTeamArrangementOrderAllocationMapper allocationMapper,
+            DispatchTeamArrangementFlowRecordMapper flowMapper,
+            SalesBookingOrderMapper orderMapper,
+            DispatchTeamGuideMapper guideMapper
+    ) {
+        return service(
+                arrangementMapper,
+                priceLineMapper,
+                allocationMapper,
+                flowMapper,
+                orderMapper,
+                mock(DispatchTeamArrangementSectionStatusMapper.class),
+                guideMapper
+        );
+    }
+
+    private DispatchTeamArrangementService service(
+            DispatchTeamArrangementMapper arrangementMapper,
+            DispatchTeamArrangementPriceLineMapper priceLineMapper,
+            DispatchTeamArrangementOrderAllocationMapper allocationMapper,
+            DispatchTeamArrangementFlowRecordMapper flowMapper,
+            SalesBookingOrderMapper orderMapper,
+            DispatchTeamArrangementSectionStatusMapper sectionStatusMapper,
+            DispatchTeamGuideMapper guideMapper
+    ) {
+        return service(
+                arrangementMapper,
+                priceLineMapper,
+                allocationMapper,
+                flowMapper,
+                orderMapper,
+                sectionStatusMapper,
+                guideMapper,
+                null
+        );
+    }
+
+    private DispatchTeamArrangementService service(
+            DispatchTeamArrangementMapper arrangementMapper,
+            DispatchTeamArrangementPriceLineMapper priceLineMapper,
+            DispatchTeamArrangementOrderAllocationMapper allocationMapper,
+            DispatchTeamArrangementFlowRecordMapper flowMapper,
+            SalesBookingOrderMapper orderMapper,
+            DispatchTeamArrangementSectionStatusMapper sectionStatusMapper,
+            DispatchTeamGuideMapper guideMapper,
+            FinanceShoppingSettlementMapper shoppingSettlementMapper
     ) {
         SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
         SalesTeamEntity team = new SalesTeamEntity();
@@ -320,8 +547,11 @@ class DispatchTeamArrangementServiceTest {
                 priceLineMapper,
                 allocationMapper,
                 flowMapper,
+                sectionStatusMapper,
                 teamMapper,
-                orderMapper
+                orderMapper,
+                guideMapper,
+                shoppingSettlementMapper
         );
     }
 
@@ -532,6 +762,63 @@ class DispatchTeamArrangementServiceTest {
         entity.setCustomerName("客户" + orderId);
         entity.setGuestCount(guestCount);
         entity.setStatus("confirmed");
+        entity.setIsDeleted(false);
+        return entity;
+    }
+
+    private SalesBookingOrderEntity moneyOrder(
+            Long orderId,
+            String receivable,
+            String received,
+            String balance,
+            String role,
+            String status
+    ) {
+        SalesBookingOrderEntity entity = order(orderId, 1);
+        entity.setReceivableAmount(new BigDecimal(receivable));
+        entity.setReceivedAmount(new BigDecimal(received));
+        entity.setBalanceAmount(new BigDecimal(balance));
+        entity.setOrderRole(role);
+        entity.setStatus(status);
+        return entity;
+    }
+
+    private DispatchTeamArrangementEntity moneyArrangement(String type, String total, String cash, String credit) {
+        return moneyArrangement(type, total, cash, credit, "0", "0", "0", "0", "0");
+    }
+
+    private DispatchTeamArrangementEntity moneyArrangement(
+            String type,
+            String total,
+            String cash,
+            String credit,
+            String sale,
+            String guideCommission,
+            String companyRebate,
+            String headFee,
+            String guideFee
+    ) {
+        DispatchTeamArrangementEntity entity = new DispatchTeamArrangementEntity();
+        entity.setArrangementType(type);
+        entity.setTotalAmount(new BigDecimal(total));
+        entity.setCostAmount(new BigDecimal(total));
+        entity.setCashAmount(new BigDecimal(cash));
+        entity.setCreditAmount(new BigDecimal(credit));
+        entity.setSaleAmount(new BigDecimal(sale));
+        entity.setGuideCommissionAmount(new BigDecimal(guideCommission));
+        entity.setCompanyRebateAmount(new BigDecimal(companyRebate));
+        entity.setHeadFeeAmount(new BigDecimal(headFee));
+        entity.setIsDeleted(false);
+        return entity;
+    }
+
+    private DispatchTeamGuideEntity guide(String guideFee, String operationFee, String imprestAmount) {
+        DispatchTeamGuideEntity entity = new DispatchTeamGuideEntity();
+        entity.setTeamId(21L);
+        entity.setGuideFee(new BigDecimal(guideFee));
+        entity.setOperationFee(new BigDecimal(operationFee));
+        entity.setImprestAmount(new BigDecimal(imprestAmount));
+        entity.setStatus("active");
         entity.setIsDeleted(false);
         return entity;
     }

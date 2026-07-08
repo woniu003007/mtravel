@@ -2,11 +2,14 @@ package com.mtravel.platform.sales.booking.order.controller;
 
 import com.mtravel.platform.common.ApiResponse;
 import com.mtravel.platform.common.ControllerSupport;
+import com.mtravel.platform.common.PageResult;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingFeeChangeCreateRequest;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingFeeChangeResponse;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingGuestImportPreviewResponse;
+import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderManageRowResponse;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderResponse;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderSaveRequest;
+import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderTaggingRequest;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingTeamDraftResponse;
 import com.mtravel.platform.sales.booking.order.service.SalesBookingOrderService;
 import com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse;
@@ -17,9 +20,12 @@ import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.List;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -88,6 +94,71 @@ public class SalesBookingOrderController extends ControllerSupport {
         return ApiResponse.ok(orderService.toOperationRows(
                 orderService.listOrdersByTeam(teamId, currentTenantId())
         ));
+    }
+
+    /**
+     * 查询全局订单管理列表。
+     *
+     * @return 订单管理分页行
+     */
+    @OperationLog(module = "销售管理", type = "查询")
+    @GetMapping("/orders/page")
+    public ApiResponse<PageResult<SalesBookingOrderManageRowResponse>> orderManagePage(
+            @RequestParam(required = false) String groupNo,
+            @RequestParam(required = false) String customerTeamNo,
+            @RequestParam(required = false) String buyerOrSalespersonKeyword,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(required = false) String productKeyword,
+            @RequestParam(required = false) String trafficOrPickupRemark,
+            @RequestParam(required = false) BigDecimal priceAll,
+            @RequestParam(required = false) String bookedBy,
+            @RequestParam(required = false) String guestKeyword,
+            @RequestParam(required = false) String teamType,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false, defaultValue = "booked") String orderByType,
+            @RequestParam(required = false) Boolean tagging,
+            @RequestParam(required = false) Boolean hasOrderFile,
+            @RequestParam(defaultValue = "1") long page,
+            @RequestParam(defaultValue = "20") long pageSize
+    ) {
+        return ApiResponse.ok(orderService.orderManagePage(
+                currentTenantId(),
+                groupNo,
+                customerTeamNo,
+                buyerOrSalespersonKeyword,
+                startDate,
+                endDate,
+                productKeyword,
+                trafficOrPickupRemark,
+                priceAll,
+                bookedBy,
+                guestKeyword,
+                teamType,
+                status,
+                orderByType,
+                tagging,
+                hasOrderFile,
+                page,
+                pageSize
+        ));
+    }
+
+    /**
+     * 更新订单管理页标记状态。
+     *
+     * @param id 订单 ID
+     * @param request 标记请求
+     * @return 操作结果
+     */
+    @OperationLog(module = "销售管理", type = "标记")
+    @PostMapping("/orders/{id}/tagging")
+    public ApiResponse<Void> updateOrderTagging(
+            @PathVariable Long id,
+            @Valid @RequestBody SalesBookingOrderTaggingRequest request
+    ) {
+        orderService.updateOrderTagging(id, request.tagging(), currentTenantId());
+        return ApiResponse.ok();
     }
 
     /**

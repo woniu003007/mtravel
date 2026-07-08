@@ -2,7 +2,11 @@ package com.mtravel.platform.sales.booking.order.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mtravel.platform.common.BizException;
+import com.mtravel.platform.common.PageResult;
+import com.mtravel.platform.common.attachment.entity.CommonAttachmentEntity;
+import com.mtravel.platform.common.attachment.mapper.CommonAttachmentMapper;
 import com.mtravel.platform.customer.risk.dto.CustomerRiskApprovalResponse;
 import com.mtravel.platform.customer.risk.service.CustomerRiskApprovalService;
 import com.mtravel.platform.enterprise.expenseitem.entity.EnterpriseExpenseItemEntity;
@@ -14,6 +18,7 @@ import com.mtravel.platform.sales.booking.order.dto.SalesBookingFeeChangeRespons
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingGuestImportPreviewResponse;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderGuestRequest;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderGuestResponse;
+import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderManageRowResponse;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderPriceLineRequest;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderPriceLineResponse;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderResponse;
@@ -29,8 +34,11 @@ import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderGuestMap
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderMapper;
 import com.mtravel.platform.sales.ordertransfer.entity.SalesOrderTransferLogEntity;
 import com.mtravel.platform.sales.ordertransfer.mapper.SalesOrderTransferLogMapper;
+import com.mtravel.platform.sales.product.entity.SalesProductEntity;
+import com.mtravel.platform.sales.product.mapper.SalesProductMapper;
 import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
 import com.mtravel.platform.sales.team.enums.SalesTeamStatus;
+import com.mtravel.platform.sales.team.enums.SalesTeamType;
 import com.mtravel.platform.sales.team.mapper.SalesTeamMapper;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -43,6 +51,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.List;
 import java.util.Objects;
@@ -86,6 +95,8 @@ public class SalesBookingOrderService {
     private final EnterpriseExpenseItemMapper expenseItemMapper;
     private final CustomerRiskApprovalService riskApprovalService;
     private final SalesOrderTransferLogMapper transferLogMapper;
+    private final SalesProductMapper productMapper;
+    private final CommonAttachmentMapper attachmentMapper;
 
     /**
      * 单元测试兼容构造器。测试只验证主链路，可不显式传身份证校验器。
@@ -96,7 +107,7 @@ public class SalesBookingOrderService {
             SalesBookingOrderGuestMapper guestMapper,
             SalesTeamMapper teamMapper
     ) {
-        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), null, null, null);
+        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), null, null, null, null, null);
     }
 
     /**
@@ -109,7 +120,7 @@ public class SalesBookingOrderService {
             SalesTeamMapper teamMapper,
             CustomerRiskApprovalService riskApprovalService
     ) {
-        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), null, riskApprovalService, null);
+        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), null, riskApprovalService, null, null, null);
     }
 
     /**
@@ -122,7 +133,24 @@ public class SalesBookingOrderService {
             SalesTeamMapper teamMapper,
             EnterpriseExpenseItemMapper expenseItemMapper
     ) {
-        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), expenseItemMapper, null, null);
+        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), expenseItemMapper, null, null, null, null);
+    }
+
+    /**
+     * 运行时构造器，注入订单、价格、游客、费用变更、团队 Mapper 及身份证校验器。
+     */
+    public SalesBookingOrderService(
+            SalesBookingOrderMapper orderMapper,
+            SalesBookingOrderChargeLineMapper chargeLineMapper,
+            SalesBookingOrderGuestMapper guestMapper,
+            SalesTeamMapper teamMapper,
+            IdCardValidator idCardValidator,
+            EnterpriseExpenseItemMapper expenseItemMapper,
+            CustomerRiskApprovalService riskApprovalService,
+            SalesOrderTransferLogMapper transferLogMapper
+    ) {
+        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, idCardValidator,
+                expenseItemMapper, riskApprovalService, transferLogMapper, null, null);
     }
 
     /**
@@ -137,7 +165,9 @@ public class SalesBookingOrderService {
             IdCardValidator idCardValidator,
             EnterpriseExpenseItemMapper expenseItemMapper,
             CustomerRiskApprovalService riskApprovalService,
-            SalesOrderTransferLogMapper transferLogMapper
+            SalesOrderTransferLogMapper transferLogMapper,
+            SalesProductMapper productMapper,
+            CommonAttachmentMapper attachmentMapper
     ) {
         this.orderMapper = orderMapper;
         this.chargeLineMapper = chargeLineMapper;
@@ -147,6 +177,8 @@ public class SalesBookingOrderService {
         this.expenseItemMapper = expenseItemMapper;
         this.riskApprovalService = riskApprovalService;
         this.transferLogMapper = transferLogMapper;
+        this.productMapper = productMapper;
+        this.attachmentMapper = attachmentMapper;
     }
 
     /**
@@ -209,6 +241,493 @@ public class SalesBookingOrderService {
      */
     public List<SalesBookingOrderEntity> listOrdersByTeam(Long teamId, Long tenantId) {
         return orderMapper.selectActiveByTeam(tenantId, teamId);
+    }
+
+    /**
+     * 汇总团队操作页顶部展示的领队信息。
+     *
+     * <p>领队来源于收客游客名单的 leader_flag 字段，只统计当前团有效订单：普通订单和拼入目标团的子订单。
+     * 取消订单与拼团来源留痕订单不参与团队执行信息展示，避免把已拼出或作废名单算入当前团。</p>
+     *
+     * @param tenantId 当前租户 ID
+     * @param orders 当前团队操作页可见订单
+     * @return 领队姓名和电话摘要；没有领队时返回 null
+     */
+    public String operationLeaderSummary(Long tenantId, List<SalesBookingOrderEntity> orders) {
+        if (CollectionUtils.isEmpty(orders)) {
+            return null;
+        }
+        Set<Long> effectiveOrderIds = orders.stream()
+                .filter(this::effectiveLeaderOrder)
+                .map(SalesBookingOrderEntity::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (effectiveOrderIds.isEmpty()) {
+            return null;
+        }
+        List<SalesBookingOrderGuestEntity> leaders = Objects.requireNonNullElse(
+                guestMapper.selectList(baseGuestQuery(tenantId)
+                        .in("order_id", effectiveOrderIds)
+                        .eq("leader_flag", true)
+                        .orderByAsc("order_id")
+                        .orderByAsc("index_no")
+                        .orderByAsc("id")),
+                List.of()
+        );
+        LinkedHashSet<String> summaries = new LinkedHashSet<>();
+        for (SalesBookingOrderGuestEntity leader : leaders) {
+            if (leader == null || !effectiveOrderIds.contains(leader.getOrderId()) || !Boolean.TRUE.equals(leader.getLeaderFlag())) {
+                continue;
+            }
+            String text = leaderSummaryText(leader);
+            if (StringUtils.hasText(text)) {
+                summaries.add(text);
+            }
+        }
+        return summaries.isEmpty() ? null : String.join("、", summaries);
+    }
+
+    /**
+     * 查询全局订单管理分页列表。
+     *
+     * <p>该列表对齐旧系统订单管理页的检索维度。列表只返回行级摘要，团队、产品、游客、价格和附件
+     * 通过当前页订单批量加载，避免订单管理页按行触发 N+1 查询。</p>
+     *
+     * @param tenantId 当前租户 ID
+     * @param groupNo 团号关键词
+     * @param customerTeamNo 客户团号关键词
+     * @param buyerOrSalespersonKeyword 预订单位或业务员关键词
+     * @param startDate 出团日期始
+     * @param endDate 出团日期止
+     * @param productKeyword 产品名称关键词
+     * @param trafficOrPickupRemark 航班号或接送备注关键词
+     * @param priceAll 订单应收金额
+     * @param bookedBy 下单人关键词
+     * @param guestKeyword 游客姓名或证件号关键词
+     * @param teamType 团队类型
+     * @param status 订单状态
+     * @param orderByType 排序方式，booked 按下单时间，departure 按出团时间
+     * @param tagging 是否只查已标记或未标记订单
+     * @param hasOrderFile 是否只查有订单文件或无订单文件订单
+     * @param page 当前页码
+     * @param pageSize 每页条数，上限 200
+     * @return 订单管理行分页
+     */
+    public PageResult<SalesBookingOrderManageRowResponse> orderManagePage(
+            Long tenantId,
+            String groupNo,
+            String customerTeamNo,
+            String buyerOrSalespersonKeyword,
+            LocalDate startDate,
+            LocalDate endDate,
+            String productKeyword,
+            String trafficOrPickupRemark,
+            BigDecimal priceAll,
+            String bookedBy,
+            String guestKeyword,
+            String teamType,
+            String status,
+            String orderByType,
+            Boolean tagging,
+            Boolean hasOrderFile,
+            long page,
+            long pageSize
+    ) {
+        long safePage = Math.max(page, 1L);
+        long safePageSize = Math.min(Math.max(pageSize, 1L), 200L);
+        QueryWrapper<SalesBookingOrderEntity> wrapper = buildOrderManageWrapper(
+                tenantId,
+                groupNo,
+                customerTeamNo,
+                buyerOrSalespersonKeyword,
+                startDate,
+                endDate,
+                productKeyword,
+                trafficOrPickupRemark,
+                priceAll,
+                bookedBy,
+                guestKeyword,
+                teamType,
+                status,
+                tagging,
+                hasOrderFile
+        );
+        applyOrderManageSort(wrapper, orderByType);
+        Page<SalesBookingOrderEntity> result = orderMapper.selectPage(new Page<>(safePage, safePageSize), wrapper);
+        List<SalesBookingOrderEntity> orders = Objects.requireNonNullElse(result.getRecords(), List.of());
+        if (orders.isEmpty()) {
+            return new PageResult<>(List.of(), result.getTotal());
+        }
+        Map<Long, SalesTeamEntity> teamsById = loadTeamsForOrders(tenantId, orders);
+        Map<Long, SalesProductEntity> productsById = loadProductsForTeams(tenantId, teamsById.values().stream().toList());
+        Map<Long, List<SalesBookingOrderChargeLineEntity>> priceLinesByOrderId = loadBasePriceLinesByOrderId(orders);
+        Map<Long, SalesBookingOrderGuestEntity> firstGuestsByOrderId = loadFirstGuestsByOrderId(tenantId, orders);
+        Set<Long> orderFileOrderIds = loadOrderFileOrderIds(tenantId, orders);
+        List<SalesBookingOrderManageRowResponse> rows = orders.stream()
+                .map(order -> toOrderManageRow(
+                        order,
+                        teamsById.get(order.getTeamId()),
+                        productsById,
+                        priceLinesByOrderId.get(order.getId()),
+                        firstGuestsByOrderId.get(order.getId()),
+                        orderFileOrderIds.contains(order.getId())
+                ))
+                .toList();
+        return new PageResult<>(rows, result.getTotal());
+    }
+
+    /**
+     * 更新订单管理页标记状态。
+     *
+     * <p>标记只用于订单管理页筛选重点订单，不改变订单状态、团队归属、金额或游客数据。</p>
+     *
+     * @param orderId 订单 ID
+     * @param tagging 是否标记
+     * @param tenantId 当前租户 ID
+     */
+    @Transactional
+    public void updateOrderTagging(Long orderId, Boolean tagging, Long tenantId) {
+        requireOrder(orderId, tenantId);
+        SalesBookingOrderEntity update = new SalesBookingOrderEntity();
+        update.setTagging(Boolean.TRUE.equals(tagging));
+        orderMapper.update(update, baseOrderUpdate(tenantId).eq("id", orderId));
+    }
+
+    private QueryWrapper<SalesBookingOrderEntity> buildOrderManageWrapper(
+            Long tenantId,
+            String groupNo,
+            String customerTeamNo,
+            String buyerOrSalespersonKeyword,
+            LocalDate startDate,
+            LocalDate endDate,
+            String productKeyword,
+            String trafficOrPickupRemark,
+            BigDecimal priceAll,
+            String bookedBy,
+            String guestKeyword,
+            String teamType,
+            String status,
+            Boolean tagging,
+            Boolean hasOrderFile
+    ) {
+        QueryWrapper<SalesBookingOrderEntity> wrapper = baseOrderQuery(tenantId);
+        if (StringUtils.hasText(groupNo)) {
+            wrapper.apply("""
+                    EXISTS (
+                      SELECT 1 FROM sales_teams t
+                      WHERE t.tenant_id = sales_orders.tenant_id
+                        AND t.id = sales_orders.team_id
+                        AND t.is_deleted = false
+                        AND t.team_no ILIKE {0}
+                    )
+                    """, "%" + clean(groupNo) + "%");
+        }
+        wrapper.like(StringUtils.hasText(customerTeamNo), "customer_team_no", clean(customerTeamNo));
+        if (StringUtils.hasText(buyerOrSalespersonKeyword)) {
+            String keyword = clean(buyerOrSalespersonKeyword);
+            wrapper.and(item -> item
+                    .like("customer_name", keyword)
+                    .or()
+                    .like("salesperson_employee_name", keyword));
+        }
+        if (startDate != null) {
+            wrapper.apply("""
+                    EXISTS (
+                      SELECT 1 FROM sales_teams t
+                      WHERE t.tenant_id = sales_orders.tenant_id
+                        AND t.id = sales_orders.team_id
+                        AND t.is_deleted = false
+                        AND t.departure_date >= {0}
+                    )
+                    """, startDate);
+        }
+        if (endDate != null) {
+            wrapper.apply("""
+                    EXISTS (
+                      SELECT 1 FROM sales_teams t
+                      WHERE t.tenant_id = sales_orders.tenant_id
+                        AND t.id = sales_orders.team_id
+                        AND t.is_deleted = false
+                        AND t.departure_date <= {0}
+                    )
+                    """, endDate);
+        }
+        if (StringUtils.hasText(productKeyword)) {
+            wrapper.apply("""
+                    EXISTS (
+                      SELECT 1
+                      FROM sales_teams t
+                      JOIN sales_products p
+                        ON p.tenant_id = t.tenant_id
+                       AND p.id = t.product_id
+                       AND p.is_deleted = false
+                      WHERE t.tenant_id = sales_orders.tenant_id
+                        AND t.id = sales_orders.team_id
+                        AND t.is_deleted = false
+                        AND p.product_name ILIKE {0}
+                    )
+                    """, "%" + clean(productKeyword) + "%");
+        }
+        if (StringUtils.hasText(trafficOrPickupRemark)) {
+            String keyword = clean(trafficOrPickupRemark);
+            wrapper.and(item -> item
+                    .like("pickup_info", keyword)
+                    .or()
+                    .like("dropoff_info", keyword)
+                    .or()
+                    .like("pickup_remark", keyword)
+                    .or()
+                    .like("guide_remark", keyword)
+                    .or()
+                    .like("travel_description", keyword));
+        }
+        if (priceAll != null) {
+            wrapper.eq("receivable_amount", money(priceAll));
+        }
+        wrapper.like(StringUtils.hasText(bookedBy), "booked_by", clean(bookedBy));
+        if (StringUtils.hasText(guestKeyword)) {
+            wrapper.apply("""
+                    EXISTS (
+                      SELECT 1 FROM sales_order_guests g
+                      WHERE g.tenant_id = sales_orders.tenant_id
+                        AND g.order_id = sales_orders.id
+                        AND g.is_deleted = false
+                        AND (
+                          g.guest_name ILIKE {0}
+                          OR g.certificate_no ILIKE {0}
+                          OR g.passport_no ILIKE {0}
+                          OR g.phone ILIKE {0}
+                        )
+                    )
+                    """, "%" + clean(guestKeyword) + "%");
+        }
+        String normalizedTeamType = normalizeOrderManageTeamType(teamType);
+        if (StringUtils.hasText(normalizedTeamType)) {
+            wrapper.apply("""
+                    EXISTS (
+                      SELECT 1 FROM sales_teams t
+                      WHERE t.tenant_id = sales_orders.tenant_id
+                        AND t.id = sales_orders.team_id
+                        AND t.is_deleted = false
+                        AND t.team_type = {0}
+                    )
+                    """, normalizedTeamType);
+        }
+        String normalizedStatus = normalizeOrderManageStatus(status);
+        wrapper.eq(StringUtils.hasText(normalizedStatus), "status", normalizedStatus);
+        if (tagging != null) {
+            wrapper.eq("tagging", Boolean.TRUE.equals(tagging));
+        }
+        if (hasOrderFile != null) {
+            String existsSql = """
+                    EXISTS (
+                      SELECT 1 FROM common_attachments a
+                      WHERE a.tenant_id = sales_orders.tenant_id
+                        AND a.business_id = sales_orders.id
+                        AND a.business_module = '销售收客'
+                        AND a.business_type = '订单文件'
+                        AND a.status = 'active'
+                        AND a.is_deleted = false
+                    )
+                    """;
+            wrapper.apply(Boolean.TRUE.equals(hasOrderFile) ? existsSql : "NOT " + existsSql);
+        }
+        return wrapper;
+    }
+
+    private void applyOrderManageSort(QueryWrapper<SalesBookingOrderEntity> wrapper, String orderByType) {
+        if (List.of("1", "departure", "depart").contains(clean(orderByType))) {
+            wrapper.last("""
+                    ORDER BY (
+                      SELECT t.departure_date
+                      FROM sales_teams t
+                      WHERE t.tenant_id = sales_orders.tenant_id
+                        AND t.id = sales_orders.team_id
+                        AND t.is_deleted = false
+                      LIMIT 1
+                    ) DESC NULLS LAST, booked_at DESC NULLS LAST, id DESC
+                    """);
+            return;
+        }
+        wrapper.orderByDesc("booked_at").orderByDesc("id");
+    }
+
+    private String normalizeOrderManageTeamType(String value) {
+        if (!StringUtils.hasText(value) || "all".equalsIgnoreCase(value)) {
+            return null;
+        }
+        return switch (clean(value)) {
+            case "2" -> SalesTeamType.SANPIN.getValue();
+            case "3" -> SalesTeamType.ZHENGTUAN.getValue();
+            case "4" -> SalesTeamType.SANTUAN.getValue();
+            case "5" -> SalesTeamType.SINGLE.getValue();
+            default -> clean(value);
+        };
+    }
+
+    private String normalizeOrderManageStatus(String value) {
+        if (!StringUtils.hasText(value) || "all".equalsIgnoreCase(value)) {
+            return null;
+        }
+        return switch (clean(value)) {
+            case "0" -> SalesBookingOrderStatus.PENDING.value();
+            case "1" -> SalesBookingOrderStatus.CONFIRMED.value();
+            case "2" -> SalesBookingOrderStatus.CANCELLED.value();
+            default -> clean(value);
+        };
+    }
+
+    private Map<Long, SalesTeamEntity> loadTeamsForOrders(Long tenantId, List<SalesBookingOrderEntity> orders) {
+        List<Long> teamIds = orders.stream()
+                .map(SalesBookingOrderEntity::getTeamId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (teamIds.isEmpty()) {
+            return Map.of();
+        }
+        return Objects.requireNonNullElse(
+                        teamMapper.selectList(baseTeamQuery(tenantId).in("id", teamIds)),
+                        List.<SalesTeamEntity>of())
+                .stream()
+                .filter(team -> team.getId() != null)
+                .collect(Collectors.toMap(SalesTeamEntity::getId, team -> team, (left, right) -> left));
+    }
+
+    private Map<Long, SalesProductEntity> loadProductsForTeams(Long tenantId, List<SalesTeamEntity> teams) {
+        if (productMapper == null || CollectionUtils.isEmpty(teams)) {
+            return Map.of();
+        }
+        List<Long> productIds = teams.stream()
+                .map(SalesTeamEntity::getProductId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (productIds.isEmpty()) {
+            return Map.of();
+        }
+        return Objects.requireNonNullElse(
+                        productMapper.selectList(new QueryWrapper<SalesProductEntity>()
+                                .eq("tenant_id", tenantId)
+                                .eq("is_deleted", false)
+                                .in("id", productIds)),
+                        List.<SalesProductEntity>of())
+                .stream()
+                .filter(product -> product.getId() != null)
+                .collect(Collectors.toMap(SalesProductEntity::getId, product -> product, (left, right) -> left));
+    }
+
+    private Map<Long, SalesBookingOrderGuestEntity> loadFirstGuestsByOrderId(
+            Long tenantId,
+            List<SalesBookingOrderEntity> orders
+    ) {
+        List<Long> orderIds = orders.stream()
+                .map(SalesBookingOrderEntity::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (orderIds.isEmpty()) {
+            return Map.of();
+        }
+        List<SalesBookingOrderGuestEntity> guests = Objects.requireNonNullElse(
+                guestMapper.selectList(baseGuestQuery(tenantId)
+                        .in("order_id", orderIds)
+                        .orderByAsc("order_id")
+                        .orderByAsc("index_no")
+                        .orderByAsc("id")),
+                List.of()
+        );
+        Map<Long, SalesBookingOrderGuestEntity> firstGuests = new HashMap<>();
+        for (SalesBookingOrderGuestEntity guest : guests) {
+            if (guest.getOrderId() != null) {
+                firstGuests.putIfAbsent(guest.getOrderId(), guest);
+            }
+        }
+        return firstGuests;
+    }
+
+    private Set<Long> loadOrderFileOrderIds(Long tenantId, List<SalesBookingOrderEntity> orders) {
+        if (attachmentMapper == null) {
+            return Set.of();
+        }
+        List<Long> orderIds = orders.stream()
+                .map(SalesBookingOrderEntity::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (orderIds.isEmpty()) {
+            return Set.of();
+        }
+        return Objects.requireNonNullElse(
+                        attachmentMapper.selectList(new QueryWrapper<CommonAttachmentEntity>()
+                                .eq("tenant_id", tenantId)
+                                .eq("is_deleted", false)
+                                .eq("business_module", "销售收客")
+                                .eq("business_type", "订单文件")
+                                .eq("status", "active")
+                                .in("business_id", orderIds)),
+                        List.<CommonAttachmentEntity>of())
+                .stream()
+                .map(CommonAttachmentEntity::getBusinessId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+    }
+
+    private SalesBookingOrderManageRowResponse toOrderManageRow(
+            SalesBookingOrderEntity order,
+            SalesTeamEntity team,
+            Map<Long, SalesProductEntity> productsById,
+            List<SalesBookingOrderChargeLineEntity> priceLines,
+            SalesBookingOrderGuestEntity firstGuest,
+            boolean hasOrderFile
+    ) {
+        SalesProductEntity product = team == null ? null : productsById.get(team.getProductId());
+        String role = orderRole(order);
+        String teamType = team == null ? null : team.getTeamType();
+        return new SalesBookingOrderManageRowResponse(
+                order.getId(),
+                order.getTeamId(),
+                order.getOrderNo(),
+                team == null ? null : team.getTeamNo(),
+                teamType,
+                StringUtils.hasText(teamType) ? SalesTeamType.fromValueOrDefault(teamType).getLabel() : "",
+                team == null ? null : team.getDepartureDate(),
+                product == null ? "" : product.getProductName(),
+                role,
+                orderRoleLabel(role),
+                joinNonBlank(order.getCustomerName(), order.getCustomerTeamNo(), order.getOrderNo()),
+                order.getHotelInfo(),
+                order.getPickupInfo(),
+                order.getDropoffInfo(),
+                order.getPickupRemark(),
+                order.getGuideRemark(),
+                joinPlace(order.getSourceProvince(), order.getSourceCity(), order.getSourceDistrict()),
+                firstGuestName(order, firstGuest),
+                order.getGuestCount(),
+                operationGuestCountText(order),
+                formatPriceDetail(priceLines),
+                yuanText(order.getReceivableAmount()),
+                yuanText(order.getReceivedAmount()),
+                yuanText(order.getBalanceAmount()),
+                order.getFeeRemark(),
+                order.getOrderRemark(),
+                joinNonBlank(order.getBookedAt() == null ? null : order.getBookedAt().toLocalDate().toString(), order.getBookedBy()),
+                SalesBookingOrderStatus.labelOf(order.getStatus()),
+                order.getStatus(),
+                Boolean.TRUE.equals(order.getTagging()),
+                hasOrderFile
+        );
+    }
+
+    private String firstGuestName(SalesBookingOrderEntity order, SalesBookingOrderGuestEntity firstGuest) {
+        if (firstGuest != null && StringUtils.hasText(firstGuest.getGuestName())) {
+            return firstGuest.getGuestName();
+        }
+        return firstLeaderOrCustomer(order);
+    }
+
+    private String joinPlace(String... values) {
+        return java.util.Arrays.stream(values)
+                .filter(StringUtils::hasText)
+                .collect(Collectors.joining(""));
     }
 
     private SalesBookingOrderResponse toResponse(SalesBookingOrderEntity order) {
@@ -289,9 +808,7 @@ public class SalesBookingOrderService {
         entity.setSalespersonEmployeeName(clean(request.salespersonEmployeeName()));
         entity.setBookingOperatorEmployeeId(request.bookingOperatorEmployeeId());
         entity.setBookingOperatorEmployeeName(clean(request.bookingOperatorEmployeeName()));
-        entity.setSourceProvince(clean(request.sourceProvince()));
-        entity.setSourceCity(clean(request.sourceCity()));
-        entity.setSourceDistrict(clean(request.sourceDistrict()));
+        applySourcePlaceFromFirstGuest(entity, guests);
         entity.setTravelDescription(clean(request.travelDescription()));
         entity.setPickupInfo(clean(request.pickupInfo()));
         entity.setDropoffInfo(clean(request.dropoffInfo()));
@@ -318,10 +835,35 @@ public class SalesBookingOrderService {
         entity.setConfirmRemark(clean(request.confirmRemark()));
         entity.setOrderRemark(clean(request.orderRemark()));
         entity.setStatus(status.value());
+        entity.setTagging(current == null ? false : Boolean.TRUE.equals(current.getTagging()));
         entity.setBookedBy(current == null || !StringUtils.hasText(current.getBookedBy()) ? operator : current.getBookedBy());
         entity.setBookedAt(current == null || current.getBookedAt() == null ? OffsetDateTime.now() : current.getBookedAt());
         entity.setCreatedBy(current == null ? operator : current.getCreatedBy());
         entity.setIsDeleted(false);
+    }
+
+    /**
+     * 按老系统规则回写订单客源地。
+     *
+     * <p>客源地不由客户单位或前端手工字段决定，而是取游客名单第一位有效游客的身份证前六位
+     * 行政区划码。第一位游客无身份证或地区码无法识别时置空，不继续取第二位游客。</p>
+     */
+    private void applySourcePlaceFromFirstGuest(
+            SalesBookingOrderEntity entity,
+            List<SalesBookingOrderGuestRequest> guests
+    ) {
+        SalesBookingOrderGuestRequest firstGuest = Objects.requireNonNullElse(guests, List.<SalesBookingOrderGuestRequest>of())
+                .stream()
+                .filter(Objects::nonNull)
+                .filter(guest -> StringUtils.hasText(guest.guestName()))
+                .findFirst()
+                .orElse(null);
+        IdCardSourcePlaceResolver.SourcePlace place = firstGuest == null
+                ? null
+                : IdCardSourcePlaceResolver.resolve(firstGuest.certificateNo());
+        entity.setSourceProvince(place == null ? null : place.province());
+        entity.setSourceCity(place == null ? null : place.city());
+        entity.setSourceDistrict(place == null ? null : place.district());
     }
 
     /**
@@ -1473,6 +2015,23 @@ public class SalesBookingOrderService {
         return order.getCustomerName();
     }
 
+    private boolean effectiveLeaderOrder(SalesBookingOrderEntity order) {
+        if (order == null || "cancelled".equals(order.getStatus())) {
+            return false;
+        }
+        String role = StringUtils.hasText(order.getOrderRole()) ? order.getOrderRole() : "normal";
+        return "normal".equals(role) || "merge_child".equals(role);
+    }
+
+    private String leaderSummaryText(SalesBookingOrderGuestEntity leader) {
+        String name = clean(leader.getGuestName());
+        if (!StringUtils.hasText(name)) {
+            return null;
+        }
+        String phone = clean(leader.getPhone());
+        return StringUtils.hasText(phone) ? name + "[Tel:" + phone + "]" : name;
+    }
+
     private String compactMoneyText(BigDecimal value) {
         if (value == null) {
             return "0";
@@ -1482,6 +2041,10 @@ public class SalesBookingOrderService {
 
     private String moneyText(BigDecimal value) {
         return value == null ? "0.00" : value.setScale(2, RoundingMode.HALF_UP).toPlainString();
+    }
+
+    private String yuanText(BigDecimal value) {
+        return "¥" + compactMoneyText(money(value));
     }
 
     private String joinNonBlank(String... values) {

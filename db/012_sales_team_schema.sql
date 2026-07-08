@@ -49,6 +49,9 @@ CREATE TABLE IF NOT EXISTS sales_teams (
   department_name varchar(160),
   escort_employee_id bigint,
   escort_employee_name varchar(100),
+  per_capita_pit_amount numeric(12,2) NOT NULL DEFAULT 0,
+  optional_markup_rate numeric(8,2) NOT NULL DEFAULT 0,
+  per_capita_shopping_amount numeric(12,2) NOT NULL DEFAULT 0,
   CONSTRAINT fk_sales_teams_product
     FOREIGN KEY (tenant_id, product_id) REFERENCES sales_products (tenant_id, id),
   CONSTRAINT uk_sales_teams_tenant_id_id UNIQUE (tenant_id, id),
@@ -58,7 +61,10 @@ CREATE TABLE IF NOT EXISTS sales_teams (
   CONSTRAINT chk_sales_teams_used_seats CHECK (used_seats >= 0),
   CONSTRAINT chk_sales_teams_remaining_seats CHECK (remaining_seats >= 0),
   CONSTRAINT chk_sales_teams_single_room CHECK (single_room_difference >= 0),
-  CONSTRAINT chk_sales_teams_close_days CHECK (close_days_before >= 0)
+  CONSTRAINT chk_sales_teams_close_days CHECK (close_days_before >= 0),
+  CONSTRAINT chk_sales_teams_per_capita_pit CHECK (per_capita_pit_amount >= 0),
+  CONSTRAINT chk_sales_teams_optional_markup CHECK (optional_markup_rate >= 0),
+  CONSTRAINT chk_sales_teams_per_capita_shopping CHECK (per_capita_shopping_amount >= 0)
 );
 
 DROP TRIGGER IF EXISTS trg_sales_teams_updated_at ON sales_teams;
@@ -195,6 +201,9 @@ COMMENT ON COLUMN sales_teams.used_seats IS '已收客或已占用位数。';
 COMMENT ON COLUMN sales_teams.remaining_seats IS '剩余位数。';
 COMMENT ON COLUMN sales_teams.single_room_difference IS '单人房差价格。';
 COMMENT ON COLUMN sales_teams.close_days_before IS '出团前截止收客天数。';
+COMMENT ON COLUMN sales_teams.per_capita_pit_amount IS '团队人均坑位金额，用于内部备注和导游备用金测算参考。';
+COMMENT ON COLUMN sales_teams.optional_markup_rate IS '团队自费加点率，按百分数保存，例如70表示70%。';
+COMMENT ON COLUMN sales_teams.per_capita_shopping_amount IS '团队人均购物金额，用于内部备注和购物预期测算参考。';
 COMMENT ON COLUMN sales_teams.created_by IS '创建人账号或名称。';
 COMMENT ON COLUMN sales_teams.remark IS '团队备注。';
 COMMENT ON COLUMN sales_teams.created_at IS '创建时间。';

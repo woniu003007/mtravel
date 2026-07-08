@@ -28,7 +28,6 @@ class MenuControllerTest {
                 "/purchase/relation",
                 "/purchase/contract",
                 "/sales/product",
-                "/dispatch/room-status",
                 "/dispatch/vehicle-quote",
                 "/enterprise/company-info",
                 "/enterprise/bank-account",

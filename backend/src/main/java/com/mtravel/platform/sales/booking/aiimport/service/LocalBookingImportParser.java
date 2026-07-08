@@ -35,7 +35,8 @@ public class LocalBookingImportParser {
     private static final Pattern PHONE = Pattern.compile("1[3-9]\\d{9}");
     private static final Pattern GUIDE = Pattern.compile("导游[:：\\s]*([\\p{IsHan}A-Za-z]{2,8})\\s*(1[3-9]\\d{9})?");
     private static final Pattern CUSTOMER = Pattern.compile("(?:客户|ATTN|联系人)[:：\\s]*([\\p{IsHan}A-Za-z0-9（）()·]{2,20})\\s*([\\p{IsHan}A-Za-z]{2,8})?\\s*(1[3-9]\\d{9})?");
-    private static final Pattern PRICE = Pattern.compile("(成人|儿童|老人|单房差)\\s*[:：]?\\s*(\\d+(?:\\.\\d+)?)\\s*元");
+    private static final Pattern PRICE = Pattern.compile("(成人|儿童|老人|单房差)\\s*[:：]?\\s*(\\d+(?:\\.\\d+)?)(?:\\s*元|\\s*[＊*×xX]\\s*\\d+\\s*=\\s*\\d+(?:\\.\\d+)?)");
+    private static final Pattern CONFIRMATION_TOTAL_AMOUNT = Pattern.compile("合计金额[:：]?\\s*(\\d+(?:\\.\\d+)?)\\s*元");
     private static final Pattern COST_TABLE_LINE = Pattern.compile("^(房|车|门|餐|导游)\\s+(.+)\\s+(\\d+(?:\\.\\d+)?)\\s*元\\s*$");
     private static final Pattern COST_TOTAL_LINE = Pattern.compile("^总计[:：]?\\s*(\\d+(?:\\.\\d+)?)\\s*元(?:\\s*(.*))?$");
     private static final Pattern GUEST_LINE = Pattern.compile(
@@ -49,6 +50,9 @@ public class LocalBookingImportParser {
     );
     private static final Pattern NAME_ID_GUEST_LINE = Pattern.compile(
             "^\\s*([\\p{IsHan}A-Za-z·]{2,20})\\s*(\\d{17}[0-9Xx])(?:\\s+(1[3-9]\\d{9}))?(?:\\s+(.+))?\\s*$"
+    );
+    private static final Pattern BRACKETED_NAME_ID_GUEST = Pattern.compile(
+            "([\\p{IsHan}A-Za-z·]{2,20})\\s*[\\[【(（]\\s*(\\d{17}[0-9Xx])(?:\\s*[/／,，\\s]\\s*(1[3-9]\\d{9}))?\\s*[\\]】)）]"
     );
     private static final Pattern INDEX_ONLY = Pattern.compile("^(\\d{1,3})$");
     private static final Pattern AGE_ONLY = Pattern.compile("^\\d{1,3}$");
@@ -260,6 +264,12 @@ public class LocalBookingImportParser {
             }
         }
         CostTableParseResult costTable = costTablePriceLines(text);
+        if (!StringUtils.hasText(costTable.totalAmount())) {
+            Matcher totalAmountMatcher = CONFIRMATION_TOTAL_AMOUNT.matcher(text);
+            if (totalAmountMatcher.find()) {
+                costTable = new CostTableParseResult(totalAmountMatcher.group(1), costTable.lines());
+            }
+        }
         lines.addAll(costTable.lines());
         return new BookingAiImportResponse.PriceInfo(adult, child, senior, singleRoom, costTable.totalAmount(), lines, List.of());
     }
@@ -333,6 +343,21 @@ public class LocalBookingImportParser {
         String lastMergedRooming = null;
         String lastMergedRemark = null;
         for (String line : lines) {
+            Matcher bracketedGuestMatcher = BRACKETED_NAME_ID_GUEST.matcher(line);
+            while (bracketedGuestMatcher.find()) {
+                parsedGuests.add(new ParsedGuest(
+                        nextGuestIndex(parsedGuests),
+                        bracketedGuestMatcher.group(1),
+                        bracketedGuestMatcher.group(2),
+                        null,
+                        null,
+                        bracketedGuestMatcher.group(3),
+                        null,
+                        null,
+                        false,
+                        false
+                ));
+            }
             Matcher matcher = GUEST_LINE.matcher(line.trim());
             if (matcher.matches()) {
                 String explicitPhone = normalizeBlank(matcher.group(6));

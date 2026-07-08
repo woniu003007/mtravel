@@ -3,6 +3,7 @@ package com.mtravel.platform.dispatch.guide.controller;
 import com.mtravel.platform.common.ApiResponse;
 import com.mtravel.platform.common.ControllerSupport;
 import com.mtravel.platform.common.PageResult;
+import com.mtravel.platform.dispatch.guide.dto.GuideAvailabilityResponse;
 import com.mtravel.platform.dispatch.guide.dto.GuideLeaveResponse;
 import com.mtravel.platform.dispatch.guide.dto.GuideLeaveReviewRequest;
 import com.mtravel.platform.dispatch.guide.dto.GuideLeaveSaveRequest;
@@ -15,6 +16,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
@@ -56,6 +58,30 @@ public class DispatchGuideScheduleController extends ControllerSupport {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate
     ) {
         return ApiResponse.ok(service.calendar(new GuideScheduleQuery(guideName, startDate), currentTenantId()));
+    }
+
+    /**
+     * 查询指定时间段内导游是否可出团。
+     */
+    @OperationLog(module = "计调操作", type = "查询")
+    @GetMapping("/guide-schedule/availability")
+    public ApiResponse<PageResult<GuideAvailabilityResponse>> availability(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startAt,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endAt,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "false") Boolean availableOnly,
+            @RequestParam(defaultValue = "1") @Min(1) long page,
+            @RequestParam(defaultValue = "50") @Min(1) @Max(200) long pageSize
+    ) {
+        return ApiResponse.ok(service.guideAvailability(
+                startAt,
+                endAt,
+                keyword,
+                Boolean.TRUE.equals(availableOnly),
+                page,
+                pageSize,
+                currentTenantId()
+        ));
     }
 
     /**

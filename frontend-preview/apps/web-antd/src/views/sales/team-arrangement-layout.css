@@ -36,8 +36,84 @@
   padding: 12px;
 }
 
+.formal-arrangement-tool-strip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 5px 7px;
+  margin-bottom: 8px;
+  background: #fbfdff;
+  border: 1px solid #e4ecf7;
+  border-radius: 6px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 90%);
+}
+
+.formal-tool-strip-title {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  min-height: 27px;
+  padding: 0 6px 0 3px;
+  font-size: 11.8px;
+  font-weight: 800;
+  color: #475569;
+  white-space: nowrap;
+  border-right: 1px solid #e2e8f0;
+}
+
+.formal-tool-strip-title svg,
+.formal-arrangement-tool-button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.formal-tool-strip-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 5px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.formal-arrangement-tool-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #334155;
+  white-space: nowrap;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #dbe5f2;
+  border-radius: 5px;
+  transition:
+    color 0.18s ease,
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.formal-arrangement-tool-button:hover,
+.formal-arrangement-tool-button:focus {
+  color: var(--formal-blue-strong);
+  background: #f3f8ff;
+  border-color: #91caff;
+  box-shadow: 0 2px 5px rgb(22 119 255 / 10%);
+}
+
+.formal-arrangement-tool-button svg {
+  color: #1677ff;
+}
+
 .form-kicker {
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   font-size: 12px;
   font-weight: 700;
   color: #1677ff;
@@ -46,10 +122,10 @@
 
 .arrangement-command-bar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 520px;
-  gap: 10px 14px;
-  align-items: start;
-  padding: 14px 16px;
+  grid-template-columns: minmax(0, 1fr) 520px auto;
+  gap: 7px 14px;
+  align-items: center;
+  padding: 12px 14px;
   margin-bottom: 10px;
   background: linear-gradient(180deg, #f8fbff 0%, #fff 100%);
   border: 1px solid #e2e8f0;
@@ -62,10 +138,7 @@
 }
 
 .command-side {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  justify-content: space-between;
+  display: contents;
 }
 
 .team-title-line {
@@ -150,14 +223,14 @@
 .formal-team-arrangement-card .formal-team-title-line {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 7px;
   align-items: start;
-  margin-bottom: 8px;
+  margin-bottom: 0;
 }
 
 .formal-team-arrangement-card .formal-team-title-line .team-name {
   max-width: 100%;
   overflow: hidden;
+  font-size: 21px;
   line-height: 1.24;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -166,6 +239,25 @@
 .formal-team-title-line .formal-team-badges {
   row-gap: 5px;
   max-width: 100%;
+}
+
+.formal-team-arrangement-card .formal-team-badges-line {
+  display: flex;
+  flex-wrap: nowrap;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  gap: 5px;
+  align-items: center;
+  align-self: center;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.formal-team-arrangement-card .formal-team-badges-line .ant-tag {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .team-metric-strip {
@@ -215,6 +307,7 @@
   display: flex;
   flex-wrap: nowrap;
   grid-column: 1 / -1;
+  grid-row: 3;
   width: fit-content;
   max-width: 100%;
 }
@@ -279,7 +372,10 @@
   display: flex;
   gap: 8px;
   align-items: center;
+  align-self: center;
   justify-content: flex-end;
+  grid-column: 3;
+  grid-row: 1;
 }
 
 .compact-action {
@@ -287,9 +383,9 @@
   gap: 6px;
   align-items: center;
   justify-content: center;
-  min-width: 92px;
-  height: 34px;
-  padding: 0 10px;
+  min-width: 88px;
+  height: 30px;
+  padding: 0 9px;
   color: #1554ad;
   cursor: pointer;
   background: #eef6ff;
@@ -309,22 +405,18 @@
 }
 
 .compact-action svg {
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
 }
 
 .compact-action span {
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 800;
 }
 
 .team-note-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
   min-height: 42px;
-  padding: 6px 12px;
+  padding: 10px 14px;
   margin-bottom: 10px;
   background: #fbfdff;
   border: 1px solid #e2e8f0;
@@ -332,35 +424,83 @@
   border-radius: 6px;
 }
 
-.internal-note-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 0;
+.internal-note-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 14px;
+  align-items: start;
+  min-width: 0;
 }
 
-.internal-note-title > div,
-.internal-note-title .ant-btn {
+.internal-note-heading {
   display: inline-flex;
   gap: 6px;
   align-items: center;
-}
-
-.internal-note-title > div {
+  min-width: 0;
   font-size: 12.5px;
   font-weight: 800;
-  color: #334155;
+  line-height: 1.5;
+  color: #1554ad;
+  white-space: nowrap;
 }
 
-.internal-note-title svg {
+.internal-note-heading svg {
+  flex: 0 0 auto;
   width: 15px;
   height: 15px;
+}
+
+.internal-note-heading .ant-btn {
+  height: 22px;
+  padding: 0 2px;
+  font-weight: 800;
+}
+
+.formal-note-edit-button {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  height: 22px;
+  padding: 0 2px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #1677ff;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.formal-note-edit-button:hover,
+.formal-note-edit-button:focus {
+  color: #0958d9;
+}
+
+.formal-note-edit-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.internal-note-text {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  font-weight: 800;
+  line-height: 1.65;
+  color: #334155;
+  background: #f8fbff;
+  border: 1px solid #edf2f7;
+  border-radius: 5px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .internal-note-metrics {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  justify-content: flex-end;
+  max-width: 560px;
 }
 
 .internal-note-metrics span {
@@ -375,7 +515,7 @@
 
 .formal-team-arrangement-card .team-note-row {
   min-height: 38px;
-  padding: 5px 10px;
+  padding: 10px 14px;
   margin-bottom: 8px;
   background: #fff;
   border-color: var(--formal-border);
@@ -383,11 +523,8 @@
   box-shadow: 0 1px 2px rgb(15 23 42 / 2%);
 }
 
-.formal-team-arrangement-card .internal-note-title > div {
-  max-width: 760px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.formal-team-arrangement-card .internal-note-main {
+  max-width: none;
 }
 
 .formal-team-arrangement-card .internal-note-metrics span {
@@ -398,9 +535,12 @@
 
 .workflow-rail {
   display: grid;
+  grid-column: 2;
+  grid-row: 1;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px;
   align-items: center;
+  align-self: center;
 }
 
 .stage-flow-item {
@@ -408,8 +548,8 @@
   gap: 6px;
   align-items: center;
   justify-content: center;
-  min-height: 32px;
-  padding: 5px 8px;
+  min-height: 30px;
+  padding: 4px 8px;
   color: #64748b;
   background: #fff;
   border: 1px solid #dbe4f0;
@@ -465,7 +605,7 @@
 
 .arrangement-overview-table {
   margin-bottom: 10px;
-  overflow-x: auto;
+  overflow-x: hidden;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
@@ -473,8 +613,9 @@
 
 .arrangement-overview-table table {
   width: 100%;
-  min-width: 1500px;
+  min-width: 0;
   border-collapse: collapse;
+  table-layout: fixed;
   background: #fff;
 }
 
@@ -571,8 +712,9 @@
 }
 
 .cost-amount-zero {
-  color: #9aa8b7 !important;
-  font-weight: 700 !important;
+  color: #b6c1ce !important;
+  font-weight: 750 !important;
+  letter-spacing: 0;
 }
 
 .cost-amount-nonzero {
@@ -580,18 +722,71 @@
   font-weight: 900 !important;
 }
 
+.cost-amount-cash {
+  color: #12233a !important;
+}
+
+.cost-amount-credit {
+  color: #1e3a5f !important;
+}
+
+.formal-team-arrangement-card .cost-overview-summary {
+  grid-template-columns: minmax(170px, 1.15fr) repeat(3, minmax(134px, 0.96fr)) repeat(3, minmax(108px, 0.78fr));
+  margin-bottom: 6px;
+  overflow-x: hidden;
+  border-color: #e5edf7;
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 3%);
+}
+
+.formal-team-arrangement-card .cost-summary-card {
+  padding: 8px 12px;
+  background: #fff;
+  border-right-color: #edf2f7;
+}
+
+.formal-team-arrangement-card .cost-summary-card--primary {
+  background: linear-gradient(90deg, #eef6ff 0%, #fff 72%);
+  box-shadow: inset 3px 0 0 #1677ff;
+}
+
+.formal-team-arrangement-card .cost-summary-card--strong {
+  background: #fbfdff;
+}
+
+.formal-team-arrangement-card .cost-summary-label {
+  margin-bottom: 3px;
+  font-size: 11.5px;
+}
+
+.formal-team-arrangement-card .cost-summary-amount {
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.formal-team-arrangement-card .cost-summary-card--primary .cost-summary-amount {
+  font-size: 18px;
+}
+
+.formal-team-arrangement-card .cost-summary-card--strong .cost-summary-amount {
+  font-size: 15.5px;
+}
+
 .formal-team-arrangement-card .arrangement-overview-table {
-  margin-bottom: 8px;
-  border-color: var(--formal-border);
-  border-radius: 7px;
+  margin-bottom: 6px;
+  border-color: #e7eef8;
+  border-radius: 6px;
   box-shadow: 0 1px 2px rgb(15 23 42 / 3%);
 }
 
 .formal-team-arrangement-card .arrangement-overview-table th,
 .formal-team-arrangement-card .arrangement-overview-table td {
-  height: 36px;
-  padding: 0 7px;
-  font-size: 12.5px;
+  height: 32px;
+  padding: 0 3px;
+  overflow: hidden;
+  font-size: 11.5px;
+  text-overflow: clip;
+  white-space: nowrap;
   border-color: var(--formal-border-soft);
 }
 
@@ -654,6 +849,15 @@
   margin-bottom: 0;
 }
 
+.formal-team-arrangement-card .arrangement-tabs-block {
+  margin-bottom: 10px;
+}
+
+.formal-team-arrangement-card .arrangement-overview-tabs {
+  overflow-x: hidden;
+  border-bottom-color: #aad2ff;
+}
+
 .arrangement-overview-tab {
   flex: 0 0 auto;
   min-width: 78px;
@@ -694,6 +898,22 @@
   border-bottom-color: #fff;
 }
 
+.formal-team-arrangement-card .arrangement-overview-tab {
+  min-width: 72px;
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  border-color: #dbe5f2;
+  border-bottom-color: #aad2ff;
+  border-radius: 5px 5px 0 0;
+}
+
+.formal-team-arrangement-card .arrangement-overview-tab.active {
+  border-color: #91caff;
+  border-bottom-color: #fff;
+  box-shadow: inset 0 2px 0 #1677ff;
+}
+
 .arrangement-icon-grid {
   display: grid;
   grid-template-columns: repeat(10, minmax(82px, 1fr));
@@ -708,6 +928,14 @@
 
 .arrangement-tabs-block .arrangement-icon-grid {
   margin-bottom: 0;
+}
+
+.formal-team-arrangement-card .arrangement-icon-grid {
+  grid-template-columns: repeat(10, minmax(78px, 1fr));
+  gap: 2px;
+  padding: 7px 6px 9px;
+  border-color: #e7eef8;
+  border-radius: 0 0 6px 6px;
 }
 
 .arrangement-icon-button {
@@ -743,6 +971,22 @@
 .arrangement-icon-button span {
   font-size: 12px;
   font-weight: 800;
+}
+
+.formal-team-arrangement-card .arrangement-icon-button {
+  gap: 4px;
+  min-height: 46px;
+  padding: 4px;
+  border-radius: 6px;
+}
+
+.formal-team-arrangement-card .arrangement-icon-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+.formal-team-arrangement-card .arrangement-icon-button span {
+  font-size: 11.8px;
 }
 
 .arrangement-overview-sections {
@@ -958,9 +1202,16 @@
 
 .formal-team-arrangement-card .arrangement-section-header {
   min-height: 32px;
-  align-items: flex-start;
+  align-items: center;
   padding: 6px 0 8px;
   margin-bottom: 0;
+}
+
+.formal-team-arrangement-card .arrangement-section-heading {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
 .formal-team-arrangement-card .arrangement-section-title {
@@ -993,6 +1244,7 @@
 }
 
 .formal-team-arrangement-card .arrangement-section-actions {
+  align-self: center;
   gap: 6px;
 }
 
@@ -1078,6 +1330,17 @@
   .team-profile-actions {
     align-items: stretch;
     justify-content: flex-start;
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .team-note-row {
+    grid-template-columns: 1fr;
+  }
+
+  .internal-note-metrics {
+    justify-content: flex-start;
+    max-width: none;
   }
 
   .arrangement-icon-grid {
@@ -1085,7 +1348,14 @@
   }
 
   .workflow-rail {
+    grid-column: 1;
+    grid-row: auto;
     grid-template-columns: repeat(5, minmax(72px, 1fr));
+  }
+
+  .formal-team-arrangement-card .formal-team-badges-line {
+    grid-column: 1;
+    grid-row: auto;
   }
 }
 

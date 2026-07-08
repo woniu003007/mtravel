@@ -51,6 +51,10 @@ public class SalesBookingOrderEntity extends TenantSoftDeleteEntity {
     @TableField("order_role")
     private String orderRole;
 
+    /** 订单管理页标记状态，用于销售人员快速筛选重点订单。 */
+    @TableField("tagging")
+    private Boolean tagging;
+
     /** 业务员员工 ID。 */
     @TableField("salesperson_employee_id")
     private Long salespersonEmployeeId;
@@ -241,6 +245,14 @@ public class SalesBookingOrderEntity extends TenantSoftDeleteEntity {
 
     public void setOrderRole(String orderRole) {
         this.orderRole = orderRole;
+    }
+
+    public Boolean getTagging() {
+        return tagging;
+    }
+
+    public void setTagging(Boolean tagging) {
+        this.tagging = tagging;
     }
 
     public Long getSalespersonEmployeeId() {

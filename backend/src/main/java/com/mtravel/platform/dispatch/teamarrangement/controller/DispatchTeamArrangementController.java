@@ -5,6 +5,9 @@ import com.mtravel.platform.common.ControllerSupport;
 import com.mtravel.platform.dispatch.teamarrangement.dto.TeamArrangementResponse;
 import com.mtravel.platform.dispatch.teamarrangement.dto.TeamArrangementSaveRequest;
 import com.mtravel.platform.dispatch.teamarrangement.dto.TeamArrangementSaveResponse;
+import com.mtravel.platform.dispatch.teamarrangement.dto.TeamArrangementSectionStatusResponse;
+import com.mtravel.platform.dispatch.teamarrangement.dto.TeamArrangementSectionStatusSaveRequest;
+import com.mtravel.platform.dispatch.teamarrangement.dto.TeamArrangementSummaryResponse;
 import com.mtravel.platform.dispatch.teamarrangement.service.DispatchScenicTicketGuestExportService;
 import com.mtravel.platform.dispatch.teamarrangement.service.DispatchTeamArrangementService;
 import com.mtravel.platform.system.log.web.OperationLog;
@@ -66,6 +69,18 @@ public class DispatchTeamArrangementController extends ControllerSupport {
     }
 
     /**
+     * 查询团队安排页后端权威金额汇总。
+     *
+     * @param teamId 团队 ID
+     * @return 应收、成本总览、各分类小计和预算利润
+     */
+    @OperationLog(module = "计调操作", type = "查询")
+    @GetMapping("/sales/team/{teamId}/arrangements/summary")
+    public ApiResponse<TeamArrangementSummaryResponse> summary(@PathVariable Long teamId) {
+        return ApiResponse.ok(service.summary(teamId, currentTenantId()));
+    }
+
+    /**
      * 保存团队安排成本。
      *
      * @param teamId 团队 ID
@@ -100,6 +115,44 @@ public class DispatchTeamArrangementController extends ControllerSupport {
     ) {
         service.delete(teamId, arrangementId, currentTenantId(), currentOperator(authentication));
         return ApiResponse.ok();
+    }
+
+    /**
+     * 查询团队安排分类流程状态。
+     *
+     * @param teamId 团队 ID
+     * @return 分类流程状态列表
+     */
+    @OperationLog(module = "计调操作", type = "查询")
+    @GetMapping("/sales/team/{teamId}/arrangement-section-statuses")
+    public ApiResponse<List<TeamArrangementSectionStatusResponse>> listSectionStatuses(@PathVariable Long teamId) {
+        return ApiResponse.ok(service.listSectionStatuses(teamId, currentTenantId()));
+    }
+
+    /**
+     * 保存团队安排分类流程状态。
+     *
+     * @param teamId 团队 ID
+     * @param arrangementType 分类类型
+     * @param request 保存请求
+     * @param authentication 当前登录信息
+     * @return 保存后的分类状态
+     */
+    @OperationLog(module = "计调操作", type = "修改")
+    @PostMapping("/sales/team/{teamId}/arrangement-section-statuses/{arrangementType}")
+    public ApiResponse<TeamArrangementSectionStatusResponse> saveSectionStatus(
+            @PathVariable Long teamId,
+            @PathVariable String arrangementType,
+            @Valid @RequestBody TeamArrangementSectionStatusSaveRequest request,
+            Authentication authentication
+    ) {
+        return ApiResponse.ok(service.saveSectionStatus(
+                teamId,
+                arrangementType,
+                request.status(),
+                currentTenantId(),
+                currentOperator(authentication)
+        ));
     }
 
     /**

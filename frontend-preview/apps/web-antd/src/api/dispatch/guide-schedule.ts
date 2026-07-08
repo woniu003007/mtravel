@@ -17,6 +17,7 @@ export namespace DispatchGuideApi {
   }
 
   export interface TeamGuide {
+    approvedImprestAmount?: number;
     createdAt?: string;
     endAt: string;
     feeMemo?: string;
@@ -26,8 +27,17 @@ export namespace DispatchGuideApi {
     guideMobile?: string;
     guideName: string;
     id: number;
+    imprestApprovalStatus?:
+      | 'approved_unpaid'
+      | 'none'
+      | 'paid'
+      | 'partial_paid'
+      | 'pending';
     imprestAmount: number;
+    imprestBalanceAmount?: number;
     operationFee: number;
+    paidImprestAmount?: number;
+    pendingImprestAmount?: number;
     startAt: string;
     status: TeamGuideStatus;
     teamId: number;
@@ -50,6 +60,27 @@ export namespace DispatchGuideApi {
   export interface TeamGuideFieldUpdateParams {
     field: string;
     value?: string;
+  }
+
+  export type GuideUnavailableType = 'leave' | 'team';
+
+  export interface GuideAvailability {
+    available: boolean;
+    gender?: string;
+    guideId: number;
+    guideMobile?: string;
+    guideName: string;
+    unavailableReason?: string;
+    unavailableType?: GuideUnavailableType;
+  }
+
+  export interface GuideAvailabilityQueryParams {
+    availableOnly?: boolean;
+    endAt: string;
+    keyword?: string;
+    page?: number;
+    pageSize?: number;
+    startAt: string;
   }
 
   export interface LeaveRecord {
@@ -177,6 +208,15 @@ export function getGuideScheduleCalendar(params: {
     '/dispatch/guide-schedule/calendar',
     { params },
   );
+}
+
+/** 查询指定时间段内导游是否可出团。 */
+export function getGuideAvailability(
+  params: DispatchGuideApi.GuideAvailabilityQueryParams,
+) {
+  return requestClient.get<
+    DispatchGuideApi.PageResult<DispatchGuideApi.GuideAvailability>
+  >('/dispatch/guide-schedule/availability', { params });
 }
 
 /** 分页查询导游请假。 */

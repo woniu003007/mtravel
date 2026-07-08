@@ -2,6 +2,7 @@
 import type { Dayjs } from 'dayjs';
 import type { DispatchGuideApi } from '#/api/dispatch/guide-schedule';
 import type { EnterpriseGuideApi } from '#/api/enterprise/guide';
+import type { GuideImprestApi } from '#/api/finance/guide-imprest';
 import type { SalesProductApi } from '#/api/sales/product';
 import type { SalesTeamApi } from '#/api/sales/team';
 import type { RegionPath } from '#/utils/region';
@@ -21,19 +22,28 @@ import {
   Select,
   Spin,
   Tag,
+  Table,
   Textarea,
+  Tooltip,
   message,
 } from 'ant-design-vue';
 import dayjs from 'dayjs';
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import {
   createTeamGuide,
   deleteTeamGuide,
+  getGuideAvailability,
   getTeamGuides,
   updateTeamGuideField,
 } from '#/api/dispatch/guide-schedule';
+import {
+  getGuideImprestDetail,
+  getGuideImprestPage,
+  previewGuideImprest,
+  submitGuideImprest,
+} from '#/api/finance/guide-imprest';
 import {
   calculateVehicleQuote as calculateVehicleQuoteRule,
   getVehicleQuoteRuleAll,
@@ -41,7 +51,6 @@ import {
 import { getExpenseItemAll } from '#/api/enterprise/expense-item';
 import { getEnterpriseDepartmentAll } from '#/api/enterprise/department';
 import { getEnterpriseEmployeeAll } from '#/api/enterprise/employee';
-import { getEnterpriseGuideAll } from '#/api/enterprise/guide';
 import {
   type EnterpriseProductDictionaryApi as ProductDictionaryNamespace,
   getProductDictionaryAll,
@@ -58,8 +67,11 @@ import {
   exportScenicTicketGuests,
   getSalesTeamOperationDetail,
   getTeamArrangements,
+  getTeamArrangementSummary,
+  getTeamArrangementSectionStatuses,
   saveSalesTeam,
   saveTeamArrangement,
+  saveTeamArrangementSectionStatus,
 } from '#/api/sales/team';
 import {
   getVehicleUsageHistorySuggestions,
@@ -68,6 +80,7 @@ import {
 import { buildRegionOptions } from '#/utils/region';
 
 import ArrangementEditorModal from '../components/ArrangementEditorModal.vue';
+import FormalTeamPageHeader from '../components/FormalTeamPageHeader.vue';
 import { showTeamItineraryModal } from '../components/itinerary-modal';
 import {
   createGroundAgentPackagePriceLine,
@@ -98,6 +111,15 @@ type OperationOrderRow = SalesTeamApi.OperationOrderRow;
 type DatePickerValue = Dayjs | string | undefined;
 type TeamGuideRow = DispatchGuideApi.TeamGuide;
 type TeamArrangementRow = SalesTeamApi.TeamArrangement;
+type TeamArrangementSummary = SalesTeamApi.TeamArrangementSummary;
+
+const DEFAULT_INTERNAL_REMARK_TEMPLATE = [
+  '>导游要求：',
+  '>控房要求：',
+  '>控车要求：',
+  '>用餐要求：',
+  '>其它要求：',
+].join('\n');
 
 type ArrangementType =
   | 'extra_fee'
@@ -161,15 +183,48 @@ type TeamProfileSelectOption = {
   value: number | string;
 };
 
-type QuickProfileEditorType = 'business_type' | 'department' | 'escort' | 'operator';
+type QuickProfileEditorType = 'business_type' | 'department' | 'escort' | 'internal_note' | 'operator';
 
 type TeamProfileDraft = {
   businessType?: string;
   departmentId?: number;
   departmentName?: string;
   escortEmployeeName?: string;
+  internalRemark?: string;
   operatorEmployeeId?: number;
   operatorEmployeeName?: string;
+  optionalMarkupRate?: number;
+  perCapitaPitAmount?: number;
+  perCapitaShoppingAmount?: number;
+};
+
+type QuickProfileEditorField =
+  | 'businessType'
+  | 'departmentId'
+  | 'escortEmployeeName'
+  | 'internalRemark'
+  | 'operatorEmployeeId';
+
+type GuideDraft = Omit<DispatchGuideApi.TeamGuideSaveParams, 'guideId'> & {
+  guideId?: number;
+};
+
+type GuideEditDraft = {
+  endAt?: DatePickerValue;
+  feeMemo?: string;
+  guideFee?: number;
+  guideMemo?: string;
+  imprestAmount?: number;
+  operationFee?: number;
+  startAt?: DatePickerValue;
+  tentative?: boolean;
+};
+
+type GuidePickerTabKey = 'all' | 'available';
+
+type GuidePickerTab = {
+  key: GuidePickerTabKey;
+  label: string;
 };
 
 type TeamBadgeItem = {
@@ -181,7 +236,7 @@ type TeamBadgeItem = {
 
 type QuickProfileEditorConfig = {
   buttonText: string;
-  field: keyof TeamProfileDraft;
+  field: QuickProfileEditorField;
   inputType: 'select' | 'textarea';
   label: string;
   optionsType?: 'business_type' | 'department' | 'employee';
@@ -232,6 +287,14 @@ const quickProfileEditorConfigs: Record<QuickProfileEditorType, QuickProfileEdit
     placeholder: '最多输入100个汉字',
     title: '团队全陪信息',
   },
+  internal_note: {
+    buttonText: '保存信息',
+    field: 'internalRemark',
+    inputType: 'textarea',
+    label: '内部备注',
+    placeholder: '填写导游、控房、控车、用餐和其它要求',
+    title: '内部备注',
+  },
 };
 
 const supplierCategoryMap: Record<ArrangementType, SupplierApi.Category | undefined> = {
@@ -266,18 +329,41 @@ const optionsLoading = ref(false);
 const guideModalOpen = ref(false);
 const guideSaving = ref(false);
 const guideLoading = ref(false);
-const guideOptionsLoaded = ref(false);
+const guideModalEditingRecord = ref<TeamGuideRow>();
+const guideEditOpen = ref(false);
+const guideEditSaving = ref(false);
+const guideEditRecord = ref<TeamGuideRow>();
+const guideImprestModalOpen = ref(false);
+const guideImprestLoading = ref(false);
+const guideImprestSubmitting = ref(false);
+const guideImprestCurrentRecord = ref<TeamGuideRow>();
+const guideImprestPreview = ref<GuideImprestApi.Preview>();
+const guideImprestApplyRemark = ref('');
+const guideImprestCompanyMarkupRate = ref<number | undefined>();
+const guideImprestRequestedAmount = ref<number | undefined>();
+const guideImprestRecordsOpen = ref(false);
+const guideImprestRecordsLoading = ref(false);
+const guideImprestRecordDetailOpen = ref(false);
+const guideImprestRecordDetailLoading = ref(false);
+const guideImprestRecordsCurrentRecord = ref<TeamGuideRow>();
+const guideImprestRecordRows = ref<GuideImprestApi.Imprest[]>([]);
+const guideImprestRecordDetail = ref<GuideImprestApi.Imprest>();
 const quickProfileEditorOpen = ref(false);
 const quickProfileEditorType = ref<QuickProfileEditorType>('business_type');
 const quickProfileSaving = ref(false);
 const teamProfileOptionsLoading = ref(false);
 const vehicleQuoteCalculating = ref(false);
 const activeEditorType = ref<ArrangementType>('traffic');
-const sectionLocalStates = reactive<Record<string, 'done' | 'none' | undefined>>({});
+const guidePickerActiveTab = ref<GuidePickerTabKey>('available');
+const guidePickerKeyword = ref('');
+const guideAvailabilityLoading = ref(false);
+const sectionLocalStates = reactive<Record<string, SalesTeamApi.TeamArrangementSectionStatus | undefined>>({});
 const detail = ref<OperationDetail>();
 const teamGuides = ref<TeamGuideRow[]>([]);
 const teamArrangements = ref<TeamArrangementRow[]>([]);
-const guideOptions = ref<EnterpriseGuideApi.Item[]>([]);
+const teamArrangementSummary = ref<TeamArrangementSummary>();
+const guideAvailabilityRows = ref<DispatchGuideApi.GuideAvailability[]>([]);
+const guideAvailabilityTotal = ref(0);
 const arrangementForm = reactive<ArrangementEditorForm>(createDefaultArrangementEditorForm('traffic'));
 const teamProfileDraft = reactive<TeamProfileDraft>({});
 const editingArrangementId = ref<number | undefined>();
@@ -303,11 +389,11 @@ const lastVehicleQuoteResult = ref<{
   ruleName: string;
 }>();
 const regionOptions = buildRegionOptions();
-const guideDraft = reactive<DispatchGuideApi.TeamGuideSaveParams>({
+const guideDraft = reactive<GuideDraft>({
   endAt: '',
   feeMemo: '',
   guideFee: 0,
-  guideId: 0,
+  guideId: undefined,
   guideMemo: '',
   imprestAmount: 0,
   operationFee: 0,
@@ -317,6 +403,16 @@ const guideDraft = reactive<DispatchGuideApi.TeamGuideSaveParams>({
 const guideDraftDates = reactive({
   endAt: undefined as DatePickerValue,
   startAt: undefined as DatePickerValue,
+});
+const guideEditDraft = reactive<GuideEditDraft>({
+  endAt: undefined,
+  feeMemo: '',
+  guideFee: 0,
+  guideMemo: '',
+  imprestAmount: 0,
+  operationFee: 0,
+  startAt: undefined,
+  tentative: false,
 });
 
 const arrangementShortcuts: ArrangementShortcut[] = [
@@ -415,6 +511,11 @@ const arrangementToolActions: ArrangementToolAction[] = [
   { icon: 'lucide:printer', label: '打印毛利表' },
 ];
 
+const guidePickerTabs: GuidePickerTab[] = [
+  { key: 'available', label: '可用导游' },
+  { key: 'all', label: '全部导游' },
+];
+
 const teamId = computed(() => Number(route.params.id || 0));
 const team = computed(() => detail.value?.team);
 const product = computed(() => detail.value?.product);
@@ -444,64 +545,42 @@ const orderOptions = computed<SelectOption[]>(() => [
 ]);
 const pageTitle = computed(() => (team.value?.teamNo ? `团队安排 - ${team.value.teamNo}` : '团队安排'));
 const teamDisplayName = computed(() => product.value?.productName || team.value?.teamNo || '--');
-const orderReceivable = computed(() => sumOrderMoney('receivableAmount'));
-const orderReceived = computed(() => sumOrderMoney('receivedAmount'));
-const orderBalance = computed(() => sumOrderMoney('balanceAmount'));
+const orderReceivable = computed(() => numericMoney(teamArrangementSummary.value?.orderReceivableAmount));
+const orderReceived = computed(() => numericMoney(teamArrangementSummary.value?.orderReceivedAmount));
+const orderBalance = computed(() => numericMoney(teamArrangementSummary.value?.orderBalanceAmount));
 const orderStatusSummary = computed(() => {
   const confirmed = orders.value.filter((item) => isOrderStatus(item, ['已确认', 'confirmed'])).length;
   const pending = orders.value.filter((item) => isOrderStatus(item, ['未处理', 'pending'])).length;
   const cancelled = orders.value.filter((item) => isOrderStatus(item, ['已取消', 'cancelled'])).length;
   return `${confirmed} | ${pending} | ${cancelled}`;
 });
-const guideSelectOptions = computed(() =>
-  guideOptions.value.map((item) => ({
-    label: item.mobilePhone
-      ? `${item.guideName}（${item.mobilePhone}）`
-      : item.guideName,
-    value: item.id,
-  })),
-);
+const guideModalEditing = computed(() => !!guideModalEditingRecord.value);
+const selectedGuideDraft = computed(() => (
+  guideAvailabilityRows.value.find((item) => item.guideId === guideDraft.guideId)
+  || (
+    guideModalEditingRecord.value?.guideId === guideDraft.guideId
+      ? guideModalEditingRecord.value
+      : undefined
+  )
+));
 const selectedScenicResourceRelation = computed(() => (
   resourceRelationOptions.value.find((item) => (
     item.resourceName === arrangementForm.resourceName
     && item.supplierId === arrangementForm.supplierId
   ))
 ));
-const guideFeeTotal = computed(() => teamGuides.value.reduce((sum, item) => sum + Number(item.guideFee || 0), 0));
-const guideOperationFeeTotal = computed(() => teamGuides.value.reduce((sum, item) => sum + Number(item.operationFee || 0), 0));
-const guideImprestTotal = computed(() => teamGuides.value.reduce((sum, item) => sum + Number(item.imprestAmount || 0), 0));
-const regularArrangementCostTotal = computed(() => (
-  teamArrangements.value
-    .filter((item) => !['optional', 'shopping'].includes(item.arrangementType))
-    .reduce((sum, item) => sum + numericMoney(item.totalAmount || item.costAmount), 0)
+const guideFeeTotal = computed(() => numericMoney(teamArrangementSummary.value?.guideFeeAmount));
+const guideOperationFeeTotal = computed(() => numericMoney(teamArrangementSummary.value?.guideOperationFeeAmount));
+const guideImprestTotal = computed(() => numericMoney(teamArrangementSummary.value?.guideImprestAmount));
+const guideApprovedImprestTotal = computed(() => teamGuides.value.reduce(
+  (sum, item) => sum + numericMoney(item.approvedImprestAmount),
+  0,
 ));
-const optionalCompanyProfitTotal = computed(() => (
-  teamArrangements.value
-    .filter((item) => item.arrangementType === 'optional')
-    .reduce((sum, item) => (
-      sum
-      + numericMoney(item.saleAmount)
-      - numericMoney(item.costAmount)
-      - numericMoney(item.guideCommissionAmount)
-    ), 0)
+const guidePendingImprestTotal = computed(() => teamGuides.value.reduce(
+  (sum, item) => sum + numericMoney(item.pendingImprestAmount),
+  0,
 ));
-const shoppingCompanyProfitTotal = computed(() => (
-  teamArrangements.value
-    .filter((item) => item.arrangementType === 'shopping')
-    .reduce((sum, item) => (
-      sum
-      + numericMoney(item.headFeeAmount)
-      + numericMoney(item.companyRebateAmount)
-      - numericMoney(item.guideCommissionAmount)
-    ), 0)
-));
-const budgetProfit = computed(() => (
-  orderReceivable.value
-  + optionalCompanyProfitTotal.value
-  + shoppingCompanyProfitTotal.value
-  - regularArrangementCostTotal.value
-  - guideFeeTotal.value
-));
+const budgetProfitAmount = computed(() => numericMoney(teamArrangementSummary.value?.budgetProfitAmount));
 const teamTravelDays = computed(() => Math.max(Number(team.value?.travelDays || 1), 1));
 const scheduleDayOptions = computed<SelectOption[]>(() => [
   { label: '=出发日期=', value: '=出发日期=' },
@@ -535,39 +614,13 @@ const showMultiOrderAveragePriceNotice = computed(() => (
   arrangementForm.allocationMode === 'multi_order_average'
 ));
 const costColumns = computed<CostColumn[]>(() => {
-  const base = [
-    { key: 'traffic', label: '大交通' },
-    { key: 'hotel', label: '住宿' },
-    { key: 'vehicle', label: '用车' },
-    { key: 'scenic', label: '景区' },
-    { key: 'meal', label: '用餐' },
-    { key: 'other', label: '其它' },
-    { key: 'ground_agent', label: '地接' },
-    { key: 'extra_fee', label: '附加' },
-    { key: 'optional', label: '自费' },
-    { key: 'shopping', label: '购物' },
-  ].map((item) => {
-    const records = arrangementsByType(item.key as ArrangementType);
-    return {
-      ...item,
-      cash: sumArrangementAmount(records, 'cashAmount'),
-      credit: sumArrangementAmount(records, 'creditAmount'),
-    };
-  });
-  const cashTotal = base.reduce((sum, item) => sum + item.cash, 0);
-  const creditTotal = base.reduce((sum, item) => sum + item.credit, 0);
-  return [
-    ...base,
-    { cash: cashTotal, credit: creditTotal, key: 'total', label: '合计' },
-    { cash: guideFeeTotal.value, credit: 0, key: 'guide_service', label: '导服' },
-    { cash: guideOperationFeeTotal.value, credit: 0, key: 'operation_fee', label: '操作费' },
-    { cash: guideImprestTotal.value, credit: 0, key: 'reserve_fund', label: '备用金' },
-  ];
+  return (teamArrangementSummary.value?.costColumns || []).map((item) => ({
+    cash: numericMoney(item.cashAmount),
+    credit: numericMoney(item.creditAmount),
+    key: item.key,
+    label: item.label,
+  }));
 });
-function costColumnAmount(key: string, field: 'cash' | 'credit') {
-  return costColumns.value.find((item) => item.key === key)?.[field] || 0;
-}
-
 const costOverviewSummaryItems = computed(() => {
   const cashTotal = costColumnAmount('total', 'cash');
   const creditTotal = costColumnAmount('total', 'credit');
@@ -581,7 +634,6 @@ const costOverviewSummaryItems = computed(() => {
     { key: 'self_pay_income', label: '自费收入', value: 0 },
   ];
 });
-
 const metricItems = computed(() => [
   { key: 'travelDays', label: '旅游天数', value: `${team.value?.travelDays ?? 1} 天` },
   { key: 'standard', label: '接待标准', value: product.value?.receptionStandard || '--' },
@@ -589,15 +641,57 @@ const metricItems = computed(() => [
   { key: 'receivable', label: '应收/已收/余额', value: `${formatPlainMoney(orderReceivable.value)} | ${formatPlainMoney(orderReceived.value)} | ${formatPlainMoney(orderBalance.value)}` },
   { key: 'orderStatus', label: '订单已确认/未处理/已取消', value: orderStatusSummary.value },
   { key: 'paid', label: '已付', value: '--' },
-  { key: 'profit', label: '预算利润', value: formatPlainMoney(budgetProfit.value) },
+  { key: 'profit', label: '预算利润', value: formatPlainMoney(budgetProfitAmount.value) },
 ]);
+const formalHeaderMetrics = computed(() => metricItems.value.map((item) => ({
+  ...item,
+  clickable: item.key === 'profit',
+})));
+const arrangedGuideSummary = computed(() => {
+  const summaries = teamGuides.value.map((item) => {
+    const name = item.guideName?.trim();
+    if (!name) return '';
+    const mobile = item.guideMobile?.trim();
+    return mobile ? `${name}[Tel:${mobile}]` : name;
+  }).filter(Boolean);
+  return summaries.length > 0 ? summaries.join('、') : team.value?.guideSummary || '--';
+});
 const teamBadges = computed<TeamBadgeItem[]>(() => [
   { color: 'orange', editorType: 'business_type', label: '业务类型', value: team.value?.businessType || product.value?.businessType || '未设置' },
   { color: 'blue', editorType: 'department', label: '部门', value: team.value?.departmentName || '未设置' },
   { color: 'blue', editorType: 'operator', label: '操作计调', value: team.value?.operatorEmployeeName || '未设置' },
-  { color: 'orange', label: '导游', value: team.value?.guideSummary || '--' },
+  { color: 'orange', label: '导游', value: arrangedGuideSummary.value },
   { color: 'green', label: '领队', value: team.value?.leaderSummary || '--' },
   { color: 'default', editorType: 'escort', label: '全陪', value: team.value?.escortEmployeeName || team.value?.escortSummary || '未设置' },
+]);
+const formalHeaderBadges = computed(() => [
+  {
+    color: 'blue',
+    key: 'team_type',
+    label: '团队类型',
+    value: teamTypeLabel(team.value?.teamType),
+  },
+  ...teamBadges.value.map((badge) => ({
+    color: badge.color,
+    editable: Boolean(badge.editorType),
+    key: badge.label,
+    label: badge.label,
+    value: badge.value,
+  })),
+]);
+const formalHeaderActions = computed(() => [
+  { icon: 'lucide:clipboard-list', key: 'teamOperation', label: '团队管理' },
+  { icon: 'lucide:briefcase', key: 'itinerary', label: '查看行程' },
+]);
+const formalHeaderToolActions = computed(() => arrangementToolActions.map((action) => ({
+  icon: action.icon,
+  key: action.label,
+  label: action.label,
+})));
+const formalHeaderNoteMetrics = computed(() => [
+  `人均坑位：${formatMoney(content.value?.perCapitaPitAmount)}`,
+  `自费加点率：${Number(content.value?.optionalMarkupRate || 0).toFixed(0)}%`,
+  `人均购物：${formatMoney(content.value?.perCapitaShoppingAmount)}`,
 ]);
 const activeQuickProfileEditor = computed(() => quickProfileEditorConfigs[quickProfileEditorType.value]);
 const quickProfileEditorModel = computed({
@@ -628,19 +722,33 @@ function formatDistanceMeters(value?: number) {
   return `${(value / 1000).toFixed(1)}公里`;
 }
 
-function formatMoney(value?: number) {
+function formatMoney(value?: number | string) {
   return `¥${Number(value || 0).toFixed(2)}`;
 }
 
-function costAmountClass(value?: number, extraClass?: string) {
-  const classes = [Number(value || 0) === 0 ? 'cost-amount-zero' : 'cost-amount-nonzero'];
+function formatCostCashMoney(value?: number | string) {
+  return formatMoney(value);
+}
+
+function formatCostDetailMoney(value?: number | string) {
+  return formatMoney(value);
+}
+
+function costAmountClass(value?: number | string, extraClass?: string) {
+  const classes = [numericMoney(value) === 0 ? 'cost-amount-zero' : 'cost-amount-nonzero'];
   if (extraClass) {
     classes.push(extraClass);
   }
   return classes;
 }
 
-function formatPlainMoney(value?: number) {
+function formatDateTime(value?: string) {
+  if (!value) return '--';
+  const parsed = dayjs(value);
+  return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm') : value;
+}
+
+function formatPlainMoney(value?: number | string) {
   return `${Number(value || 0).toFixed(0)} 元`;
 }
 
@@ -653,17 +761,17 @@ function dictionaryOptions(items: DictItem[]): TeamProfileSelectOption[] {
     }));
 }
 
-function numericMoney(value?: number) {
+function numericMoney(value?: number | string) {
   const result = Number(value || 0);
   return Number.isFinite(result) ? result : 0;
 }
 
-function sumArrangementAmount(records: TeamArrangementRow[], field: 'cashAmount' | 'creditAmount') {
-  return records.reduce((sum, item) => sum + numericMoney(item[field]), 0);
-}
-
 function arrangementsByType(type: ArrangementType) {
   return teamArrangements.value.filter((item) => item.arrangementType === type);
+}
+
+function summaryByType(type: ArrangementType) {
+  return teamArrangementSummary.value?.sectionSummaries?.find((item) => item.arrangementType === type);
 }
 
 function sectionStatusText(type: ArrangementType) {
@@ -682,13 +790,17 @@ function sectionStatusTone(type: ArrangementType) {
 }
 
 function sectionSummary(type: ArrangementType): SectionSummary {
-  const records = arrangementsByType(type);
+  const summary = summaryByType(type);
   return {
-    cash: sumArrangementAmount(records, 'cashAmount'),
-    cost: records.reduce((sum, item) => sum + numericMoney(item.totalAmount || item.costAmount), 0),
-    count: records.length,
-    credit: sumArrangementAmount(records, 'creditAmount'),
+    cash: numericMoney(summary?.cashAmount),
+    cost: numericMoney(summary?.costAmount),
+    count: summary?.count || 0,
+    credit: numericMoney(summary?.creditAmount),
   };
+}
+
+function costColumnAmount(key: string, field: 'cash' | 'credit') {
+  return costColumns.value.find((item) => item.key === key)?.[field] || 0;
 }
 
 async function loadTeamProfileOptions() {
@@ -726,8 +838,12 @@ function resetTeamProfileDraft() {
     departmentId: team.value?.departmentId,
     departmentName: team.value?.departmentName,
     escortEmployeeName: team.value?.escortEmployeeName || team.value?.escortSummary,
+    internalRemark: content.value?.internalRemark || DEFAULT_INTERNAL_REMARK_TEMPLATE,
     operatorEmployeeId: team.value?.operatorEmployeeId,
     operatorEmployeeName: team.value?.operatorEmployeeName,
+    optionalMarkupRate: Number(content.value?.optionalMarkupRate ?? 0),
+    perCapitaPitAmount: Number(content.value?.perCapitaPitAmount ?? 0),
+    perCapitaShoppingAmount: Number(content.value?.perCapitaShoppingAmount ?? 0),
   });
 }
 
@@ -782,6 +898,14 @@ function buildTeamProfilePayload(editorType: QuickProfileEditorType): SalesTeamA
       operatorEmployeeName: selected?.label || teamProfileDraft.operatorEmployeeName || '',
     };
   }
+  if (editorType === 'internal_note') {
+    return {
+      optionalMarkupRate: teamProfileDraft.optionalMarkupRate,
+      perCapitaPitAmount: teamProfileDraft.perCapitaPitAmount,
+      perCapitaShoppingAmount: teamProfileDraft.perCapitaShoppingAmount,
+      remark: String(teamProfileDraft.internalRemark || '').trim(),
+    };
+  }
   return {
     escortEmployeeName: String(teamProfileDraft.escortEmployeeName || '').trim(),
   };
@@ -813,6 +937,9 @@ function formatPriceLines(record: TeamArrangementRow) {
       const name = line.projectName || record.itemName;
       const unitPrice = Number(line.unitPrice || 0).toFixed(2);
       const quantity = Number(line.quantity || 0);
+      if (quantity <= 0) {
+        return `${name} 参考单价 ¥${unitPrice}`;
+      }
       return `${name} ¥${unitPrice} × ${quantity}`;
     })
     .join('；');
@@ -869,7 +996,7 @@ function arrangementCell(record: TeamArrangementRow, section: ArrangementSection
       return record.mealType || '--';
     case '人数':
     case '进店人数':
-      return String(record.peopleCount || 0);
+      return Number(record.peopleCount || 0) > 0 ? String(record.peopleCount) : '--';
     case '销售价':
       return formatMoney(record.saleAmount);
     case '成本价':
@@ -909,30 +1036,23 @@ function defaultGuideEndAt() {
   return defaultGuideStartAt().add(travelDays - 1, 'day').hour(18).minute(0).second(0);
 }
 
-function guideSelectOptionsForRecord(record: TeamGuideRow) {
-  if (guideSelectOptions.value.some((item) => item.value === record.guideId)) {
-    return guideSelectOptions.value;
-  }
-  return [
-    {
-      label: record.guideMobile
-        ? `${record.guideName}（${record.guideMobile}）`
-        : record.guideName,
-      value: record.guideId,
-    },
-    ...guideSelectOptions.value,
-  ];
+function guideGenderText(gender?: EnterpriseGuideApi.Gender | string) {
+  if (gender === 'male') return '男';
+  if (gender === 'female') return '女';
+  return '未填';
 }
 
-function parseMoney(value?: string) {
-  if (!value) return 0;
-  const normalized = String(value).replace(/[^\d.-]/g, '');
-  const result = Number(normalized);
-  return Number.isFinite(result) ? result : 0;
+function guideDisplayPhone(guide?: DispatchGuideApi.GuideAvailability | EnterpriseGuideApi.Item | TeamGuideRow) {
+  if (!guide) return '--';
+  if ('guideMobile' in guide) return guide.guideMobile || '--';
+  return (guide as EnterpriseGuideApi.Item).mobilePhone
+    || (guide as EnterpriseGuideApi.Item).telephone
+    || '--';
 }
 
-function sumOrderMoney(field: 'balanceAmount' | 'receivableAmount' | 'receivedAmount') {
-  return orders.value.reduce((sum, item) => sum + parseMoney(item[field]), 0);
+function selectGuideForDraft(item: DispatchGuideApi.GuideAvailability) {
+  if (!item.available) return;
+  guideDraft.guideId = item.guideId;
 }
 
 function isOrderStatus(order: OperationOrderRow, statuses: string[]) {
@@ -943,9 +1063,18 @@ function scrollToArrangementAnchor(anchor: string) {
   document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function setSectionLocalState(type: ArrangementType, state: 'done' | 'none') {
-  sectionLocalStates[type] = state;
-  message.info('分类状态后续接入团队流程状态表');
+async function scrollToRouteHashAnchor() {
+  const anchor = route.hash?.replace('#', '');
+  if (!anchor) return;
+  await nextTick();
+  requestAnimationFrame(() => scrollToArrangementAnchor(anchor));
+}
+
+async function setSectionLocalState(type: ArrangementType, state: Exclude<SalesTeamApi.TeamArrangementSectionStatus, 'pending'>) {
+  if (!teamId.value) return;
+  const saved = await saveTeamArrangementSectionStatus(teamId.value, type, state);
+  sectionLocalStates[type] = saved.status;
+  message.success(state === 'done' ? '分类状态已标记为完成' : '分类状态已标记为无需');
 }
 
 async function openArrangementEditor(type: ArrangementType) {
@@ -1394,11 +1523,19 @@ function syncOptionalLineToForm() {
   let cashAmount = 0;
   let guideCommissionAmount = 0;
   arrangementForm.priceLines.forEach((line) => {
-    peopleCount += Number(line.quantity || 0);
-    saleAmount += Number(line.salePrice || 0);
-    costAmount += Number(line.costPrice || 0);
+    const quantity = Number(line.quantity || 0);
+    const salePrice = Number(line.salePrice || 0);
+    const costPrice = Number(line.costPrice || 0);
+    const guideCommissionRate = Number(line.guideCommissionRate || 0);
+    const guideCommissionFixedAmount = Number(line.guideCommissionAmount || 0);
+    const guideCommissionUnitAmount = guideCommissionFixedAmount > 0
+      ? guideCommissionFixedAmount
+      : Math.max(salePrice - costPrice, 0) * guideCommissionRate / 100;
+    peopleCount += quantity;
+    saleAmount += quantity * salePrice;
+    costAmount += quantity * costPrice;
     cashAmount += Number(line.cashAmount || 0);
-    guideCommissionAmount += Number(line.guideCommissionAmount || 0);
+    guideCommissionAmount += quantity * guideCommissionUnitAmount;
   });
   arrangementForm.peopleCount = peopleCount;
   arrangementForm.saleAmount = saleAmount;
@@ -1636,21 +1773,115 @@ function resetGuideDraft() {
     endAt: '',
     feeMemo: '',
     guideFee: 0,
-    guideId: 0,
+    guideId: undefined,
     guideMemo: '',
     imprestAmount: 0,
     operationFee: 0,
     startAt: '',
     tentative: false,
   });
+  guidePickerActiveTab.value = 'available';
+  guidePickerKeyword.value = '';
   guideDraftDates.startAt = defaultGuideStartAt();
   guideDraftDates.endAt = defaultGuideEndAt();
 }
 
-async function loadGuideOptions() {
-  if (guideOptionsLoaded.value) return;
-  guideOptions.value = await getEnterpriseGuideAll(false);
-  guideOptionsLoaded.value = true;
+function guideRemarkSummary(record: TeamGuideRow) {
+  const parts = [
+    record.feeMemo ? `费用：${record.feeMemo}` : '',
+    record.guideMemo ? `备注：${record.guideMemo}` : '',
+  ].filter(Boolean);
+  return parts.length ? parts.join('；') : '--';
+}
+
+function resetGuideEditDraft(record: TeamGuideRow) {
+  Object.assign(guideEditDraft, {
+    endAt: dateTimeValue(record.endAt),
+    feeMemo: record.feeMemo || '',
+    guideFee: numericMoney(record.guideFee),
+    guideMemo: record.guideMemo || '',
+    imprestAmount: numericMoney(record.imprestAmount),
+    operationFee: numericMoney(record.operationFee),
+    startAt: dateTimeValue(record.startAt),
+    tentative: !!record.tentative,
+  });
+}
+
+function openGuideEditModal(record: TeamGuideRow) {
+  guideEditRecord.value = record;
+  resetGuideEditDraft(record);
+  guideEditOpen.value = true;
+}
+
+async function submitGuideEditDraft() {
+  const record = guideEditRecord.value;
+  if (!record) return;
+  const startAt = formatBackendDateTime(guideEditDraft.startAt);
+  const endAt = formatBackendDateTime(guideEditDraft.endAt);
+  if (!startAt || !endAt) {
+    message.warning('请填写上团和下团时间');
+    return;
+  }
+  const fields = [
+    ['guideFee', guideEditDraft.guideFee],
+    ['imprestAmount', guideEditDraft.imprestAmount],
+    ['operationFee', guideEditDraft.operationFee],
+    ['startAt', startAt],
+    ['endAt', endAt],
+    ['feeMemo', guideEditDraft.feeMemo?.trim()],
+    ['guideMemo', guideEditDraft.guideMemo?.trim()],
+    ['tentative', guideEditDraft.tentative],
+  ] as Array<[string, boolean | number | string | undefined]>;
+  guideEditSaving.value = true;
+  try {
+    let latest = record;
+    for (const [field, value] of fields) {
+      latest = await updateTeamGuideField(teamId.value, record.id, {
+        field,
+        value: value === undefined || value === null ? '' : String(value),
+      });
+    }
+    const index = teamGuides.value.findIndex((item) => item.id === record.id);
+    if (index >= 0) {
+      teamGuides.value[index] = latest;
+    }
+    guideEditOpen.value = false;
+    await loadArrangementSummary();
+    message.success('导游安排已保存');
+  } finally {
+    guideEditSaving.value = false;
+  }
+}
+
+async function loadGuideAvailability() {
+  const startAt = formatBackendDateTime(guideDraftDates.startAt);
+  const endAt = formatBackendDateTime(guideDraftDates.endAt);
+  if (!startAt || !endAt) return;
+  guideAvailabilityLoading.value = true;
+  try {
+    const result = await getGuideAvailability({
+      availableOnly: guidePickerActiveTab.value === 'available',
+      endAt,
+      keyword: guidePickerKeyword.value.trim() || undefined,
+      page: 1,
+      pageSize: 50,
+      startAt,
+    });
+    guideAvailabilityRows.value = result.items || [];
+    guideAvailabilityTotal.value = Number(result.total || 0);
+    const selectedRow = guideAvailabilityRows.value.find((item) => item.guideId === guideDraft.guideId);
+    const selectedIsCurrentEditingGuide = guideModalEditingRecord.value?.guideId === guideDraft.guideId;
+    if (selectedRow && !selectedRow.available && !selectedIsCurrentEditingGuide) {
+      guideDraft.guideId = undefined;
+    }
+  } finally {
+    guideAvailabilityLoading.value = false;
+  }
+}
+
+async function setGuidePickerTab(tab: GuidePickerTabKey) {
+  guidePickerActiveTab.value = tab;
+  await loadGuideAvailability();
 }
 
 async function loadTeamGuides() {
@@ -1664,13 +1895,27 @@ async function loadTeamGuides() {
 }
 
 async function openGuideModal() {
+  guideModalEditingRecord.value = undefined;
   resetGuideDraft();
-  await loadGuideOptions();
+  await loadGuideAvailability();
+  guideModalOpen.value = true;
+}
+
+async function openGuidePickerForRow(record: TeamGuideRow) {
+  guideModalEditingRecord.value = record;
+  resetGuideDraft();
+  Object.assign(guideDraft, {
+    guideId: record.guideId,
+  });
+  guideDraftDates.startAt = dateTimeValue(record.startAt) || defaultGuideStartAt();
+  guideDraftDates.endAt = dateTimeValue(record.endAt) || defaultGuideEndAt();
+  await loadGuideAvailability();
   guideModalOpen.value = true;
 }
 
 async function submitGuideDraft() {
-  if (!guideDraft.guideId) {
+  const selectedGuideId = guideDraft.guideId;
+  if (!selectedGuideId) {
     message.warning('请选择导游');
     return;
   }
@@ -1682,14 +1927,28 @@ async function submitGuideDraft() {
   }
   guideSaving.value = true;
   try {
-    await createTeamGuide(teamId.value, {
-      ...guideDraft,
-      feeMemo: guideDraft.feeMemo?.trim(),
-      guideMemo: guideDraft.guideMemo?.trim(),
-    });
-    message.success('导游安排已保存');
+    if (guideModalEditingRecord.value) {
+      const result = await updateTeamGuideField(teamId.value, guideModalEditingRecord.value.id, {
+        field: 'guideId',
+        value: String(selectedGuideId),
+      });
+      const index = teamGuides.value.findIndex((item) => item.id === result.id);
+      if (index >= 0) {
+        teamGuides.value[index] = result;
+      }
+      message.success('导游已更换');
+    } else {
+      await createTeamGuide(teamId.value, {
+        ...guideDraft,
+        feeMemo: guideDraft.feeMemo?.trim(),
+        guideId: selectedGuideId,
+        guideMemo: guideDraft.guideMemo?.trim(),
+      });
+      message.success('导游安排已保存');
+    }
     guideModalOpen.value = false;
     await loadTeamGuides();
+    await loadArrangementSummary();
   } finally {
     guideSaving.value = false;
   }
@@ -1702,15 +1961,263 @@ async function saveGuideField(row: TeamGuideRow, field: string, value?: number |
   if (index >= 0) {
     teamGuides.value[index] = result;
   }
+  await loadArrangementSummary();
   message.success('已保存');
 }
 
-async function saveGuideDateField(row: TeamGuideRow, field: 'endAt' | 'startAt', value: DatePickerValue) {
-  await saveGuideField(row, field, formatBackendDateTime(value));
+function guideImprestLineTypeLabel(type?: string) {
+  if (type === 'cash_cost') return '现付成本';
+  if (type === 'optional_deduction') return '自费抵扣';
+  return '明细';
 }
 
-async function saveGuideTentative(row: TeamGuideRow, checked: boolean) {
-  await saveGuideField(row, 'tentative', checked);
+function formatPercent(value?: number) {
+  if (value === undefined || value === null) return '--';
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '--';
+  return `${(Math.abs(numeric) <= 1 ? numeric * 100 : numeric).toFixed(0)}%`;
+}
+
+function guideImprestApprovalStatusLabel(status?: string) {
+  const labels: Record<string, string> = {
+    approved_unpaid: '已批未付',
+    none: '未申请',
+    paid: '已付清',
+    partial_paid: '部分付款',
+    pending: '待审批',
+  };
+  return labels[status || 'none'] || status || '未申请';
+}
+
+function guideImprestApprovalStatusTone(status?: string) {
+  const tones: Record<string, string> = {
+    approved_unpaid: 'blue',
+    none: 'default',
+    paid: 'green',
+    partial_paid: 'cyan',
+    pending: 'orange',
+  };
+  return tones[status || 'none'] || 'default';
+}
+
+function guideImprestRequestStatusLabel(status?: string) {
+  const labels: Record<string, string> = {
+    cancelled: '已作废',
+    draft: '草稿',
+    manager_approved: '总经理已同意',
+    manager_rejected: '总经理已拒绝',
+    paid: '已付款',
+    pending_manager: '待总经理审批',
+    settled: '已结算',
+  };
+  return labels[status || ''] || status || '--';
+}
+
+function guideImprestRequestStatusTone(status?: string) {
+  const tones: Record<string, string> = {
+    cancelled: 'default',
+    draft: 'default',
+    manager_approved: 'blue',
+    manager_rejected: 'red',
+    paid: 'green',
+    pending_manager: 'orange',
+    settled: 'cyan',
+  };
+  return tones[status || ''] || 'default';
+}
+
+function guideImprestRequestedAmountInvalid() {
+  if (!guideImprestPreview.value) {
+    return false;
+  }
+  const amount = Number(guideImprestRequestedAmount.value);
+  return !Number.isFinite(amount) || amount <= 0;
+}
+
+function guideImprestAfterApplyAmount(preview?: GuideImprestApi.Preview) {
+  if (!preview) return 0;
+  return numericMoney(preview.occupiedAuthorizationAmount) + numericMoney(guideImprestRequestedAmount.value);
+}
+
+function guideImprestNeedsEmergencyRemark(preview?: GuideImprestApi.Preview) {
+  if (!preview) return false;
+  return guideImprestAfterApplyAmount(preview) > numericMoney(preview.suggestedImprestAmount);
+}
+
+function guideImprestRemarkMissing() {
+  return guideImprestNeedsEmergencyRemark(guideImprestPreview.value)
+    && !guideImprestApplyRemark.value.trim();
+}
+
+function guideImprestLineFormula(line: GuideImprestApi.CalcLine) {
+  if (line.lineType === 'cash_cost') {
+    return `现付成本直接计入备用金需求：${formatMoney(line.amount)}`;
+  }
+  if (line.lineType === 'optional_deduction') {
+    const salePrice = Number(line.salePrice || 0);
+    const costPrice = Number(line.costPrice || 0);
+    const guideCommission = Number(line.guideCommissionAmount || 0);
+    const guestCount = Number(line.guestCount || 0);
+    const commissionTip = line.guideCommissionCalcType === 'percent'
+      ? `导游提成按比例折算为 ${formatMoney(guideCommission)}/人，`
+      : '';
+    return `${commissionTip}(${formatMoney(salePrice)} - ${formatMoney(costPrice)} - ${formatMoney(guideCommission)}) × ${formatPercent(line.companyMarkupRate)} × ${guestCount}人 = ${formatMoney(line.amount)}`;
+  }
+  return `本行金额：${formatMoney(line.amount)}`;
+}
+
+function guideImprestSummaryFormula(preview?: GuideImprestApi.Preview) {
+  if (!preview) return '';
+  const cashCostAmount = Number(preview.cashCostAmount || 0);
+  const optionalDeductionAmount = Number(preview.optionalDeductionAmount || 0);
+  const calculatedAmount = cashCostAmount - optionalDeductionAmount;
+  if (calculatedAmount >= 0) {
+    return `建议备用金 = 现付总成本 ${formatMoney(cashCostAmount)} - 自费抵扣 ${formatMoney(optionalDeductionAmount)} = ${formatMoney(preview.suggestedImprestAmount)}`;
+  }
+  return `现付总成本 ${formatMoney(cashCostAmount)} - 自费抵扣 ${formatMoney(optionalDeductionAmount)} = -${formatMoney(Math.abs(calculatedAmount))}，所以建议备用金为 ${formatMoney(0)}，导游应上交 ${formatMoney(preview.guideTurnInAmount)}`;
+}
+
+function guideImprestReferenceBalanceFormula(preview?: GuideImprestApi.Preview) {
+  if (!preview) return '';
+  return `建议余额参考 = 建议备用金 ${formatMoney(preview.suggestedImprestAmount)} - 已申请/已批 ${formatMoney(preview.occupiedAuthorizationAmount)} = ${formatMoney(preview.availableAuthorizationAmount)}，仅作风险提示，不限制本次申请`;
+}
+
+function guideImprestEmergencyWarning(preview?: GuideImprestApi.Preview) {
+  if (!guideImprestNeedsEmergencyRemark(preview)) {
+    return '';
+  }
+  return `本次申请后累计备用金 ${formatMoney(guideImprestAfterApplyAmount(preview))} 已超过系统建议金额 ${formatMoney(preview?.suggestedImprestAmount)}，请在申请备注说明应急或特殊项目原因。`;
+}
+
+function teamOptionalMarkupRateAnchor() {
+  const rate = numericMoney(content.value?.optionalMarkupRate);
+  return rate > 0 ? rate : undefined;
+}
+
+async function openGuideImprestCalculator(record: TeamGuideRow) {
+  if (!teamId.value || !record.guideId) {
+    message.warning('请先选择导游');
+    return;
+  }
+  guideImprestCurrentRecord.value = record;
+  guideImprestPreview.value = undefined;
+  guideImprestApplyRemark.value = '';
+  guideImprestCompanyMarkupRate.value = teamOptionalMarkupRateAnchor();
+  guideImprestRequestedAmount.value = undefined;
+  guideImprestModalOpen.value = true;
+  await refreshGuideImprestPreview();
+}
+
+async function refreshGuideImprestPreview() {
+  const currentRecord = guideImprestCurrentRecord.value;
+  if (!teamId.value || !currentRecord?.guideId) {
+    message.warning('请先选择导游');
+    return;
+  }
+  guideImprestLoading.value = true;
+  try {
+    const preview = await previewGuideImprest({
+      companyMarkupRate: guideImprestCompanyMarkupRate.value,
+      guideId: currentRecord.guideId,
+      teamId: teamId.value,
+    });
+    guideImprestPreview.value = preview;
+    guideImprestCompanyMarkupRate.value = numericMoney(
+      preview.companyMarkupRate ?? guideImprestCompanyMarkupRate.value,
+    );
+    guideImprestRequestedAmount.value = numericMoney(
+      preview.suggestedImprestAmount,
+    );
+  } finally {
+    guideImprestLoading.value = false;
+  }
+}
+
+async function useGuideImprestSuggestedAmount() {
+  const currentRecord = guideImprestCurrentRecord.value;
+  const preview = guideImprestPreview.value;
+  if (!currentRecord || !preview) {
+    message.warning('请先计算备用金');
+    return;
+  }
+  const suggestedAmount = numericMoney(preview.suggestedImprestAmount);
+  currentRecord.imprestAmount = suggestedAmount;
+  await saveGuideField(currentRecord, 'imprestAmount', suggestedAmount);
+}
+
+async function submitGuideImprestApplication() {
+  const currentRecord = guideImprestCurrentRecord.value;
+  const preview = guideImprestPreview.value;
+  if (!currentRecord || !preview) {
+    message.warning('请先计算备用金');
+    return;
+  }
+  guideImprestSubmitting.value = true;
+  try {
+    if (guideImprestRequestedAmountInvalid()) {
+      message.warning('本次申请金额必须大于0');
+      return;
+    }
+    if (guideImprestRemarkMissing()) {
+      message.warning('申请后累计备用金超过系统建议金额，请填写应急或特殊项目说明');
+      return;
+    }
+    await submitGuideImprest({
+      companyMarkupRate: guideImprestCompanyMarkupRate.value,
+      guideId: currentRecord.guideId,
+      remark: guideImprestApplyRemark.value.trim() || undefined,
+      requestedAmount: guideImprestRequestedAmount.value,
+      teamId: teamId.value,
+    });
+    message.success('备用金申请已提交');
+    guideImprestModalOpen.value = false;
+    await loadTeamGuides();
+    await loadArrangementSummary();
+  } finally {
+    guideImprestSubmitting.value = false;
+  }
+}
+
+async function openGuideImprestRecords(record: TeamGuideRow) {
+  if (!record.guideId) {
+    message.warning('请先选择导游');
+    return;
+  }
+  guideImprestRecordsCurrentRecord.value = record;
+  guideImprestRecordRows.value = [];
+  guideImprestRecordDetail.value = undefined;
+  guideImprestRecordDetailOpen.value = false;
+  guideImprestRecordsOpen.value = true;
+  await loadGuideImprestRecords(record);
+}
+
+async function loadGuideImprestRecords(record = guideImprestRecordsCurrentRecord.value) {
+  if (!record?.guideId) {
+    return;
+  }
+  guideImprestRecordsLoading.value = true;
+  try {
+    const result = await getGuideImprestPage({
+      guideId: record.guideId,
+      page: 1,
+      pageSize: 50,
+      teamId: team.value?.id || teamId.value,
+    });
+    guideImprestRecordRows.value = result.items || [];
+  } finally {
+    guideImprestRecordsLoading.value = false;
+  }
+}
+
+async function openGuideImprestRecordDetail(record: GuideImprestApi.Imprest) {
+  guideImprestRecordDetailOpen.value = true;
+  guideImprestRecordDetail.value = undefined;
+  guideImprestRecordDetailLoading.value = true;
+  try {
+    guideImprestRecordDetail.value = await getGuideImprestDetail(record.id);
+  } finally {
+    guideImprestRecordDetailLoading.value = false;
+  }
 }
 
 async function removeTeamGuide(row: TeamGuideRow) {
@@ -1721,11 +2228,16 @@ async function removeTeamGuide(row: TeamGuideRow) {
       await deleteTeamGuide(teamId.value, row.id);
       message.success('导游安排已删除');
       await loadTeamGuides();
+      await loadArrangementSummary();
     },
   });
 }
 
 function handleToolAction(action: { label: string }) {
+  if (action.label === '编辑内部备注') {
+    openTeamProfileEditor('internal_note');
+    return;
+  }
   if (action.label === '打印毛利表') {
     openGrossProfitPreview();
     return;
@@ -1734,6 +2246,23 @@ function handleToolAction(action: { label: string }) {
     content: '该动作后续接入正式文件、打印或成本导入接口。',
     title: action.label,
   });
+}
+
+function handleFormalHeaderAction(action: { key: string }) {
+  if (action.key === 'teamOperation') {
+    goTeamOperation();
+    return;
+  }
+  if (action.key === 'itinerary') {
+    showItineraryModal();
+  }
+}
+
+function handleFormalHeaderBadge(badge: { label: string }) {
+  const target = teamBadges.value.find((item) => item.label === badge.label);
+  if (target?.editorType) {
+    openTeamProfileEditor(target.editorType);
+  }
 }
 
 function openGrossProfitPreview() {
@@ -1760,7 +2289,7 @@ function priceLineAmountForSubmit(line: SalesTeamApi.TeamArrangementPriceLine) {
     return Number(line.consumptionAmount || 0);
   }
   if (activeEditorType.value === 'optional') {
-    return Number(line.costPrice || 0);
+    return Number(line.quantity || 0) * Number(line.costPrice || 0);
   }
   return Number(line.amount || Number(line.unitPrice || 0) * Number(line.quantity || 0));
 }
@@ -1900,6 +2429,7 @@ async function submitArrangementDraft() {
     message.success(`${activeArrangementLabel()}安排已保存`);
     arrangementModalOpen.value = false;
     await loadTeamArrangements();
+    await loadArrangementSummary();
   } finally {
     arrangementSaving.value = false;
   }
@@ -1908,6 +2438,22 @@ async function submitArrangementDraft() {
 async function loadTeamArrangements() {
   if (!teamId.value) return;
   teamArrangements.value = await getTeamArrangements(teamId.value);
+}
+
+async function loadArrangementSummary() {
+  if (!teamId.value) return;
+  teamArrangementSummary.value = await getTeamArrangementSummary(teamId.value);
+}
+
+async function loadSectionStatuses() {
+  if (!teamId.value) return;
+  Object.keys(sectionLocalStates).forEach((key) => {
+    delete sectionLocalStates[key];
+  });
+  const rows = await getTeamArrangementSectionStatuses(teamId.value);
+  rows.forEach((item) => {
+    sectionLocalStates[item.arrangementType] = item.status;
+  });
 }
 
 async function removeArrangement(record: TeamArrangementRow) {
@@ -1922,6 +2468,7 @@ async function removeArrangement(record: TeamArrangementRow) {
       await deleteTeamArrangement(teamId.value, record.id);
       message.success('团队安排已删除');
       await loadTeamArrangements();
+      await loadArrangementSummary();
     },
   });
 }
@@ -1942,6 +2489,8 @@ async function loadDetail() {
       getSalesTeamOperationDetail(teamId.value),
       loadTeamGuides(),
       loadTeamArrangements(),
+      loadArrangementSummary(),
+      loadSectionStatuses(),
     ]);
     detail.value = operationDetail;
   } finally {
@@ -1949,107 +2498,39 @@ async function loadDetail() {
   }
 }
 
-onMounted(loadDetail);
+watch(
+  () => route.hash,
+  () => {
+    scrollToRouteHashAnchor();
+  },
+);
+
+onMounted(async () => {
+  await loadDetail();
+  await scrollToRouteHashAnchor();
+});
 </script>
 
 <template>
   <Page :title="pageTitle">
     <Spin :spinning="loading">
       <Card class="team-arrangement-card formal-team-arrangement-card">
-        <div class="formal-arrangement-tool-strip" aria-label="团队安排工具">
-          <div class="formal-tool-strip-title">
-            <IconifyIcon icon="lucide:wrench" />
-            <span>团队工具</span>
-          </div>
-          <div class="formal-tool-strip-actions">
-            <button
-              v-for="action in arrangementToolActions"
-              :key="action.label"
-              type="button"
-              class="formal-arrangement-tool-button"
-              @click="handleToolAction(action)"
-            >
-              <IconifyIcon :icon="action.icon" />
-              <span>{{ action.label }}</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="arrangement-command-bar">
-          <div class="command-main">
-            <div class="form-kicker">团队安排总览 · Group Arrange</div>
-            <div class="team-title-line formal-team-title-line">
-              <div class="team-name">{{ teamDisplayName }}</div>
-              <div class="team-badges formal-team-badges">
-                <Tag color="blue">团队类型：{{ teamTypeLabel(team?.teamType) }}</Tag>
-                <Tag
-                  v-for="badge in teamBadges"
-                  :key="badge.label"
-                  :color="badge.color"
-                  :class="{ editable: badge.editorType }"
-                  @click="badge.editorType && openTeamProfileEditor(badge.editorType)"
-                >
-                  {{ badge.label }}：{{ badge.value }}
-                </Tag>
-              </div>
-            </div>
-          </div>
-
-          <div class="command-side">
-            <div class="workflow-rail" aria-label="团队阶段">
-              <div
-                v-for="(stage, index) in arrangementStages"
-                :key="stage.label"
-                class="stage-flow-item"
-                :class="stage.state"
-              >
-                <span class="stage-index">{{ index + 1 }}</span>
-                <span class="stage-label">{{ stage.label }}</span>
-              </div>
-            </div>
-            <div class="team-profile-actions">
-              <button type="button" class="compact-action" @click="goTeamOperation">
-                <IconifyIcon icon="lucide:clipboard-list" />
-                <span>团队管理</span>
-              </button>
-              <button type="button" class="compact-action" @click="showItineraryModal">
-                <IconifyIcon icon="lucide:briefcase" />
-                <span>查看行程</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="team-metric-strip formal-team-metric-strip">
-            <span
-              v-for="item in metricItems"
-              :key="item.key"
-              class="team-metric-item clickable"
-              :class="`metric-${item.key}`"
-              @click="handleMetricClick(item)"
-            >
-              <em>{{ item.label }}</em>
-              <strong>{{ item.value }}</strong>
-            </span>
-          </div>
-        </div>
-
-        <div class="team-note-row">
-          <div class="internal-note-title">
-            <div>
-              <IconifyIcon icon="lucide:info" />
-              <span>内部备注：{{ content?.internalRemark || '未填写' }}</span>
-            </div>
-            <Button type="link" size="small" @click="handleToolAction({ label: '编辑内部备注' })">
-              <IconifyIcon icon="lucide:file-pen-line" />
-              <span>编辑</span>
-            </Button>
-          </div>
-          <div class="internal-note-metrics">
-            <span>人均坑位：¥0</span>
-            <span>自费加点率：0%</span>
-            <span>人均购物：¥0</span>
-          </div>
-        </div>
+        <FormalTeamPageHeader
+          :actions="formalHeaderActions"
+          :badges="formalHeaderBadges"
+          :metrics="formalHeaderMetrics"
+          :note="content?.internalRemark || '未填写'"
+          :note-metrics="formalHeaderNoteMetrics"
+          :stages="arrangementStages"
+          :title="teamDisplayName"
+          :tool-actions="formalHeaderToolActions"
+          tool-title="团队工具"
+          @action-click="handleFormalHeaderAction"
+          @badge-click="handleFormalHeaderBadge"
+          @metric-click="handleMetricClick"
+          @note-edit="handleToolAction({ label: '编辑内部备注' })"
+          @tool-click="handleToolAction"
+        />
 
         <div class="formal-cost-overview-title">
           <div>
@@ -2101,8 +2582,8 @@ onMounted(loadDetail);
                   v-for="item in costColumns.slice(0, 10)"
                   :key="`${item.key}-amount`"
                 >
-                  <td :class="costAmountClass(item.cash)">{{ formatMoney(item.cash) }}</td>
-                  <td :class="costAmountClass(item.credit)">{{ formatMoney(item.credit) }}</td>
+                  <td :class="costAmountClass(item.cash, 'cost-amount-cash')">{{ formatCostCashMoney(item.cash) }}</td>
+                  <td :class="costAmountClass(item.credit, 'cost-amount-credit')">{{ formatCostDetailMoney(item.credit) }}</td>
                 </template>
               </tr>
             </tbody>
@@ -2139,117 +2620,106 @@ onMounted(loadDetail);
 
         <section id="guide-arrangement" class="arrangement-section-card guide-arrangement-section">
           <div class="arrangement-section-header">
-            <div class="arrangement-section-title">
-              <IconifyIcon icon="lucide:badge" />
-              <span>导游</span>
+            <div class="arrangement-section-heading">
+              <div class="arrangement-section-title">
+                <IconifyIcon icon="lucide:badge" />
+                <span>导游</span>
+                <span
+                  class="arrangement-status-badge"
+                  :class="teamGuides.length ? 'status-arranged' : 'status-pending'"
+                >
+                  {{ teamGuides.length ? '已安排' : '未安排' }}
+                </span>
+              </div>
+              <div class="guide-summary-chips">
+                <span class="arrangement-summary-chip">安排 {{ teamGuides.length }} 位</span>
+                <span class="arrangement-summary-chip">导服费 {{ formatMoney(guideFeeTotal) }}</span>
+                <span class="arrangement-summary-chip">操作费 {{ formatMoney(guideOperationFeeTotal) }}</span>
+                <span class="arrangement-summary-chip">计划备用金 {{ formatMoney(guideImprestTotal) }}</span>
+                <span class="arrangement-summary-chip">累计已批备用金 {{ formatMoney(guideApprovedImprestTotal) }}</span>
+                <span class="arrangement-summary-chip">待审批备用金 {{ formatMoney(guidePendingImprestTotal) }}</span>
+              </div>
             </div>
             <div class="arrangement-section-actions">
-              <Button size="small" @click="loadTeamGuides">刷新</Button>
-              <Button size="small" type="primary" @click="openGuideModal">添加导游</Button>
+              <Button size="small" type="primary" @click="openGuideModal">
+                添加导游
+              </Button>
+              <Button size="small" :loading="guideLoading" @click="loadTeamGuides">刷新</Button>
             </div>
           </div>
-          <div class="arrangement-section-state">
-            已安排 {{ teamGuides.length }} 位导游，导服费 {{ formatMoney(guideFeeTotal) }}，操作费 {{ formatMoney(guideOperationFeeTotal) }}，备用金 {{ formatMoney(guideImprestTotal) }}
-          </div>
-          <div class="arrangement-section-table-wrap">
-            <table class="arrangement-section-table guide-arrangement-table">
+          <div class="guide-arrangement-table-wrap">
+            <table class="guide-arrangement-table">
               <thead>
                 <tr>
-                  <th>导游</th>
-                  <th>导服费</th>
+                  <th>导游信息</th>
+                  <th>带团时间</th>
+                  <th>费用</th>
                   <th>备用金</th>
-                  <th>操作费</th>
-                  <th>上团时间</th>
-                  <th>下团时间</th>
-                  <th>费用说明</th>
-                  <th>导游备注</th>
-                  <th>待定中</th>
+                  <th>备注摘要</th>
+                  <th>状态</th>
                   <th>操作</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-if="!teamGuides.length">
-                  <td colspan="10" class="arrangement-empty-cell">暂无导游安排</td>
+                  <td colspan="7" class="arrangement-empty-cell guide-table-empty">暂无导游安排</td>
                 </tr>
                 <tr v-for="record in teamGuides" :key="record.id">
                   <td>
-                    <Select
-                      :value="record.guideId"
-                      class="guide-table-control"
-                      show-search
-                      :filter-option="false"
-                      :options="guideSelectOptionsForRecord(record)"
-                      @focus="loadGuideOptions"
-                      @change="(value) => saveGuideField(record, 'guideId', value as number)"
-                    />
-                    <div class="guide-table-subtext">{{ record.guideMobile || '--' }}</div>
+                    <div class="guide-name-line">{{ record.guideName || '未选择导游' }}</div>
+                    <div class="guide-phone-line">Tel：{{ record.guideMobile || '--' }}</div>
                   </td>
                   <td>
-                    <InputNumber
-                      v-model:value="record.guideFee"
-                      class="guide-table-money"
-                      :min="0"
-                      @blur="() => saveGuideField(record, 'guideFee', record.guideFee)"
-                    />
+                    <div class="guide-time-range">
+                      <span>上团 {{ formatDateTime(record.startAt) }}</span>
+                      <span>下团 {{ formatDateTime(record.endAt) }}</span>
+                    </div>
                   </td>
                   <td>
-                    <InputNumber
-                      v-model:value="record.imprestAmount"
-                      class="guide-table-money"
-                      :min="0"
-                      @blur="() => saveGuideField(record, 'imprestAmount', record.imprestAmount)"
-                    />
+                    <div class="guide-money-stack">
+                      <span>导服费 {{ formatMoney(record.guideFee) }}</span>
+                      <span>操作费 {{ formatMoney(record.operationFee) }}</span>
+                    </div>
                   </td>
                   <td>
-                    <InputNumber
-                      v-model:value="record.operationFee"
-                      class="guide-table-money"
-                      :min="0"
-                      @blur="() => saveGuideField(record, 'operationFee', record.operationFee)"
-                    />
+                    <div class="guide-money-stack guide-imprest-stack">
+                      <span>计划 {{ formatMoney(record.imprestAmount) }}</span>
+                      <span>已批 {{ formatMoney(record.approvedImprestAmount) }}</span>
+                      <span>待审 {{ formatMoney(record.pendingImprestAmount) }}</span>
+                    </div>
+                    <div class="guide-imprest-inline-actions">
+                      <Tag :color="guideImprestApprovalStatusTone(record.imprestApprovalStatus)">
+                        {{ guideImprestApprovalStatusLabel(record.imprestApprovalStatus) }}
+                      </Tag>
+                      <Button
+                        size="small"
+                        type="link"
+                        :loading="guideImprestLoading && guideImprestCurrentRecord?.id === record.id"
+                        @click="openGuideImprestCalculator(record)"
+                      >
+                        计算
+                      </Button>
+                      <Button size="small" type="link" @click="openGuideImprestRecords(record)">
+                        审批记录
+                      </Button>
+                    </div>
                   </td>
                   <td>
-                    <DatePicker
-                      class="guide-table-date"
-                      format="YYYY-MM-DD HH:mm"
-                      show-time
-                      :value="dateTimeValue(record.startAt)"
-                      @change="(value) => saveGuideDateField(record, 'startAt', value)"
-                    />
+                    <Tooltip :title="guideRemarkSummary(record)">
+                      <div class="guide-remark-summary">{{ guideRemarkSummary(record) }}</div>
+                    </Tooltip>
                   </td>
                   <td>
-                    <DatePicker
-                      class="guide-table-date"
-                      format="YYYY-MM-DD HH:mm"
-                      show-time
-                      :value="dateTimeValue(record.endAt)"
-                      @change="(value) => saveGuideDateField(record, 'endAt', value)"
-                    />
+                    <Tag :color="record.tentative ? 'orange' : 'green'">
+                      {{ record.tentative ? '待定中' : '已确定' }}
+                    </Tag>
                   </td>
                   <td>
-                    <Input
-                      v-model:value="record.feeMemo"
-                      class="guide-table-control"
-                      @blur="() => saveGuideField(record, 'feeMemo', record.feeMemo)"
-                    />
-                  </td>
-                  <td>
-                    <Input
-                      v-model:value="record.guideMemo"
-                      class="guide-table-control"
-                      @blur="() => saveGuideField(record, 'guideMemo', record.guideMemo)"
-                    />
-                  </td>
-                  <td>
-                    <Checkbox
-                      :checked="record.tentative"
-                      @change="(event) => saveGuideTentative(record, event.target.checked)"
-                    >
-                      待定中
-                    </Checkbox>
-                  </td>
-                  <td>
-                    <Button danger size="small" type="link" @click="removeTeamGuide(record)">删除</Button>
+                    <div class="guide-row-actions">
+                      <Button size="small" type="link" @click="openGuideEditModal(record)">修改</Button>
+                      <Button size="small" type="link" @click="openGuidePickerForRow(record)">更换导游</Button>
+                      <Button danger size="small" type="link" @click="removeTeamGuide(record)">删除</Button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -2372,12 +2842,53 @@ onMounted(loadDetail);
       centered
       destroy-on-close
       :title="activeQuickProfileEditor.title"
-      :width="460"
+      :width="quickProfileEditorType === 'internal_note' ? 760 : 460"
       :footer="null"
     >
       <Spin :spinning="teamProfileOptionsLoading || quickProfileSaving">
         <Form layout="vertical" class="quick-profile-form">
-          <Form.Item :label="activeQuickProfileEditor.label" :required="activeQuickProfileEditor.required">
+          <template v-if="quickProfileEditorType === 'internal_note'">
+            <Form.Item label="内部备注">
+              <Textarea
+                v-model:value="teamProfileDraft.internalRemark"
+                class="inside-memo-textarea"
+                :auto-size="{ minRows: 10, maxRows: 16 }"
+                :maxlength="500"
+                :placeholder="activeQuickProfileEditor.placeholder"
+                show-count
+              />
+            </Form.Item>
+            <div class="inside-memo-edit-grid">
+              <Form.Item label="人均坑位">
+                <InputNumber
+                  v-model:value="teamProfileDraft.perCapitaPitAmount"
+                  :min="0"
+                  :precision="2"
+                  addon-before="¥"
+                  class="inside-memo-number-input"
+                />
+              </Form.Item>
+              <Form.Item label="自费加点率">
+                <InputNumber
+                  v-model:value="teamProfileDraft.optionalMarkupRate"
+                  :min="0"
+                  :precision="2"
+                  addon-after="%"
+                  class="inside-memo-number-input"
+                />
+              </Form.Item>
+              <Form.Item label="人均购物">
+                <InputNumber
+                  v-model:value="teamProfileDraft.perCapitaShoppingAmount"
+                  :min="0"
+                  :precision="2"
+                  addon-before="¥"
+                  class="inside-memo-number-input"
+                />
+              </Form.Item>
+            </div>
+          </template>
+          <Form.Item v-else :label="activeQuickProfileEditor.label" :required="activeQuickProfileEditor.required">
             <template v-if="activeQuickProfileEditor.inputType === 'select'">
               <Select
                 v-model:value="quickProfileEditorModel"
@@ -2466,59 +2977,532 @@ onMounted(loadDetail);
     />
 
     <Modal
-      v-model:open="guideModalOpen"
+      v-model:open="guideImprestModalOpen"
+      class="guide-imprest-modal"
       destroy-on-close
-      title="添加导游"
+      title="计算导游备用金"
+      width="820px"
+      @cancel="guideImprestModalOpen = false"
+    >
+      <Spin :spinning="guideImprestLoading">
+        <div class="guide-imprest-summary">
+          <div class="guide-imprest-summary-item">
+            <span>现付总成本</span>
+            <strong>{{ formatMoney(guideImprestPreview?.cashCostAmount) }}</strong>
+          </div>
+          <div class="guide-imprest-summary-item">
+            <span>自费抵扣</span>
+            <strong>{{ formatMoney(guideImprestPreview?.optionalDeductionAmount) }}</strong>
+          </div>
+          <div class="guide-imprest-summary-item">
+            <span>实收人数</span>
+            <strong>{{ guideImprestPreview?.guestCount || 0 }} 人</strong>
+          </div>
+          <div class="guide-imprest-summary-item highlight">
+            <span>建议备用金</span>
+            <strong>{{ formatMoney(guideImprestPreview?.suggestedImprestAmount) }}</strong>
+          </div>
+          <div class="guide-imprest-summary-item">
+            <span>已申请/已批</span>
+            <strong>{{ formatMoney(guideImprestPreview?.occupiedAuthorizationAmount) }}</strong>
+          </div>
+          <div class="guide-imprest-summary-item">
+            <span>建议余额参考</span>
+            <strong>{{ formatMoney(guideImprestPreview?.availableAuthorizationAmount) }}</strong>
+          </div>
+          <div class="guide-imprest-summary-item">
+            <span>导游应上交</span>
+            <strong>{{ formatMoney(guideImprestPreview?.guideTurnInAmount) }}</strong>
+          </div>
+        </div>
+        <div v-if="guideImprestPreview" class="guide-imprest-formula-panel">
+          <div class="guide-imprest-formula-line">
+            <span>总公式</span>
+            <strong>{{ guideImprestSummaryFormula(guideImprestPreview) }}</strong>
+          </div>
+          <div class="guide-imprest-formula-line">
+            <span>风险提示</span>
+            <strong>{{ guideImprestReferenceBalanceFormula(guideImprestPreview) }}</strong>
+          </div>
+          <div v-if="guideImprestEmergencyWarning(guideImprestPreview)" class="guide-imprest-warning">
+            {{ guideImprestEmergencyWarning(guideImprestPreview) }}
+          </div>
+        </div>
+
+        <div class="guide-imprest-lines-title">明细行</div>
+        <div class="guide-imprest-table-wrap">
+          <table class="guide-imprest-table">
+            <thead>
+              <tr>
+                <th>类型</th>
+                <th>项目</th>
+                <th>人数</th>
+                <th>售价</th>
+                <th>成本</th>
+                <th>导游提成</th>
+                <th>公司加点</th>
+                <th>金额</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="!(guideImprestPreview?.calcLines || []).length">
+                <td colspan="8" class="guide-imprest-empty">暂无计算明细</td>
+              </tr>
+              <template
+                v-for="(line, index) in guideImprestPreview?.calcLines || []"
+                :key="`${line.lineType || 'line'}-${line.itemName || index}-${index}`"
+              >
+                <tr>
+                  <td>{{ guideImprestLineTypeLabel(line.lineType) }}</td>
+                  <td class="guide-imprest-item-name">{{ line.itemName || '--' }}</td>
+                  <td>{{ line.guestCount ?? '--' }}</td>
+                  <td>{{ line.salePrice === undefined ? '--' : formatMoney(line.salePrice) }}</td>
+                  <td>{{ line.costPrice === undefined ? '--' : formatMoney(line.costPrice) }}</td>
+                  <td>{{ line.guideCommissionAmount === undefined ? '--' : formatMoney(line.guideCommissionAmount) }}</td>
+                  <td>{{ line.lineType === 'optional_deduction' ? formatPercent(line.companyMarkupRate) : '--' }}</td>
+                  <td class="guide-imprest-amount">{{ formatMoney(line.amount) }}</td>
+                </tr>
+                <tr class="guide-imprest-formula-row">
+                  <td colspan="8">
+                    <span>计算：</span>{{ guideImprestLineFormula(line) }}
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <Form layout="vertical" class="guide-imprest-remark-form">
+          <div class="guide-imprest-apply-grid">
+            <Form.Item label="本次公司加点率">
+              <InputNumber
+                v-model:value="guideImprestCompanyMarkupRate"
+                class="guide-imprest-input"
+                :min="0"
+                :precision="2"
+                addon-after="%"
+                @blur="refreshGuideImprestPreview"
+              />
+            </Form.Item>
+            <Form.Item
+              label="本次申请金额"
+              :validate-status="guideImprestRequestedAmountInvalid() ? 'error' : undefined"
+              :help="guideImprestRequestedAmountInvalid() ? '必须大于0' : undefined"
+            >
+              <InputNumber
+                v-model:value="guideImprestRequestedAmount"
+                class="guide-imprest-input"
+                :min="0"
+                :precision="2"
+                addon-before="¥"
+              />
+            </Form.Item>
+            <Form.Item label="重新计算">
+              <Button :loading="guideImprestLoading" @click="refreshGuideImprestPreview">
+                按本次加点率计算
+              </Button>
+            </Form.Item>
+          </div>
+          <Form.Item
+            label="申请备注"
+            :validate-status="guideImprestRemarkMissing() ? 'error' : undefined"
+            :help="guideImprestRemarkMissing() ? '超过系统建议金额时必须填写应急或特殊项目说明' : undefined"
+          >
+            <Textarea
+              v-model:value="guideImprestApplyRemark"
+              :auto-size="{ minRows: 3, maxRows: 5 }"
+              :maxlength="500"
+              placeholder="可填写备用金申请原因或特殊说明"
+              show-count
+            />
+          </Form.Item>
+        </Form>
+      </Spin>
+
+      <template #footer>
+        <Button @click="guideImprestModalOpen = false">取消</Button>
+        <Button
+          :disabled="!guideImprestPreview"
+          :loading="guideImprestLoading"
+          @click="useGuideImprestSuggestedAmount"
+        >
+          使用此金额
+        </Button>
+        <Button
+          type="primary"
+          :disabled="!guideImprestPreview || guideImprestRequestedAmountInvalid() || guideImprestRemarkMissing()"
+          :loading="guideImprestSubmitting"
+          @click="submitGuideImprestApplication"
+        >
+          提交备用金申请
+        </Button>
+      </template>
+    </Modal>
+
+    <Modal
+      v-model:open="guideImprestRecordsOpen"
+      destroy-on-close
+      title="导游备用金审批记录"
+      width="1080px"
+      :footer="null"
+      @cancel="guideImprestRecordDetail = undefined"
+    >
+      <Spin :spinning="guideImprestRecordsLoading">
+        <div class="guide-imprest-record-head">
+          <div>
+            <strong>{{ guideImprestRecordsCurrentRecord?.guideName || '--' }}</strong>
+            <span>本团备用金申请单记录</span>
+          </div>
+          <Button size="small" :loading="guideImprestRecordsLoading" @click="loadGuideImprestRecords()">
+            刷新
+          </Button>
+        </div>
+        <Table
+          :data-source="guideImprestRecordRows"
+          :pagination="false"
+          :scroll="{ x: 980 }"
+          row-key="id"
+          size="small"
+        >
+          <Table.Column data-index="requestNo" title="申请编号" width="150" />
+          <Table.Column title="申请金额" width="110">
+            <template #default="{ record }">{{ formatMoney(record.requestedAmount) }}</template>
+          </Table.Column>
+          <Table.Column title="审批状态" width="130">
+            <template #default="{ record }">
+              <Tag :color="guideImprestRequestStatusTone(record.status)">
+                {{ guideImprestRequestStatusLabel(record.status) }}
+              </Tag>
+            </template>
+          </Table.Column>
+          <Table.Column title="申请人 / 时间" width="180">
+            <template #default="{ record }">
+              <div class="guide-imprest-record-stack">
+                <span>{{ record.applicant || '--' }}</span>
+                <small>{{ formatDateTime(record.appliedAt) }}</small>
+              </div>
+            </template>
+          </Table.Column>
+          <Table.Column title="审批人 / 时间" width="190">
+            <template #default="{ record }">
+              <div class="guide-imprest-record-stack">
+                <span>{{ record.approvedBy || record.rejectedBy || '--' }}</span>
+                <small>{{ formatDateTime(record.approvedAt || record.rejectedAt) }}</small>
+              </div>
+            </template>
+          </Table.Column>
+          <Table.Column data-index="approvalRemark" title="审批意见" width="170">
+            <template #default="{ record }">{{ record.approvalRemark || '--' }}</template>
+          </Table.Column>
+          <Table.Column title="已付金额" width="110">
+            <template #default="{ record }">{{ formatMoney(record.paidAmount) }}</template>
+          </Table.Column>
+          <Table.Column title="余额" width="100">
+            <template #default="{ record }">{{ formatMoney(record.balanceAmount) }}</template>
+          </Table.Column>
+          <Table.Column title="操作" width="100" fixed="right">
+            <template #default="{ record }">
+              <Button
+                size="small"
+                type="link"
+                :loading="guideImprestRecordDetailLoading && guideImprestRecordDetail?.id === record.id"
+                @click="openGuideImprestRecordDetail(record)"
+              >
+                查看详情
+              </Button>
+            </template>
+          </Table.Column>
+        </Table>
+      </Spin>
+    </Modal>
+
+    <Modal
+      v-model:open="guideImprestRecordDetailOpen"
+      destroy-on-close
+      title="备用金申请详情"
+      width="860px"
+      :footer="null"
+    >
+      <Spin :spinning="guideImprestRecordDetailLoading">
+        <section v-if="guideImprestRecordDetail" class="guide-imprest-record-detail">
+          <div class="guide-imprest-record-detail-title">
+            {{ guideImprestRecordDetail.requestNo || '申请详情' }}
+          </div>
+          <div class="guide-imprest-record-summary">
+            <span>现付总成本 {{ formatMoney(guideImprestRecordDetail.cashCostAmount) }}</span>
+            <span>自费抵扣 {{ formatMoney(guideImprestRecordDetail.optionalDeductionAmount) }}</span>
+            <span>建议备用金 {{ formatMoney(guideImprestRecordDetail.suggestedImprestAmount) }}</span>
+            <span>申请金额 {{ formatMoney(guideImprestRecordDetail.requestedAmount) }}</span>
+            <span>已付金额 {{ formatMoney(guideImprestRecordDetail.paidAmount) }}</span>
+            <span>余额 {{ formatMoney(guideImprestRecordDetail.balanceAmount) }}</span>
+          </div>
+          <div v-if="guideImprestRecordDetail.calculationChanged" class="guide-imprest-record-warning">
+            {{ guideImprestRecordDetail.calculationChangeMessage || '团队安排已变化，请计调重新计算备用金' }}
+          </div>
+          <div class="guide-imprest-record-remark">
+            <span>申请备注：{{ guideImprestRecordDetail.remark || '--' }}</span>
+            <span>审批意见：{{ guideImprestRecordDetail.approvalRemark || '--' }}</span>
+          </div>
+          <div class="guide-imprest-table-wrap guide-imprest-record-lines">
+            <table class="guide-imprest-table">
+              <thead>
+                <tr>
+                  <th>类型</th>
+                  <th>项目</th>
+                  <th>人数</th>
+                  <th>售价</th>
+                  <th>成本</th>
+                  <th>导游提成</th>
+                  <th>公司加点</th>
+                  <th>金额</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="!(guideImprestRecordDetail.calcLines || []).length">
+                  <td colspan="8" class="guide-imprest-empty">暂无计算明细</td>
+                </tr>
+                <tr
+                  v-for="(line, index) in guideImprestRecordDetail.calcLines || []"
+                  :key="`${line.lineType || 'line'}-${line.itemName || index}-${index}`"
+                >
+                  <td>{{ guideImprestLineTypeLabel(line.lineType) }}</td>
+                  <td class="guide-imprest-item-name">{{ line.itemName || '--' }}</td>
+                  <td>{{ line.guestCount ?? '--' }}</td>
+                  <td>{{ line.salePrice === undefined ? '--' : formatMoney(line.salePrice) }}</td>
+                  <td>{{ line.costPrice === undefined ? '--' : formatMoney(line.costPrice) }}</td>
+                  <td>{{ line.guideCommissionAmount === undefined ? '--' : formatMoney(line.guideCommissionAmount) }}</td>
+                  <td>{{ line.lineType === 'optional_deduction' ? formatPercent(line.companyMarkupRate) : '--' }}</td>
+                  <td class="guide-imprest-amount">{{ formatMoney(line.amount) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </Spin>
+    </Modal>
+
+    <Modal
+      v-model:open="guideEditOpen"
+      centered
+      destroy-on-close
+      title="修改导游安排"
       width="720px"
+      ok-text="保存"
+      :confirm-loading="guideEditSaving"
+      @ok="submitGuideEditDraft"
+    >
+      <Form layout="vertical" class="guide-modal-form guide-edit-form">
+        <section class="guide-modal-section">
+          <div class="guide-modal-section-title">费用信息</div>
+          <div class="guide-modal-grid guide-modal-grid-fees">
+            <Form.Item label="导服费">
+              <InputNumber v-model:value="guideEditDraft.guideFee" class="w-full" :min="0" addon-before="¥" />
+            </Form.Item>
+            <Form.Item label="计划备用金">
+              <InputNumber v-model:value="guideEditDraft.imprestAmount" class="w-full" :min="0" addon-before="¥" />
+            </Form.Item>
+            <Form.Item label="操作费">
+              <InputNumber v-model:value="guideEditDraft.operationFee" class="w-full" :min="0" addon-before="¥" />
+            </Form.Item>
+          </div>
+        </section>
+
+        <section class="guide-modal-section">
+          <div class="guide-modal-section-title">带团时间</div>
+          <div class="guide-modal-grid">
+            <Form.Item label="上团时间" required>
+              <DatePicker
+                v-model:value="guideEditDraft.startAt"
+                class="w-full"
+                format="YYYY-MM-DD HH:mm"
+                show-time
+              />
+            </Form.Item>
+            <Form.Item label="下团时间" required>
+              <DatePicker
+                v-model:value="guideEditDraft.endAt"
+                class="w-full"
+                format="YYYY-MM-DD HH:mm"
+                show-time
+              />
+            </Form.Item>
+          </div>
+        </section>
+
+        <section class="guide-modal-section">
+          <div class="guide-modal-section-title">状态</div>
+          <Checkbox v-model:checked="guideEditDraft.tentative">待定中</Checkbox>
+        </section>
+
+        <section class="guide-modal-section guide-modal-section-last">
+          <div class="guide-modal-section-title">备注信息</div>
+          <Form.Item label="费用说明">
+            <Textarea
+              v-model:value="guideEditDraft.feeMemo"
+              class="guide-edit-textarea"
+              :auto-size="{ minRows: 3, maxRows: 5 }"
+              :maxlength="1000"
+            />
+          </Form.Item>
+          <Form.Item label="导游备注">
+            <Textarea
+              v-model:value="guideEditDraft.guideMemo"
+              class="guide-edit-textarea"
+              :auto-size="{ minRows: 3, maxRows: 5 }"
+              :maxlength="1000"
+            />
+          </Form.Item>
+        </section>
+      </Form>
+    </Modal>
+
+    <Modal
+      v-model:open="guideModalOpen"
+      class="guide-arrangement-modal"
+      destroy-on-close
+      :title="guideModalEditing ? '更换导游' : '选择导游'"
+      width="920px"
+      ok-text="提交保存"
       :confirm-loading="guideSaving"
       @ok="submitGuideDraft"
     >
-      <Form layout="vertical" :model="guideDraft">
-        <div class="editor-grid">
-          <Form.Item label="导游" required>
-            <Select
-              v-model:value="guideDraft.guideId"
-              show-search
-              :filter-option="false"
-              placeholder="选择导游"
-              :options="guideSelectOptions"
+      <Form layout="vertical" :model="guideDraft" class="guide-modal-form">
+        <section class="guide-modal-section guide-picker-section">
+          <div class="guide-modal-title-row">
+            <div class="guide-modal-section-title">
+              <span>选择导游</span>
+              <span class="guide-modal-title-en">Choose Guide</span>
+            </div>
+            <div v-if="selectedGuideDraft" class="guide-selected-pill">
+              已选 {{ selectedGuideDraft.guideName }} / {{ guideDisplayPhone(selectedGuideDraft) }}
+            </div>
+          </div>
+          <div class="guide-picker-tabs">
+            <button
+              v-for="item in guidePickerTabs"
+              :key="item.key"
+              type="button"
+              class="guide-picker-tab"
+              :class="{ active: guidePickerActiveTab === item.key }"
+              @click="setGuidePickerTab(item.key)"
+            >
+              {{ item.label }}
+            </button>
+          </div>
+          <div class="guide-picker-search">
+            <Input
+              v-model:value="guidePickerKeyword"
+              allow-clear
+              class="guide-picker-search-input"
+              placeholder="导游名称/手机号"
             />
+            <Button type="primary" class="guide-picker-search-button" :loading="guideAvailabilityLoading" @click="loadGuideAvailability">
+              <IconifyIcon icon="lucide:search" />
+              <span>搜索</span>
+            </Button>
+            <span class="guide-picker-tip">默认最多显示50人，全部导游会标记不能出团原因</span>
+          </div>
+          <Spin :spinning="guideAvailabilityLoading">
+            <div class="guide-picker-table-wrap">
+              <table class="guide-picker-table">
+                <thead>
+                  <tr>
+                    <th>选择</th>
+                    <th>导游姓名</th>
+                    <th>手机号</th>
+                    <th>性别</th>
+                    <th>状态</th>
+                    <th>不能出团原因</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-if="!guideAvailabilityRows.length">
+                    <td colspan="6" class="guide-picker-empty">暂无匹配导游</td>
+                  </tr>
+                  <tr
+                    v-for="item in guideAvailabilityRows"
+                    :key="item.guideId"
+                    :class="{ selected: guideDraft.guideId === item.guideId, disabled: !item.available }"
+                  >
+                    <td>
+                      <Button
+                        size="small"
+                        type="link"
+                        :disabled="!item.available"
+                        @click="selectGuideForDraft(item)"
+                      >
+                        {{ guideDraft.guideId === item.guideId ? '已选' : '选择' }}
+                      </Button>
+                    </td>
+                    <td class="guide-picker-name-cell">{{ item.guideName }}</td>
+                    <td class="guide-picker-phone-cell">{{ guideDisplayPhone(item) }}</td>
+                    <td>{{ guideGenderText(item.gender) }}</td>
+                    <td>
+                      <Tag :color="item.available ? 'green' : 'orange'">
+                        {{ item.available ? '可出团' : '不能出团' }}
+                      </Tag>
+                    </td>
+                    <td class="guide-picker-reason-cell">{{ item.unavailableReason || '--' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </Spin>
+        </section>
+
+        <section v-if="!guideModalEditing" class="guide-modal-section">
+          <div class="guide-modal-section-title">费用信息</div>
+          <div class="guide-modal-grid guide-modal-grid-fees">
+            <Form.Item label="导服费">
+              <InputNumber v-model:value="guideDraft.guideFee" class="w-full" :min="0" addon-before="¥" />
+            </Form.Item>
+            <Form.Item label="备用金">
+              <InputNumber v-model:value="guideDraft.imprestAmount" class="w-full" :min="0" addon-before="¥" />
+            </Form.Item>
+            <Form.Item label="操作费">
+              <InputNumber v-model:value="guideDraft.operationFee" class="w-full" :min="0" addon-before="¥" />
+            </Form.Item>
+          </div>
+        </section>
+
+        <section v-if="!guideModalEditing" class="guide-modal-section">
+          <div class="guide-modal-section-title">带团时间</div>
+          <div class="guide-modal-grid">
+            <Form.Item label="上团时间" required>
+              <DatePicker
+                v-model:value="guideDraftDates.startAt"
+                class="w-full"
+                format="YYYY-MM-DD HH:mm"
+                show-time
+                @change="loadGuideAvailability"
+              />
+            </Form.Item>
+            <Form.Item label="下团时间" required>
+              <DatePicker
+                v-model:value="guideDraftDates.endAt"
+                class="w-full"
+                format="YYYY-MM-DD HH:mm"
+                show-time
+                @change="loadGuideAvailability"
+              />
+            </Form.Item>
+          </div>
+        </section>
+
+        <section v-if="!guideModalEditing" class="guide-modal-section">
+          <div class="guide-modal-section-title">状态</div>
+          <Checkbox v-model:checked="guideDraft.tentative">待定中</Checkbox>
+        </section>
+
+        <section v-if="!guideModalEditing" class="guide-modal-section guide-modal-section-last">
+          <div class="guide-modal-section-title">备注信息</div>
+          <Form.Item label="费用说明">
+            <Textarea v-model:value="guideDraft.feeMemo" :rows="3" :maxlength="1000" />
           </Form.Item>
-          <Form.Item label="待定中">
-            <Checkbox v-model:checked="guideDraft.tentative">待定中</Checkbox>
+          <Form.Item label="导游备注">
+            <Textarea v-model:value="guideDraft.guideMemo" :rows="3" :maxlength="1000" />
           </Form.Item>
-          <Form.Item label="导服费">
-            <InputNumber v-model:value="guideDraft.guideFee" class="w-full" :min="0" addon-before="¥" />
-          </Form.Item>
-          <Form.Item label="备用金">
-            <InputNumber v-model:value="guideDraft.imprestAmount" class="w-full" :min="0" addon-before="¥" />
-          </Form.Item>
-          <Form.Item label="操作费">
-            <InputNumber v-model:value="guideDraft.operationFee" class="w-full" :min="0" addon-before="¥" />
-          </Form.Item>
-          <Form.Item label="上团时间" required>
-            <DatePicker
-              v-model:value="guideDraftDates.startAt"
-              class="w-full"
-              format="YYYY-MM-DD HH:mm"
-              show-time
-            />
-          </Form.Item>
-          <Form.Item label="下团时间" required>
-            <DatePicker
-              v-model:value="guideDraftDates.endAt"
-              class="w-full"
-              format="YYYY-MM-DD HH:mm"
-              show-time
-            />
-          </Form.Item>
-        </div>
-        <Form.Item label="费用说明">
-          <Textarea v-model:value="guideDraft.feeMemo" :rows="3" :maxlength="1000" />
-        </Form.Item>
-        <Form.Item label="导游备注">
-          <Textarea v-model:value="guideDraft.guideMemo" :rows="3" :maxlength="1000" />
-        </Form.Item>
+        </section>
       </Form>
     </Modal>
   </Page>
@@ -2541,6 +3525,21 @@ onMounted(loadDetail);
   border-radius: 5px;
 }
 
+.inside-memo-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.inside-memo-textarea {
+  line-height: 1.7;
+}
+
+.inside-memo-number-input {
+  width: 100%;
+}
+
 .traffic-modal-footer {
   display: flex;
   gap: 12px;
@@ -2549,82 +3548,6 @@ onMounted(loadDetail);
   padding-top: 14px;
   margin-top: 16px;
   border-top: 1px solid #e2e8f0;
-}
-
-.formal-arrangement-tool-strip {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-  padding: 5px 7px;
-  margin-bottom: 8px;
-  background: #fbfdff;
-  border: 1px solid #e4ecf7;
-  border-radius: 6px;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 90%);
-}
-
-.formal-tool-strip-title {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  min-height: 27px;
-  padding: 0 6px 0 3px;
-  font-size: 11.8px;
-  font-weight: 800;
-  color: #475569;
-  white-space: nowrap;
-  border-right: 1px solid #e2e8f0;
-}
-
-.formal-tool-strip-title svg,
-.formal-arrangement-tool-button svg {
-  width: 15px;
-  height: 15px;
-}
-
-.formal-tool-strip-actions {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 5px;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: thin;
-}
-
-.formal-arrangement-tool-button {
-  display: inline-flex;
-  flex: 0 0 auto;
-  gap: 4px;
-  align-items: center;
-  justify-content: center;
-  height: 28px;
-  padding: 0 8px;
-  font-size: 11.5px;
-  font-weight: 700;
-  color: #334155;
-  white-space: nowrap;
-  cursor: pointer;
-  background: #fff;
-  border: 1px solid #dbe5f2;
-  border-radius: 5px;
-  transition:
-    color 0.18s ease,
-    background-color 0.18s ease,
-    border-color 0.18s ease,
-    box-shadow 0.18s ease;
-}
-
-.formal-arrangement-tool-button:hover,
-.formal-arrangement-tool-button:focus {
-  color: var(--formal-blue-strong);
-  background: #f3f8ff;
-  border-color: #91caff;
-  box-shadow: 0 2px 5px rgb(22 119 255 / 10%);
-}
-
-.formal-arrangement-tool-button svg {
-  color: #1677ff;
 }
 
 .save-placeholder-alert {
@@ -2652,54 +3575,908 @@ onMounted(loadDetail);
   margin-bottom: 10px;
 }
 
+.guide-arrangement-section .arrangement-section-header {
+  align-items: center;
+}
+
+.guide-summary-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 1px;
+}
+
+.guide-arrangement-table-wrap {
+  overflow-x: auto;
+  background: #fff;
+  border: 1px solid #e4ecf7;
+  border-radius: 7px;
+}
+
 .guide-arrangement-table {
-  min-width: 1520px;
+  width: 100%;
+  min-width: 1180px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.guide-arrangement-table th,
+.guide-arrangement-table td {
+  min-width: 0;
+  padding: 9px 10px;
+  font-size: 12.5px;
+  color: #334155;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid #edf2f7;
+}
+
+.guide-arrangement-table th {
+  height: 34px;
+  font-size: 12px;
+  font-weight: 850;
+  color: #52657a;
+  background: #f8fafc;
+}
+
+.guide-arrangement-table tr:last-child td {
+  border-bottom: 0;
 }
 
 .guide-arrangement-table th:nth-child(1),
 .guide-arrangement-table td:nth-child(1) {
-  width: 170px;
+  width: 180px;
 }
 
 .guide-arrangement-table th:nth-child(2),
-.guide-arrangement-table td:nth-child(2),
+.guide-arrangement-table td:nth-child(2) {
+  width: 220px;
+}
+
 .guide-arrangement-table th:nth-child(3),
-.guide-arrangement-table td:nth-child(3),
+.guide-arrangement-table td:nth-child(3) {
+  width: 150px;
+}
+
 .guide-arrangement-table th:nth-child(4),
 .guide-arrangement-table td:nth-child(4) {
-  width: 116px;
+  width: 245px;
 }
 
-.guide-arrangement-table th:nth-child(5),
-.guide-arrangement-table td:nth-child(5),
 .guide-arrangement-table th:nth-child(6),
 .guide-arrangement-table td:nth-child(6) {
-  width: 190px;
+  width: 82px;
+  text-align: center;
 }
 
-.guide-arrangement-table th:nth-child(9),
-.guide-arrangement-table td:nth-child(9),
-.guide-arrangement-table th:nth-child(10),
-.guide-arrangement-table td:nth-child(10) {
-  width: 92px;
+.guide-arrangement-table th:nth-child(7),
+.guide-arrangement-table td:nth-child(7) {
+  width: 170px;
 }
 
-.guide-table-control,
-.guide-table-date {
+.guide-table-empty {
+  height: 72px;
+  text-align: center !important;
+}
+
+.guide-name-line,
+.guide-phone-line,
+.guide-remark-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-name-line {
+  margin-bottom: 3px;
+  font-size: 13px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.guide-phone-line {
+  font-size: 12px;
+  font-weight: 750;
+  color: #64748b;
+}
+
+.guide-time-range {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.guide-time-range span {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 800;
+  color: #334155;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-money-stack {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.guide-money-stack span {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 800;
+  color: #475569;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-imprest-stack {
+  gap: 3px;
+}
+
+.guide-imprest-stack span {
+  padding: 0;
+  color: #475569;
+}
+
+.guide-imprest-inline-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+  margin-top: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.guide-imprest-inline-actions :deep(.ant-tag) {
+  flex: 0 0 auto;
+  margin-inline-end: 0;
+}
+
+.guide-imprest-inline-actions :deep(.ant-btn) {
+  height: 20px;
+  padding: 0 2px;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.guide-remark-summary {
+  max-width: 100%;
+  font-weight: 760;
+  color: #64748b;
+}
+
+.guide-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  align-items: center;
+}
+
+.guide-row-actions :deep(.ant-btn) {
+  height: 22px;
+  padding: 0 2px;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.guide-imprest-record-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.guide-imprest-record-head strong {
+  margin-right: 10px;
+  font-size: 15px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.guide-imprest-record-head span {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #64748b;
+}
+
+.guide-imprest-record-stack {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.guide-imprest-record-stack span,
+.guide-imprest-record-stack small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-imprest-record-stack span {
+  font-weight: 800;
+  color: #334155;
+}
+
+.guide-imprest-record-stack small {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.guide-imprest-record-detail {
+  padding: 12px;
+  margin-top: 14px;
+  background: #fbfdff;
+  border: 1px solid #e4ecf7;
+  border-radius: 6px;
+}
+
+.guide-imprest-record-detail-title {
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.guide-imprest-record-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.guide-imprest-record-summary span {
+  min-width: 0;
+  padding: 7px 9px;
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #334155;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #fff;
+  border: 1px solid #edf2f7;
+  border-radius: 5px;
+}
+
+.guide-imprest-record-warning {
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  font-size: 12.5px;
+  font-weight: 800;
+  line-height: 1.5;
+  color: #9a3412;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 5px;
+}
+
+.guide-imprest-record-remark {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #475569;
+}
+
+.guide-imprest-record-lines {
+  max-height: 230px;
+  margin-bottom: 0;
+}
+
+.guide-imprest-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.guide-imprest-summary-item {
+  min-width: 0;
+  padding: 10px 12px;
+  background: #fbfdff;
+  border: 1px solid #e4ecf7;
+  border-radius: 6px;
+}
+
+.guide-imprest-summary-item span,
+.guide-imprest-lines-title {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1;
+  color: #52657a;
+}
+
+.guide-imprest-summary-item strong {
+  display: block;
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1.2;
+  color: #0f172a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-imprest-summary-item.highlight {
+  background: #eef6ff;
+  border-color: #b7d7ff;
+}
+
+.guide-imprest-summary-item.highlight strong {
+  color: #1554ad;
+}
+
+.guide-imprest-formula-panel {
+  padding: 10px 12px;
+  margin: 12px 0 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #334155;
+  background: #f8fbff;
+  border: 1px solid #dbeafe;
+  border-radius: 6px;
+}
+
+.guide-imprest-formula-panel span {
+  margin-right: 10px;
+  font-weight: 850;
+  color: #1554ad;
+}
+
+.guide-imprest-formula-panel strong {
+  font-weight: 800;
+}
+
+.guide-imprest-formula-line + .guide-imprest-formula-line {
+  margin-top: 4px;
+}
+
+.guide-imprest-warning {
+  padding: 7px 9px;
+  margin-top: 9px;
+  font-size: 12.5px;
+  font-weight: 800;
+  line-height: 1.5;
+  color: #9a3412;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 5px;
+}
+
+.guide-imprest-lines-title {
+  margin-bottom: 8px;
+}
+
+.guide-imprest-table-wrap {
+  max-height: 260px;
+  margin-bottom: 12px;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #e4ecf7;
+  border-radius: 6px;
+}
+
+.guide-imprest-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.guide-imprest-table th,
+.guide-imprest-table td {
+  height: 36px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: #334155;
+  text-align: left;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.guide-imprest-table th {
+  font-weight: 850;
+  color: #52657a;
+  background: #f8fafc;
+}
+
+.guide-imprest-table th:nth-child(2),
+.guide-imprest-table td:nth-child(2) {
+  width: 180px;
+}
+
+.guide-imprest-item-name {
+  overflow: hidden;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-imprest-amount {
+  font-weight: 850;
+  color: #1554ad;
+}
+
+.guide-imprest-formula-row td {
+  height: auto;
+  padding: 8px 10px 10px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #64748b;
+  background: #fbfdff;
+}
+
+.guide-imprest-formula-row span {
+  font-weight: 850;
+  color: #334155;
+}
+
+.guide-imprest-empty {
+  padding: 28px 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.guide-imprest-apply-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 10px 12px;
+  align-items: start;
+}
+
+.guide-imprest-input {
   width: 100%;
 }
 
-.guide-table-money {
-  width: 96px;
+.guide-imprest-remark-form :deep(.ant-form-item) {
+  margin-bottom: 0;
 }
 
-.guide-table-subtext {
-  margin-top: 3px;
+.guide-imprest-apply-grid :deep(.ant-form-item) {
+  margin-bottom: 12px;
+}
+
+.guide-imprest-remark-form :deep(.ant-form-item-label > label) {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #475569;
+}
+
+.guide-modal-form :deep(.ant-form-item) {
+  margin-bottom: 12px;
+}
+
+.guide-modal-form :deep(.ant-form-item-label > label) {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #475569;
+}
+
+.guide-picker-section {
+  padding-bottom: 14px;
+}
+
+.guide-modal-title-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.guide-modal-section {
+  padding: 12px 14px 2px;
+  margin-bottom: 12px;
+  background: #fbfdff;
+  border: 1px solid #e4ecf7;
+  border-radius: 6px;
+}
+
+.guide-modal-section.guide-picker-section {
+  padding-bottom: 14px;
+}
+
+.guide-modal-section-last {
+  margin-bottom: 0;
+}
+
+.guide-modal-section-title {
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+  color: #0f172a;
+}
+
+.guide-modal-title-row .guide-modal-section-title {
+  display: inline-flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 0;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.guide-modal-title-en {
+  font-size: 18px;
+  font-weight: 800;
+  color: #d1d5db;
+}
+
+.guide-selected-pill {
+  max-width: 360px;
+  padding: 4px 10px;
   overflow: hidden;
-  font-size: 11px;
-  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  color: #1554ad;
   text-overflow: ellipsis;
   white-space: nowrap;
+  background: #eef6ff;
+  border: 1px solid #b7d7ff;
+  border-radius: 999px;
+}
+
+.guide-picker-tabs {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding-bottom: 0;
+  margin-bottom: 12px;
+  border-bottom: 2px solid #1677ff;
+}
+
+.guide-picker-tab {
+  min-width: 108px;
+  height: 36px;
+  padding: 0 18px;
+  font-size: 13px;
+  font-weight: 850;
+  color: #334155;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #dbe4f0;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  transition:
+    color 0.18s ease,
+    background-color 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.guide-picker-tab.active {
+  color: #fff;
+  background: #1677ff;
+  border-color: #1677ff;
+}
+
+.guide-picker-search {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.guide-picker-search-input {
+  width: 210px;
+}
+
+.guide-picker-search-button {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  font-weight: 800;
+}
+
+.guide-picker-search-button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.guide-picker-tip {
+  font-size: 12px;
+  font-weight: 800;
+  color: #15803d;
+}
+
+.guide-picker-table-wrap {
+  min-height: 168px;
+  max-height: 300px;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #e4ecf7;
+  border-radius: 6px;
+}
+
+.guide-picker-table {
+  width: 100%;
+  min-width: 820px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.guide-picker-table th,
+.guide-picker-table td {
+  height: 38px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: #334155;
+  text-align: left;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.guide-picker-table th {
+  font-weight: 850;
+  color: #52657a;
+  background: #f8fafc;
+}
+
+.guide-picker-table th:nth-child(1),
+.guide-picker-table td:nth-child(1) {
+  width: 68px;
+  text-align: center;
+}
+
+.guide-picker-table th:nth-child(2),
+.guide-picker-table td:nth-child(2) {
+  width: 128px;
+}
+
+.guide-picker-table th:nth-child(3),
+.guide-picker-table td:nth-child(3) {
+  width: 128px;
+}
+
+.guide-picker-table th:nth-child(4),
+.guide-picker-table td:nth-child(4) {
+  width: 72px;
+  text-align: center;
+}
+
+.guide-picker-table th:nth-child(5),
+.guide-picker-table td:nth-child(5) {
+  width: 92px;
+  text-align: center;
+}
+
+.guide-picker-table tr.selected td {
+  background: #eef6ff;
+}
+
+.guide-picker-table tr.disabled td {
+  color: #94a3b8;
+  background: #fbfdff;
+}
+
+.guide-picker-name-cell,
+.guide-picker-phone-cell,
+.guide-picker-reason-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-picker-name-cell {
+  font-weight: 850;
+  color: #0f172a;
+}
+
+.guide-picker-phone-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.guide-picker-empty {
+  padding: 32px 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.guide-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 14px;
+}
+
+.guide-modal-grid-main {
+  grid-template-columns: minmax(0, 1fr) 120px;
+}
+
+.guide-modal-grid-fees {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.guide-modal-section :deep(.ant-checkbox-wrapper) {
+  height: 32px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.guide-modal-section :deep(.ant-input),
+.guide-modal-section :deep(.ant-input-number),
+.guide-modal-section :deep(.ant-select-selector),
+.guide-modal-section :deep(.ant-picker) {
+  border-color: #dbe4f0;
+  border-radius: 5px;
+}
+
+.shopping-commission-summary,
+.shopping-rule-grid,
+.shopping-bonus-grid,
+.shopping-feedback-grid,
+.shopping-feedback-detail-grid,
+.shopping-feedback-detail-summary,
+.shopping-settlement-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.shopping-commission-summary {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-bottom: 14px;
+}
+
+.shopping-commission-card {
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.shopping-commission-card span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #64748b;
+}
+
+.shopping-commission-card strong {
+  font-size: 18px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.shopping-commission-card.highlight {
+  background: #ecfdf5;
+  border-color: #bbf7d0;
+}
+
+.shopping-commission-card.highlight strong {
+  color: #047857;
+}
+
+.shopping-commission-section {
+  padding: 14px;
+  margin-top: 12px;
+  border: 1px solid #e4ecf7;
+  border-radius: 6px;
+}
+
+.shopping-commission-section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.shopping-commission-section-title span {
+  font-size: 14px;
+  font-weight: 900;
+  color: #1e293b;
+}
+
+.shopping-commission-section-title small {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.shopping-rule-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.shopping-bonus-grid {
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+}
+
+.shopping-feedback-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.shopping-commission-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 4px 0 12px;
+}
+
+.shopping-feedback-table {
+  margin-top: 4px;
+}
+
+.shopping-feedback-detail-panel {
+  padding: 12px;
+  margin-top: 4px;
+  background: #fbfdff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.shopping-feedback-detail-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.shopping-feedback-detail-summary span {
+  padding: 7px 9px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 800;
+  color: #334155;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+}
+
+.shopping-feedback-detail-line {
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #ffffff;
+  border: 1px solid #e8eef7;
+  border-radius: 5px;
+}
+
+.shopping-feedback-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(130px, 1fr) minmax(220px, 1.6fr) minmax(220px, 1.6fr);
+  gap: 10px 12px;
+}
+
+.shopping-feedback-rate-field {
+  display: grid;
+  grid-template-columns: minmax(72px, 0.7fr) 18px minmax(110px, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.shopping-feedback-rate-field span {
+  font-size: 12px;
+  font-weight: 800;
+  color: #64748b;
+  text-align: center;
+}
+
+.shopping-settlement-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.shopping-settlement-grid span {
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
 }
 
 @media (max-width: 1080px) {
@@ -2710,6 +4487,48 @@ onMounted(loadDetail);
   .traffic-modal-footer {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .guide-modal-grid,
+  .guide-modal-grid-fees,
+  .guide-modal-grid-main {
+    grid-template-columns: 1fr;
+  }
+
+  .guide-imprest-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .shopping-commission-summary,
+  .shopping-rule-grid,
+  .shopping-bonus-grid,
+  .shopping-feedback-grid,
+  .shopping-feedback-detail-grid,
+  .shopping-feedback-detail-summary,
+  .shopping-settlement-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .guide-modal-title-row,
+  .guide-picker-search {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .guide-picker-search-input {
+    width: 100%;
+  }
+}
+
+@media (max-width: 680px) {
+  .shopping-commission-summary,
+  .shopping-rule-grid,
+  .shopping-bonus-grid,
+  .shopping-feedback-grid,
+  .shopping-feedback-detail-grid,
+  .shopping-feedback-detail-summary,
+  .shopping-settlement-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

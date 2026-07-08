@@ -71,6 +71,10 @@ public class SalesTeamController extends ControllerSupport {
      * @param endDate 出团结束日期
      * @param travelDays 行程天数
      * @param teamStatus 团队状态或页面日期状态
+     * @param guideKeyword 导游姓名或手机号关键字
+     * @param departmentName 团队归属部门名称
+     * @param orderStatus 订单状态
+     * @param addDate 团队添加日期
      * @param page 当前页，从 1 开始
      * @param pageSize 每页数量，最大 200
      * @return 团队管理列表分页结果
@@ -80,6 +84,7 @@ public class SalesTeamController extends ControllerSupport {
     public ApiResponse<PageResult<SalesTeamListResponse>> page(
             @RequestParam(required = false) String teamType,
             @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String customerKeyword,
             @RequestParam(required = false) String operatorKeyword,
             @RequestParam(required = false) String departurePlace,
             @RequestParam(required = false) String businessType,
@@ -87,6 +92,10 @@ public class SalesTeamController extends ControllerSupport {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(required = false) Integer travelDays,
             @RequestParam(required = false) String teamStatus,
+            @RequestParam(required = false) String guideKeyword,
+            @RequestParam(required = false) String departmentName,
+            @RequestParam(required = false) String orderStatus,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate addDate,
             @RequestParam(defaultValue = "1") @Min(1) long page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(200) long pageSize
     ) {
@@ -94,6 +103,7 @@ public class SalesTeamController extends ControllerSupport {
                 currentTenantId(),
                 teamType,
                 keyword,
+                customerKeyword,
                 operatorKeyword,
                 departurePlace,
                 businessType,
@@ -101,6 +111,10 @@ public class SalesTeamController extends ControllerSupport {
                 endDate,
                 travelDays,
                 teamStatus,
+                guideKeyword,
+                departmentName,
+                orderStatus,
+                addDate,
                 page,
                 pageSize
         ));

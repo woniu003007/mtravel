@@ -17,6 +17,10 @@ import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderGuestEnt
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderChargeLineMapper;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderGuestMapper;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderMapper;
+import com.mtravel.platform.common.attachment.entity.CommonAttachmentEntity;
+import com.mtravel.platform.common.attachment.mapper.CommonAttachmentMapper;
+import com.mtravel.platform.sales.product.entity.SalesProductEntity;
+import com.mtravel.platform.sales.product.mapper.SalesProductMapper;
 import com.mtravel.platform.sales.ordertransfer.entity.SalesOrderTransferLogEntity;
 import com.mtravel.platform.sales.ordertransfer.mapper.SalesOrderTransferLogMapper;
 import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
@@ -91,6 +95,9 @@ class SalesBookingOrderServiceTest {
         assertThat(savedOrder.getSalespersonEmployeeName()).isEqualTo("张业务");
         assertThat(savedOrder.getBookingOperatorEmployeeId()).isEqualTo(32L);
         assertThat(savedOrder.getBookingOperatorEmployeeName()).isEqualTo("王计调");
+        assertThat(savedOrder.getSourceProvince()).isEqualTo("浙江省");
+        assertThat(savedOrder.getSourceCity()).isEqualTo("杭州市");
+        assertThat(savedOrder.getSourceDistrict()).isEqualTo("余杭区");
         assertThat(savedOrder.getHotelInfo()).contains("双床");
         assertThat(savedOrder.getStatus()).isEqualTo("confirmed");
 
@@ -157,6 +164,36 @@ class SalesBookingOrderServiceTest {
         verify(teamMapper).update(teamCaptor.capture(), any(UpdateWrapper.class));
         assertThat(teamCaptor.getValue().getUsedSeats()).isZero();
         assertThat(teamCaptor.getValue().getRemainingSeats()).isEqualTo(20);
+    }
+
+    @Test
+    void saveOrderShouldClearSourcePlaceWhenFirstGuestIdCardCannotResolveEvenIfSecondGuestCanResolve() {
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
+        SalesBookingOrderGuestMapper guestMapper = mock(SalesBookingOrderGuestMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesBookingOrderService service = new SalesBookingOrderService(
+                orderMapper,
+                chargeLineMapper,
+                guestMapper,
+                teamMapper
+        );
+        when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(team(1001L, 20, 0, 20));
+        when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(null);
+        when(orderMapper.sumGuestCountByTeam(1L, 1001L)).thenReturn(3);
+        doAnswer(invocation -> {
+            SalesBookingOrderEntity order = invocation.getArgument(0);
+            order.setId(2001L);
+            return 1;
+        }).when(orderMapper).insert(any(SalesBookingOrderEntity.class));
+
+        service.save(requestWithGuestCertificates("990000198206214839", "310101201010287414"), 1L, "admin");
+
+        ArgumentCaptor<SalesBookingOrderEntity> orderCaptor = ArgumentCaptor.forClass(SalesBookingOrderEntity.class);
+        verify(orderMapper).insert(orderCaptor.capture());
+        assertThat(orderCaptor.getValue().getSourceProvince()).isNull();
+        assertThat(orderCaptor.getValue().getSourceCity()).isNull();
+        assertThat(orderCaptor.getValue().getSourceDistrict()).isNull();
     }
 
     @Test
@@ -611,6 +648,167 @@ class SalesBookingOrderServiceTest {
         assertThat(service.guestImportTemplateFilename()).isEqualTo("游客名单导入模板.xls");
     }
 
+    @Test
+    void orderManagePageShouldReturnOldSystemRowsWithTeamProductGuestsAndFiles() {
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
+        SalesBookingOrderGuestMapper guestMapper = mock(SalesBookingOrderGuestMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        CommonAttachmentMapper attachmentMapper = mock(CommonAttachmentMapper.class);
+        SalesBookingOrderService service = new SalesBookingOrderService(
+                orderMapper,
+                chargeLineMapper,
+                guestMapper,
+                teamMapper,
+                new com.mtravel.platform.sales.booking.aiimport.service.IdCardValidator(),
+                null,
+                null,
+                null,
+                productMapper,
+                attachmentMapper
+        );
+        SalesBookingOrderEntity order = existingOrder(2001L);
+        order.setCustomerName("杭州百缘旅行社");
+        order.setCustomerTeamNo("客户团号-A");
+        order.setContactName("张三");
+        order.setPickupInfo("接站：[大连/上海虹桥站 CZ123 2026-06-25 08:00 -- 2026-06-25 10:00]");
+        order.setDropoffInfo("送站：[上海虹桥站/大连 CZ124 2026-06-30 18:00 -- 2026-06-30 20:00]");
+        order.setPickupRemark("接送备注");
+        order.setGuideRemark("导游备注");
+        order.setSourceProvince("浙江省");
+        order.setSourceCity("杭州市");
+        order.setSourceDistrict("拱墅区");
+        order.setHotelInfo("06-30 双床/大床 1");
+        order.setFeeRemark("费用说明");
+        order.setOrderRemark("订单备注");
+        order.setBookedBy("老板账号");
+        order.setBookedAt(OffsetDateTime.parse("2026-06-26T15:04:37+08:00"));
+        order.setReceivableAmount(new BigDecimal("6360.00"));
+        order.setReceivedAmount(new BigDecimal("1000.00"));
+        order.setBalanceAmount(new BigDecimal("5360.00"));
+        order.setAdultCount(2);
+        order.setGuestCount(2);
+        order.setTagging(true);
+        when(orderMapper.selectPage(any(), any(Wrapper.class)))
+                .thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<SalesBookingOrderEntity>(1, 20, 1).setRecords(List.of(order)));
+        SalesTeamEntity team = team(1001L, 20, 2, 18);
+        team.setTeamNo("CS-SP-BK-260625A");
+        team.setTeamType("sanpin");
+        team.setDepartureDate(LocalDate.of(2026, 6, 25));
+        when(teamMapper.selectList(any(Wrapper.class))).thenReturn(List.of(team));
+        SalesProductEntity product = new SalesProductEntity();
+        product.setId(88L);
+        product.setTenantId(1L);
+        product.setProductName("宁波方特二日游");
+        when(productMapper.selectList(any(Wrapper.class))).thenReturn(List.of(product));
+        SalesBookingOrderChargeLineEntity adult = chargeLine(order, "adult", "成人", "3000", "2", "6000", 1);
+        SalesBookingOrderChargeLineEntity surcharge = chargeLine(order, "surcharge", "附加费", "180", "2", "360", 2);
+        when(chargeLineMapper.selectList(any(Wrapper.class))).thenReturn(List.of(adult, surcharge));
+        SalesBookingOrderGuestEntity guest = new SalesBookingOrderGuestEntity();
+        guest.setOrderId(2001L);
+        guest.setGuestName("张三");
+        guest.setCertificateNo("330105198201010319");
+        when(guestMapper.selectList(any(Wrapper.class))).thenReturn(List.of(guest));
+        CommonAttachmentEntity attachment = new CommonAttachmentEntity();
+        attachment.setBusinessId(2001L);
+        when(attachmentMapper.selectList(any(Wrapper.class))).thenReturn(List.of(attachment));
+
+        var result = service.orderManagePage(
+                1L,
+                "CS-SP",
+                "客户团号-A",
+                "杭州百缘",
+                LocalDate.of(2026, 6, 1),
+                LocalDate.of(2026, 6, 30),
+                "宁波方特",
+                "接送备注",
+                new BigDecimal("6360.00"),
+                "老板账号",
+                "张三",
+                "sanpin",
+                "confirmed",
+                "booked",
+                true,
+                true,
+                1,
+                20
+        );
+
+        assertThat(result.total()).isEqualTo(1);
+        assertThat(result.items()).hasSize(1);
+        var row = result.items().get(0);
+        assertThat(row.id()).isEqualTo(2001L);
+        assertThat(row.teamId()).isEqualTo(1001L);
+        assertThat(row.teamNo()).isEqualTo("CS-SP-BK-260625A");
+        assertThat(row.teamType()).isEqualTo("sanpin");
+        assertThat(row.teamTypeLabel()).isEqualTo("散拼");
+        assertThat(row.departureDate()).isEqualTo(LocalDate.of(2026, 6, 25));
+        assertThat(row.productName()).isEqualTo("宁波方特二日游");
+        assertThat(row.orderInfo()).contains("杭州百缘旅行社", "客户团号-A");
+        assertThat(row.pickupRemark()).isEqualTo("接送备注");
+        assertThat(row.guideRemark()).isEqualTo("导游备注");
+        assertThat(row.sourcePlace()).isEqualTo("浙江省杭州市拱墅区");
+        assertThat(row.guestName()).isEqualTo("张三");
+        assertThat(row.priceDetail()).contains("成人：3000 * 2 = 6000");
+        assertThat(row.receivableAmount()).isEqualTo("¥6360");
+        assertThat(row.status()).isEqualTo("已确认");
+        assertThat(row.tagging()).isTrue();
+        assertThat(row.hasOrderFile()).isTrue();
+    }
+
+    @Test
+    void operationLeaderSummaryShouldUseLeaderGuestsFromEffectiveOrders() {
+        SalesBookingOrderGuestMapper guestMapper = mock(SalesBookingOrderGuestMapper.class);
+        SalesBookingOrderService service = new SalesBookingOrderService(
+                mock(SalesBookingOrderMapper.class),
+                mock(SalesBookingOrderChargeLineMapper.class),
+                guestMapper,
+                mock(SalesTeamMapper.class)
+        );
+        SalesBookingOrderEntity normalOrder = existingOrder(2001L);
+        normalOrder.setOrderRole("normal");
+        SalesBookingOrderEntity mergeChildOrder = existingOrder(3001L);
+        mergeChildOrder.setOrderRole("merge_child");
+        SalesBookingOrderEntity mergeSourceOrder = existingOrder(4001L);
+        mergeSourceOrder.setOrderRole("merge_source");
+        SalesBookingOrderEntity cancelledOrder = existingOrder(5001L);
+        cancelledOrder.setStatus("cancelled");
+        when(guestMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                leaderGuest(2001L, "张三", "13800138000"),
+                leaderGuest(3001L, "李四", null),
+                leaderGuest(4001L, "来源领队", "13600136000"),
+                leaderGuest(5001L, "取消领队", "13700137000")
+        ));
+
+        String summary = service.operationLeaderSummary(
+                1L,
+                List.of(normalOrder, mergeChildOrder, mergeSourceOrder, cancelledOrder)
+        );
+
+        assertThat(summary).isEqualTo("张三[Tel:13800138000]、李四");
+    }
+
+    @Test
+    void updateOrderTaggingShouldOnlyChangeTaggingFlag() {
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesBookingOrderService service = new SalesBookingOrderService(
+                orderMapper,
+                mock(SalesBookingOrderChargeLineMapper.class),
+                mock(SalesBookingOrderGuestMapper.class),
+                mock(SalesTeamMapper.class)
+        );
+        when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(existingOrder(2001L));
+
+        service.updateOrderTagging(2001L, true, 1L);
+
+        ArgumentCaptor<SalesBookingOrderEntity> captor = ArgumentCaptor.forClass(SalesBookingOrderEntity.class);
+        verify(orderMapper).update(captor.capture(), any(UpdateWrapper.class));
+        assertThat(captor.getValue().getTagging()).isTrue();
+        assertThat(captor.getValue().getStatus()).isNull();
+        assertThat(captor.getValue().getTeamId()).isNull();
+    }
+
     private byte[] guestImportWorkbook() throws Exception {
         try (var workbook = new HSSFWorkbook(); var output = new ByteArrayOutputStream()) {
             var sheet = workbook.createSheet("Sheet1");
@@ -677,6 +875,19 @@ class SalesBookingOrderServiceTest {
     }
 
     private SalesBookingOrderSaveRequest request(Long id, String status) {
+        return request(id, status, "330110198206214839", "310101201010287414");
+    }
+
+    private SalesBookingOrderSaveRequest requestWithGuestCertificates(String firstCertificateNo, String secondCertificateNo) {
+        return request(null, "confirmed", firstCertificateNo, secondCertificateNo);
+    }
+
+    private SalesBookingOrderSaveRequest request(
+            Long id,
+            String status,
+            String firstCertificateNo,
+            String secondCertificateNo
+    ) {
         return new SalesBookingOrderSaveRequest(
                 id,
                 1001L,
@@ -691,9 +902,9 @@ class SalesBookingOrderServiceTest {
                 "张业务",
                 32L,
                 "王计调",
-                "浙江省",
-                "杭州市",
-                "西湖区",
+                null,
+                null,
+                null,
                 "2026年6月25日 大连-上海 CZ6533，2026年6月30日 上海-大连 CZ6536",
                 "接站：杭州东站",
                 "送站：萧山机场",
@@ -729,7 +940,7 @@ class SalesBookingOrderServiceTest {
                                 1,
                                 "张三",
                                 null,
-                                "210204198206214832",
+                                firstCertificateNo,
                                 null,
                                 "男",
                                 LocalDate.of(1982, 6, 21),
@@ -746,7 +957,7 @@ class SalesBookingOrderServiceTest {
                                 2,
                                 "李四",
                                 null,
-                                "21020420101028741X",
+                                secondCertificateNo,
                                 null,
                                 "女",
                                 LocalDate.of(2010, 10, 28),
@@ -787,5 +998,16 @@ class SalesBookingOrderServiceTest {
         order.setOrderNo("SO-260625-0001");
         order.setStatus("confirmed");
         return order;
+    }
+
+    private SalesBookingOrderGuestEntity leaderGuest(Long orderId, String guestName, String phone) {
+        SalesBookingOrderGuestEntity guest = new SalesBookingOrderGuestEntity();
+        guest.setTenantId(1L);
+        guest.setTeamId(1001L);
+        guest.setOrderId(orderId);
+        guest.setGuestName(guestName);
+        guest.setPhone(phone);
+        guest.setLeaderFlag(true);
+        return guest;
     }
 }

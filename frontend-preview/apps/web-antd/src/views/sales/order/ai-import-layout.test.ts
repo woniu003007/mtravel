@@ -33,6 +33,17 @@ describe('sales order ai import assistant', () => {
     expect(source).toContain('只填入当前表单，不会自动保存订单');
     expect(source).toContain('guest-warning-row');
     expect(source).toContain('leaderSourceText');
+    expect(source).toContain('getSalesBookingOrderPage');
+    expect(source).toContain('updateSalesBookingOrderTagging');
+    expect(source).toContain('导出名单');
+    expect(source).toContain('导出报表');
+    expect(source).toContain('拼团操作');
+    expect(source).toContain('发团日期');
+    expect(source).toContain('订单信息');
+    expect(source).toContain('价格');
+    expect(source).toContain('出团日期不能为空!');
+    expect(source).toContain('/sales/team/booking/${record.teamId}/${record.id}');
+    expect(source).not.toContain('OD20250510001');
 
     expect(api).toContain('/sales/booking/ai-import/recognize');
     expect(api).toContain('BookingAiImportApi');

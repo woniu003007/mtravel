@@ -29,6 +29,11 @@ describe('sales booking order form layout', () => {
     const apiSource = readAppFile('src/api/sales/booking.ts');
 
     expect(source).toContain('AI辅助录入');
+    expect(source).toContain('MAX_AI_IMPORT_FILE_SIZE_MB');
+    expect(source).toContain('上传文件不能超过50MB');
+    expect(source).toContain('SUPPORTED_AI_IMPORT_FILE_EXTENSIONS');
+    expect(source).toContain('doc,docx,xls,xlsx,csv,txt,pdf,jpg,jpeg,png,webp,bmp');
+    expect(source).toContain('暂不支持该文件类型，请上传 Word、Excel、PDF、图片或粘贴文本');
     expect(source).toContain('身份证校验');
     expect(source).toContain('分房');
     expect(source).toContain('领队');

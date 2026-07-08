@@ -28,7 +28,6 @@ import {
   type EnterpriseProductDictionaryApi as ProductDictionaryNamespace,
   getProductDictionaryAll,
 } from '#/api/enterprise/product-dictionary';
-import { getControlledRoomResourceAll } from '#/api/dispatch/room-status';
 import { getHotelResourcePage } from '#/api/purchase/hotel';
 import {
   calculateRoadbookRoute,
@@ -169,10 +168,6 @@ function dictionaryOptions(items: ProductDictionaryNamespace.Item[]) {
   }));
 }
 
-function formatHotelLocation(item: { city?: string; district?: string; province?: string }) {
-  return [item.province, item.city, item.district].filter(Boolean).join(' / ') || '未填地区';
-}
-
 function uniqueHotelOptions(options: SelectOption[]) {
   const seen = new Set<string>();
   return options.filter((item) => {
@@ -185,26 +180,18 @@ function uniqueHotelOptions(options: SelectOption[]) {
 /**
  * 加载行程关联酒店候选项。
  *
- * 产品行程阶段只保存酒店名称文本，但选择项要来自现有自营房源和采购酒店资源，避免用户手写后与后续排房资源脱节。
+ * 产品行程阶段只保存酒店名称文本，酒店候选来自采购酒店资源。
  */
 async function loadRelatedHotelOptions() {
   relatedHotelLoading.value = true;
   try {
-    const [controlledResources, purchasedResult] = await Promise.all([
-      getControlledRoomResourceAll(false),
-      getHotelResourcePage({ page: 1, pageSize: 200, status: 'active' }),
-    ]);
-
-    const controlledOptions = controlledResources.map((item) => ({
-      label: `自营｜${item.hotelName}｜${formatHotelLocation(item)}｜${item.starStandard || '未设标准'}`,
-      value: item.hotelName,
-    }));
+    const purchasedResult = await getHotelResourcePage({ page: 1, pageSize: 200, status: 'active' });
     const purchasedOptions = purchasedResult.items.map((item) => ({
       label: `采购｜${item.hotelName}｜${[item.city, item.area].filter(Boolean).join(' / ') || '未填地区'}｜${item.roomType || '未填房型'}`,
       value: item.hotelName,
     }));
 
-    relatedHotelOptions.value = uniqueHotelOptions([...controlledOptions, ...purchasedOptions]);
+    relatedHotelOptions.value = uniqueHotelOptions(purchasedOptions);
   } catch (error) {
     relatedHotelOptions.value = [];
     message.warning('关联酒店候选加载失败，可先手动输入后保存');

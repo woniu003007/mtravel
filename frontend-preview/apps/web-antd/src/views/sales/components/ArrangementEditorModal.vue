@@ -164,6 +164,12 @@ const showProductVehicleAssistActions = computed(() => props.editorMode === 'pro
 const showScenicTicketDownload = computed(() => (
   props.editorMode === 'team' && props.activeEditorType === 'scenic'
 ));
+const showCostModeTabs = computed(() => (
+  props.activeEditorType !== 'optional'
+));
+const optionalPrimaryLine = computed<SalesProductApi.ArrangementPriceLine>(() => (
+  props.form.priceLines[0] || ({} as SalesProductApi.ArrangementPriceLine)
+));
 const submitButtonText = computed(() => {
   if (props.activeEditorType === 'optional') return '提交保存';
   if (props.editorMode === 'team') {
@@ -177,7 +183,24 @@ function projectOptionsForCurrentType() {
 }
 
 function optionalLineCreditAmount(line: SalesProductApi.ArrangementPriceLine) {
-  return Math.max(Number(line.costPrice || 0) - Number(line.cashAmount || 0), 0);
+  return Math.max(optionalLineCostAmount(line) - Number(line.cashAmount || 0), 0);
+}
+
+function optionalLineSaleAmount(line: SalesProductApi.ArrangementPriceLine) {
+  return Number(line.quantity || 0) * Number(line.salePrice || 0);
+}
+
+function optionalLineCostAmount(line: SalesProductApi.ArrangementPriceLine) {
+  return Number(line.quantity || 0) * Number(line.costPrice || 0);
+}
+
+function optionalLineGuideCommissionAmount(line: SalesProductApi.ArrangementPriceLine) {
+  const quantity = Number(line.quantity || 0);
+  const fixedUnitAmount = Number(line.guideCommissionAmount || 0);
+  if (fixedUnitAmount > 0) return quantity * fixedUnitAmount;
+  const commissionRate = Number(line.guideCommissionRate || 0);
+  if (commissionRate <= 0) return 0;
+  return quantity * Math.max(Number(line.salePrice || 0) - Number(line.costPrice || 0), 0) * commissionRate / 100;
 }
 </script>
 
@@ -193,6 +216,7 @@ function optionalLineCreditAmount(line: SalesProductApi.ArrangementPriceLine) {
     <Spin :spinning="optionsLoading">
       <div class="traffic-modal-body">
         <Radio.Group
+          v-if="showCostModeTabs"
           v-model:value="props.form.allocationMode"
           class="traffic-cost-mode-tabs"
           option-type="button"
@@ -870,14 +894,17 @@ function optionalLineCreditAmount(line: SalesProductApi.ArrangementPriceLine) {
               <div class="traffic-field-group">
                 <div class="traffic-group-title">
                   <IconifyIcon icon="lucide:landmark" />
-                  <span>景区/项目名称</span>
+                  <span>景区名称</span>
                 </div>
-                <div class="traffic-form-row two-columns">
-                  <Form.Item label="景区/项目名称">
+                <div class="traffic-form-row three-columns">
+                  <Form.Item label="景区名称" required>
                     <Select v-model:value="props.form.resourceName" allow-clear show-search :options="resourceOptions" @change="(value) => emit('apply-selected-resource', value)" />
                   </Form.Item>
                   <Form.Item label="游玩日期" required>
                     <Select v-model:value="props.form.scheduleStartDay" :options="scheduleDayOptions" />
+                  </Form.Item>
+                  <Form.Item label="添加">
+                    <Button @click="emit('open-resource-create-page')">添加景区</Button>
                   </Form.Item>
                 </div>
               </div>
@@ -895,21 +922,6 @@ function optionalLineCreditAmount(line: SalesProductApi.ArrangementPriceLine) {
                     <Button @click="emit('open-supplier-create-page')">添加供应商</Button>
                   </Form.Item>
                 </div>
-                <div class="scenic-template-status">
-                  <div>
-                    <span>游客名单模板：</span>
-                    <Tag v-if="scenicTicketTemplateLoading" color="blue">读取中</Tag>
-                    <Tag v-else-if="scenicTicketTemplate" color="green">已配置</Tag>
-                    <Tag v-else color="orange">未配置</Tag>
-                  <strong v-if="scenicTicketTemplate">{{ scenicTicketTemplate.templateName }}</strong>
-                </div>
-                  <Space size="small">
-                    <Button v-if="showScenicTicketDownload" size="small" @click="emit('download-scenic-ticket-guests')">
-                      下载游客Excel
-                    </Button>
-                    <Button size="small" @click="emit('open-scenic-template-config-page')">配置模板</Button>
-                  </Space>
-                </div>
               </div>
 
               <div class="traffic-field-group">
@@ -919,75 +931,113 @@ function optionalLineCreditAmount(line: SalesProductApi.ArrangementPriceLine) {
                 </div>
                 <div class="traffic-form-row three-columns">
                   <Form.Item label="销售价">
-                    <InputNumber v-model:value="props.form.saleAmount" addon-before="¥" :min="0" :precision="2" />
+                    <InputNumber v-model:value="optionalPrimaryLine.salePrice" addon-before="¥" :min="0" :precision="2" @change="emit('sync-optional-line-to-form')" />
                   </Form.Item>
                   <Form.Item label="成本价">
-                    <InputNumber v-model:value="props.form.costAmount" addon-before="¥" :min="0" :precision="2" />
+                    <InputNumber v-model:value="optionalPrimaryLine.costPrice" addon-before="¥" :min="0" :precision="2" @change="emit('sync-optional-line-to-form')" />
                   </Form.Item>
                   <div class="old-system-combined-field">
                     <div class="old-system-combined-title">导游提成</div>
                     <div class="old-system-combined-controls optional-commission-controls">
-                      <InputNumber v-model:value="props.form.guideCommissionAmount" :min="0" :precision="2" />
+                      <InputNumber v-model:value="optionalPrimaryLine.guideCommissionAmount" :min="0" :precision="2" @change="emit('sync-optional-line-to-form')" />
                       <span>元/人</span>
                       <span>或</span>
-                      <InputNumber v-model:value="props.form.guideCommissionRate" :min="0" :precision="2" />
+                      <InputNumber v-model:value="optionalPrimaryLine.guideCommissionRate" :min="0" :precision="2" @change="emit('sync-optional-line-to-form')" />
                       <span>%</span>
                     </div>
+                  </div>
+                </div>
+                <div class="optional-price-overview">
+                  <div class="optional-overview-item">
+                    <label>合计人数：</label>
+                    <InputNumber :value="props.form.peopleCount" disabled :precision="0" />
+                    <span>人</span>
+                  </div>
+                  <div class="optional-overview-item">
+                    <label>合计收入：</label>
+                    <InputNumber :value="props.form.saleAmount" disabled :precision="2" />
+                  </div>
+                  <div class="optional-overview-item">
+                    <label>合计成本：</label>
+                    <InputNumber :value="props.form.costAmount" disabled :precision="2" />
+                  </div>
+                  <div class="optional-overview-item">
+                    <label>合计现结：</label>
+                    <InputNumber :value="props.form.cashAmount" disabled :precision="2" />
+                  </div>
+                  <div class="optional-overview-item">
+                    <label>合计挂账：</label>
+                    <InputNumber :value="editorCreditAmount" disabled :precision="2" />
+                  </div>
+                  <div class="optional-overview-item">
+                    <label>合计提成：</label>
+                    <InputNumber :value="props.form.guideCommissionAmount" disabled :precision="2" />
                   </div>
                 </div>
                 <div class="optional-fee-summary">
                   <div class="optional-fee-summary-title">费用合计</div>
                   <div v-for="(line, index) in props.form.priceLines" :key="`optional-${index}`" class="optional-fee-summary-line optional-fee-summary-row">
-                    <label>人数：</label>
-                    <InputNumber v-model:value="line.quantity" :min="0" :precision="0" @change="emit('sync-optional-line-to-form')" />
-                    <label>收入：</label>
-                    <InputNumber v-model:value="line.salePrice" :min="0" :precision="2" @change="emit('sync-optional-line-to-form')" />
-                    <label>成本：</label>
-                    <InputNumber v-model:value="line.costPrice" :min="0" :precision="2" @change="emit('sync-optional-line-to-form')" />
-                    <label>现结：</label>
-                    <InputNumber v-model:value="line.cashAmount" :min="0" :precision="2" @change="emit('sync-optional-line-to-form')" />
-                    <label>挂账：</label>
-                    <InputNumber :value="optionalLineCreditAmount(line)" disabled :precision="2" />
-                    <label>提成：</label>
-                    <InputNumber v-model:value="line.guideCommissionAmount" :min="0" :precision="2" @change="emit('sync-optional-line-to-form')" />
-                    <button class="traffic-remove-line-button" :class="{ disabled: props.form.priceLines.length <= 1 }" :disabled="props.form.priceLines.length <= 1" title="删除费用合计" type="button" @click="emit('remove-optional-summary-line', index)">
-                      <IconifyIcon icon="lucide:minus" />
-                    </button>
-                    <button v-if="index === props.form.priceLines.length - 1" class="optional-add-summary-button" title="添加费用合计" type="button" @click="emit('add-optional-summary-line')">
-                      <IconifyIcon icon="lucide:plus" />
-                    </button>
+                    <div class="optional-fee-number-grid">
+                      <div class="optional-fee-field">
+                        <label>人数：</label>
+                        <InputNumber v-model:value="line.quantity" :min="0" :precision="0" @change="emit('sync-optional-line-to-form')" />
+                      </div>
+                      <div class="optional-fee-field">
+                        <label>收入：</label>
+                        <InputNumber :value="optionalLineSaleAmount(line)" disabled :precision="2" />
+                      </div>
+                      <div class="optional-fee-field">
+                        <label>成本：</label>
+                        <InputNumber :value="optionalLineCostAmount(line)" disabled :precision="2" />
+                      </div>
+                      <div class="optional-fee-field">
+                        <label>现结：</label>
+                        <InputNumber v-model:value="line.cashAmount" :min="0" :precision="2" @change="emit('sync-optional-line-to-form')" />
+                      </div>
+                      <div class="optional-fee-field">
+                        <label>挂账：</label>
+                        <InputNumber :value="optionalLineCreditAmount(line)" disabled :precision="2" />
+                      </div>
+                      <div class="optional-fee-field">
+                        <label>提成：</label>
+                        <InputNumber :value="optionalLineGuideCommissionAmount(line)" disabled :precision="2" />
+                      </div>
+                    </div>
+                    <div class="optional-fee-meta-grid">
+                      <label>订单信息：</label>
+                      <Select
+                        v-if="props.form.allocationMode === 'group_order_average'"
+                        v-model:value="props.form.orderScope"
+                        class="optional-summary-order-field"
+                        :options="mergedOrderOptions"
+                      />
+                      <Select
+                        v-else
+                        v-model:value="props.form.selectedOrderIds"
+                        class="optional-summary-order-field"
+                        mode="multiple"
+                        :options="orderOptions"
+                        placeholder="请选择需要均摊的订单"
+                      />
+                      <label>备注信息：</label>
+                      <Input
+                        v-model:value="line.remark"
+                        class="optional-summary-remark-field"
+                        placeholder="备注信息"
+                        @change="emit('sync-optional-line-to-form')"
+                      />
+                      <div class="optional-fee-actions">
+                        <button class="traffic-remove-line-button" :class="{ disabled: props.form.priceLines.length <= 1 }" :disabled="props.form.priceLines.length <= 1" title="删除费用合计" type="button" @click="emit('remove-optional-summary-line', index)">
+                          <IconifyIcon icon="lucide:minus" />
+                        </button>
+                        <button v-if="index === props.form.priceLines.length - 1" class="optional-add-summary-button" title="添加费用合计" type="button" @click="emit('add-optional-summary-line')">
+                          <IconifyIcon icon="lucide:plus" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
-
-              <Form.Item label="订单信息">
-                <Select
-                  v-if="props.form.allocationMode === 'group_order_average'"
-                  v-model:value="props.form.orderScope"
-                  :options="mergedOrderOptions"
-                />
-                <Select
-                  v-else
-                  v-model:value="props.form.selectedOrderIds"
-                  mode="multiple"
-                  :options="orderOptions"
-                  placeholder="请选择需要均摊的订单"
-                />
-                <Radio.Group
-                  v-if="props.form.allocationMode === 'multi_order_average'"
-                  v-model:value="props.form.multiOrderSplitMode"
-                  class="order-split-mode"
-                  option-type="button"
-                  button-style="solid"
-                >
-                  <Radio.Button value="by_order">按订单均摊</Radio.Button>
-                  <Radio.Button value="by_people">按人数均摊</Radio.Button>
-                </Radio.Group>
-                <div class="traffic-field-tip">{{ orderInfoTip }}</div>
-              </Form.Item>
-              <Form.Item label="备注信息">
-                <Textarea v-model:value="props.form.remark" :auto-size="{ minRows: 2, maxRows: 4 }" placeholder="备注信息" />
-              </Form.Item>
             </div>
           </template>
 
@@ -1739,6 +1789,39 @@ function optionalLineCreditAmount(line: SalesProductApi.ArrangementPriceLine) {
   border-top: 1px dashed #cbd5e1;
 }
 
+.optional-price-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 12px;
+  align-items: center;
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px dashed #cbd5e1;
+}
+
+.optional-overview-item,
+.optional-fee-field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.optional-price-overview label,
+.optional-price-overview span,
+.optional-fee-summary-row label {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.optional-price-overview :deep(.ant-input-number),
+.optional-fee-summary-row :deep(.ant-input-number) {
+  width: 100%;
+}
+
 .optional-fee-summary-title {
   margin-bottom: 9px;
   font-size: 13px;
@@ -1747,29 +1830,46 @@ function optionalLineCreditAmount(line: SalesProductApi.ArrangementPriceLine) {
 }
 
 .optional-fee-summary-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.optional-fee-summary-line + .optional-fee-summary-line {
+  margin-top: 10px;
+}
+
+.optional-fee-number-grid {
   display: grid;
-  grid-template-columns:
-    auto minmax(72px, 1fr)
-    auto minmax(72px, 1fr)
-    auto minmax(72px, 1fr)
-    auto minmax(72px, 1fr)
-    auto minmax(72px, 1fr)
-    auto minmax(72px, 1fr)
-    34px
-    34px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 12px;
+  min-width: 0;
+}
+
+.optional-fee-meta-grid {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 0.9fr) auto minmax(240px, 1.25fr) auto;
   gap: 8px;
   align-items: center;
+  min-width: 0;
 }
 
-.optional-fee-summary-row label {
-  font-size: 12.5px;
-  font-weight: 800;
-  color: #475569;
-  white-space: nowrap;
-}
-
-.optional-fee-summary-row :deep(.ant-input-number) {
+.optional-summary-order-field,
+.optional-summary-remark-field {
   width: 100%;
+  min-width: 0;
+}
+
+.optional-fee-actions {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .optional-add-summary-button,
@@ -1895,7 +1995,9 @@ function optionalLineCreditAmount(line: SalesProductApi.ArrangementPriceLine) {
   .vehicle-roadbook-summary,
   .old-system-combined-controls,
   .old-system-combined-controls.optional-commission-controls,
-  .optional-fee-summary-row,
+  .optional-price-overview,
+  .optional-fee-number-grid,
+  .optional-fee-meta-grid,
   .shopping-compact-grid,
   .shopping-fee-row,
   .shopping-consumption-main-row,

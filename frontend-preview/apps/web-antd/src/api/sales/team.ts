@@ -106,6 +106,7 @@ export namespace SalesTeamApi {
     | 'shopping'
     | 'traffic'
     | 'vehicle';
+  export type TeamArrangementSectionStatus = 'done' | 'none' | 'pending';
   export type ArrangementAllocationMode = 'group_order_average' | 'multi_order_average';
   export type ArrangementSplitMode = 'by_order' | 'by_people';
   export type DateTeamStatus = 'all' | 'cancelled' | 'departed' | 'not_departed' | 'stopped';
@@ -115,6 +116,7 @@ export namespace SalesTeamApi {
     addDate?: string;
     businessType?: string;
     customerKeyword?: string;
+    departmentName?: string;
     departurePlace?: string;
     endDate?: string;
     guideKeyword?: string;
@@ -156,6 +158,9 @@ export namespace SalesTeamApi {
     escortEmployeeName?: string;
     operatorEmployeeId?: number;
     operatorEmployeeName?: string;
+    optionalMarkupRate?: number;
+    perCapitaPitAmount?: number;
+    perCapitaShoppingAmount?: number;
     remark?: string;
     singleRoomDifference?: number;
     teamType?: TeamType;
@@ -270,6 +275,9 @@ export namespace SalesTeamApi {
   export interface OperationContentInfo {
     bookingNotice?: string;
     internalRemark?: string;
+    optionalMarkupRate?: number;
+    perCapitaPitAmount?: number;
+    perCapitaShoppingAmount?: number;
     productDescription?: string;
   }
 
@@ -516,6 +524,44 @@ export namespace SalesTeamApi {
     ids: number[];
   }
 
+  export interface TeamArrangementSectionStatusItem {
+    arrangementType: ArrangementType;
+    id?: number;
+    status: TeamArrangementSectionStatus;
+    teamId?: number;
+    teamNo?: string;
+  }
+
+  export interface TeamArrangementSummaryCostColumn {
+    cashAmount?: number | string;
+    creditAmount?: number | string;
+    key: string;
+    label: string;
+  }
+
+  export interface TeamArrangementSummarySection {
+    arrangementType: ArrangementType;
+    cashAmount?: number | string;
+    costAmount?: number | string;
+    count: number;
+    creditAmount?: number | string;
+  }
+
+  export interface TeamArrangementSummary {
+    budgetProfitAmount?: number | string;
+    costColumns: TeamArrangementSummaryCostColumn[];
+    guideFeeAmount?: number | string;
+    guideImprestAmount?: number | string;
+    guideOperationFeeAmount?: number | string;
+    optionalCompanyProfitAmount?: number | string;
+    orderBalanceAmount?: number | string;
+    orderReceivableAmount?: number | string;
+    orderReceivedAmount?: number | string;
+    regularCostAmount?: number | string;
+    sectionSummaries: TeamArrangementSummarySection[];
+    shoppingCompanyProfitAmount?: number | string;
+  }
+
   export interface GrossProfitTeamInfo {
     departureDate?: string;
     guestCount?: number;
@@ -649,6 +695,13 @@ export function getTeamArrangements(teamId: number, type?: SalesTeamApi.Arrangem
   );
 }
 
+/** 查询正式团队安排页后端权威金额汇总。 */
+export function getTeamArrangementSummary(teamId: number) {
+  return requestClient.get<SalesTeamApi.TeamArrangementSummary>(
+    `/sales/team/${teamId}/arrangements/summary`,
+  );
+}
+
 /** 保存正式团队安排成本。 */
 export function saveTeamArrangement(teamId: number, data: SalesTeamApi.TeamArrangementSaveParams) {
   return requestClient.post<SalesTeamApi.TeamArrangementSaveResult>(
@@ -662,6 +715,25 @@ export function deleteTeamArrangement(teamId: number, arrangementId: number) {
   return requestClient.post<void>(
     `/sales/team/${teamId}/arrangements/${arrangementId}/delete`,
     {},
+  );
+}
+
+/** 查询正式团队安排分类流程状态。 */
+export function getTeamArrangementSectionStatuses(teamId: number) {
+  return requestClient.get<SalesTeamApi.TeamArrangementSectionStatusItem[]>(
+    `/sales/team/${teamId}/arrangement-section-statuses`,
+  );
+}
+
+/** 保存正式团队安排分类流程状态。 */
+export function saveTeamArrangementSectionStatus(
+  teamId: number,
+  arrangementType: SalesTeamApi.ArrangementType,
+  status: SalesTeamApi.TeamArrangementSectionStatus,
+) {
+  return requestClient.post<SalesTeamApi.TeamArrangementSectionStatusItem>(
+    `/sales/team/${teamId}/arrangement-section-statuses/${arrangementType}`,
+    { status },
   );
 }
 
