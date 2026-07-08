@@ -26,6 +26,7 @@ import {
   updateEnterpriseDepartment,
   type EnterpriseDepartmentApi,
 } from '#/api/enterprise/department';
+import BusinessSearchForm from '#/components/business/BusinessSearchForm.vue';
 
 const columns: TableColumnsType<EnterpriseDepartmentApi.Item> = [
   { title: '部门名称', dataIndex: 'departmentName', key: 'departmentName', width: 180 },
@@ -245,44 +246,39 @@ onMounted(async () => {
 <template>
   <Page title="部门管理" description="维护企业组织架构，供员工、角色权限、计调归属和统计使用">
     <Card>
-      <Form
-        class="department-search-form"
+      <BusinessSearchForm
         :model="query"
-        :label-col="{ style: { width: '76px' } }"
-        :wrapper-col="{ flex: 1 }"
+        :search-loading="loading"
+        create-text="新增"
+        @create="openCreateModal"
+        @reset="resetQuery"
+        @search="handleSearch"
       >
-        <div class="department-search-grid">
-          <Form.Item label="关键词">
-            <Input
-              v-model:value="query.keyword"
-              allow-clear
-              placeholder="部门名称 / 编码 / 负责人 / 电话"
-              @press-enter="handleSearch"
-            />
-          </Form.Item>
-          <Form.Item label="上级部门">
-            <Select
-              v-model:value="query.parentId"
-              allow-clear
-              :options="parentOptions"
-              placeholder="请选择上级部门"
-            />
-          </Form.Item>
-          <Form.Item label="状态">
-            <Select
-              v-model:value="query.status"
-              allow-clear
-              :options="statusOptions"
-              placeholder="请选择状态"
-            />
-          </Form.Item>
-        </div>
-        <div class="department-search-actions">
-          <Button @click="resetQuery">重置</Button>
-          <Button type="primary" @click="handleSearch">查询</Button>
-          <Button type="primary" @click="openCreateModal">添加部门</Button>
-        </div>
-      </Form>
+        <Form.Item label="关键词">
+          <Input
+            v-model:value="query.keyword"
+            allow-clear
+            placeholder="部门名称 / 编码 / 负责人 / 电话"
+            @press-enter="handleSearch"
+          />
+        </Form.Item>
+        <Form.Item label="上级部门">
+          <Select
+            v-model:value="query.parentId"
+            allow-clear
+            :options="parentOptions"
+            placeholder="请选择上级部门"
+          />
+        </Form.Item>
+        <Form.Item label="状态">
+          <Select
+            v-model:value="query.status"
+            allow-clear
+            :options="statusOptions"
+            placeholder="请选择状态"
+          />
+        </Form.Item>
+      </BusinessSearchForm>
 
       <Table
         :columns="columns"
@@ -418,25 +414,6 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.department-search-form {
-  margin-bottom: 16px;
-}
-
-.department-search-grid {
-  display: grid;
-  grid-template-columns: minmax(280px, 1.3fr) minmax(180px, 0.8fr) minmax(
-      160px,
-      0.6fr
-    );
-  gap: 12px;
-}
-
-.department-search-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
 .department-form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -453,13 +430,8 @@ onMounted(async () => {
 }
 
 @media (max-width: 768px) {
-  .department-search-grid,
   .department-form-row {
     display: block;
-  }
-
-  .department-search-actions {
-    justify-content: flex-start;
   }
 }
 </style>

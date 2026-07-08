@@ -20,6 +20,164 @@ function expectTextOrder(source: string, labels: string[]) {
   }
 }
 
+describe('sales team list layout', () => {
+  it('aligns the team search area with the order management search layout', () => {
+    const source = readAppFile('src/views/sales/team/index.vue');
+
+    expect(source).toContain("import BusinessSearchForm from '#/components/business/BusinessSearchForm.vue';");
+    expect(source).toContain('advancedSearchOpen');
+    expect(source).not.toContain('grid-class="team-search-grid"');
+    expect(source).not.toContain('actions-class="team-filter-actions"');
+    expect(source).not.toContain('label-width="72px"');
+    expect(source).toContain('class="team-search-item" label="团号"');
+    expect(source).toContain('class="business-search-item--wide" label="出团日期"');
+    expect(source).toContain('<DatePicker.RangePicker');
+    expect(source).toContain('<template v-if="advancedSearchOpen">');
+    expect(source).toContain('class="team-search-item team-advanced-search-item" label="导游"');
+    expect(source).toContain('class="team-search-item team-advanced-search-item" label="部门"');
+    expect(source).toContain('class="team-search-item team-advanced-search-item" label="订单状态"');
+    expect(source).toContain('class="team-search-item team-advanced-search-item" label="添加日期"');
+    expect(source).toContain('class="team-table-toolbar"');
+    expect(source).toContain('团队列表');
+    expect(source).toContain('共 {{ pagination.total || 0 }} 条');
+    expect(source).toContain('guideKeyword: clean(query.guideKeyword)');
+    expect(source).toContain('departmentName: query.departmentName');
+    expect(source).toContain('orderStatus: query.orderStatus');
+    expect(source).toContain('addDate: dateParam(queryDates.addDate)');
+    expect(source).toContain('getEnterpriseDepartmentAll');
+    expect(source).toContain('loadDepartmentOptions');
+    expect(source).not.toContain('disabled placeholder="导游"');
+    expect(source).not.toContain('disabled allow-clear :options="orderStatusOptions"');
+    expect(source).not.toContain('disabled placeholder="添加日期"');
+    expect(source).not.toContain('class="team-search-actions"');
+    expect(source).not.toContain('grid-template-columns: 1.25fr 1.1fr 0.8fr');
+  });
+
+  it('keeps long team names inside a fixed-width ellipsis cell with hover title', () => {
+    const source = readAppFile('src/views/sales/team/index.vue');
+
+    expect(source).toContain("className: 'team-name-column'");
+    expect(source).toContain("{ className: 'team-name-column', key: 'teamName', title: '团队名称', width: 318 }");
+    expect(source).toContain(`<Tooltip :title="teamRow(record).productName || '--'">`);
+    expect(source).toContain('class="team-name-cell"');
+    expect(source).toContain('class="team-name-link"');
+    expect(source).toContain('.team-table :deep(.team-name-column)');
+    expect(source).toContain('width: 318px !important;');
+    expect(source).toContain('max-width: 318px !important;');
+    expect(source).toContain('.team-name-cell');
+    expect(source).toContain('width: 318px;');
+    expect(source).toContain('.team-name-link');
+    expect(source).toContain('width: 100%;');
+    expect(source).toContain('.team-name-link :deep(span)');
+    expect(source).toContain('max-width: 100%;');
+    expect(source).toContain('overflow: hidden;');
+    expect(source).toContain('text-overflow: ellipsis;');
+    expect(source).toContain('white-space: nowrap;');
+  });
+
+  it('passes customer keyword and jumps arrangement icons to their section anchors', () => {
+    const source = readAppFile('src/views/sales/team/index.vue');
+    const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
+
+    expect(source).toContain('customerKeyword: clean(query.customerKeyword)');
+    expect(source).toContain('const arrangementAnchorMap: Record<string, string>');
+    expect(source).toContain("guidePlan: 'guide-arrangement'");
+    expect(source).toContain("trafficPlan: 'part1'");
+    expect(source).toContain("hotelPlan: 'part2'");
+    expect(source).toContain("groundAgentPlan: 'part9'");
+    expect(source).toContain('function openArrangementSection(record: TeamListItem, key: string)');
+    expect(source).toContain('router.push(`/sales/team/arrangement/${record.id}#${anchor}`)');
+    expect(source).toContain('class="arrange-jump-button"');
+    expect(source).toContain('@click="openArrangementSection(teamRow(record), String(column.key))"');
+    expect(arrangementSource).toContain('async function scrollToRouteHashAnchor()');
+    expect(arrangementSource).toContain("const anchor = route.hash?.replace('#', '')");
+    expect(arrangementSource).toContain('await scrollToRouteHashAnchor();');
+  });
+
+  it('shows product-copied arrangement prices as references before operators enter real quantities', () => {
+    const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
+
+    expect(arrangementSource).toContain('参考单价');
+    expect(arrangementSource).toContain('if (quantity <= 0)');
+    expect(arrangementSource).toContain("return Number(record.peopleCount || 0) > 0 ? String(record.peopleCount) : '--';");
+  });
+
+  it('shows guide imprest approval records from existing imprest applications', () => {
+    const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
+
+    expect(arrangementSource).toContain('getGuideImprestPage');
+    expect(arrangementSource).toContain('getGuideImprestDetail');
+    expect(arrangementSource).toContain('openGuideImprestRecords(record)');
+    expect(arrangementSource).toContain('导游备用金审批记录');
+    expect(arrangementSource).toContain('审批记录');
+    expect(arrangementSource).toContain('guideImprestRecordRows');
+    expect(arrangementSource).toContain('申请编号');
+    expect(arrangementSource).toContain('申请金额');
+    expect(arrangementSource).toContain('审批人 / 时间');
+    expect(arrangementSource).toContain('已付金额');
+    expect(arrangementSource).toContain('余额');
+    expect(arrangementSource).toContain('查看详情');
+    expect(arrangementSource).toContain('guideImprestRecordDetailOpen');
+    expect(arrangementSource).toContain('title="备用金申请详情"');
+    expect(arrangementSource).toContain('teamId: team.value?.id');
+    expect(arrangementSource).toContain('guideId: record.guideId');
+  });
+
+  it('keeps actual shopping reconciliation out of the arrangement page', () => {
+    const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
+
+    expect(arrangementSource).not.toContain('购物业绩');
+    expect(arrangementSource).not.toContain('购物业绩与公司补佣');
+    expect(arrangementSource).not.toContain('openShoppingCommissionModal');
+  });
+
+  it('fills arrangement header guide from arranged guide rows and leader from booking guests', () => {
+    const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
+    const teamDtoSource = readAppFile('../../../backend/src/main/java/com/mtravel/platform/sales/team/dto/SalesTeamOperationResponse.java');
+
+    expect(arrangementSource).toContain('const arrangedGuideSummary = computed');
+    expect(arrangementSource).toContain('teamGuides.value.map');
+    expect(arrangementSource).toContain('item.guideName');
+    expect(arrangementSource).toContain('item.guideMobile');
+    expect(arrangementSource).toContain("{ color: 'orange', label: '导游', value: arrangedGuideSummary.value }");
+    expect(arrangementSource).toContain("{ color: 'green', label: '领队', value: team.value?.leaderSummary || '--' }");
+    expect(teamDtoSource).toContain('String leaderSummary');
+  });
+
+  it('moves shopping reconciliation to single-team audit and operation entries', () => {
+    const operationSource = readAppFile('src/views/sales/team/operation.vue');
+    const financeAuditSource = readAppFile('src/views/finance/team-audit/index.vue');
+    const financeRouteSource = readAppFile('src/router/routes/modules/finance.ts');
+
+    expect(operationSource).toContain('ShoppingReconciliationModal');
+    expect(operationSource).toContain('openShoppingReconciliationModal(team.value.id)');
+    expect(financeAuditSource).toContain('ShoppingReconciliationModal');
+    expect(financeAuditSource).toContain('getSalesTeamPage');
+    expect(financeAuditSource).toContain('openShoppingReconciliationModal');
+    expect(financeAuditSource).toContain('购物核对/补佣');
+    expect(financeRouteSource).toContain("path: '/finance/team-audit'");
+    expect(financeRouteSource).toContain("hideInMenu: true, title: '财务团队审核'");
+  });
+
+  it('keeps customer and guide summaries clipped inside their table cells', () => {
+    const source = readAppFile('src/views/sales/team/index.vue');
+
+    expect(source).toContain("{ className: 'team-customer-column', key: 'customer', title: '客户', width: 170 }");
+    expect(source).toContain("{ className: 'team-guide-summary-column', key: 'guideSummary', title: '导游信息', width: 132 }");
+    expect(source).toContain('class="team-summary-cell team-customer-cell"');
+    expect(source).toContain('class="team-summary-cell team-guide-cell"');
+    expect(source).toContain('.team-table :deep(.team-customer-column)');
+    expect(source).toContain('width: 170px !important;');
+    expect(source).toContain('.team-table :deep(.team-guide-summary-column)');
+    expect(source).toContain('width: 132px !important;');
+    expect(source).toContain('-webkit-line-clamp: 2;');
+    expect(source).toContain('-webkit-box-orient: vertical;');
+    expect(source).toContain('.team-guide-cell');
+    expect(source).toContain('text-overflow: ellipsis;');
+    expect(source).toContain('white-space: nowrap;');
+  });
+});
+
 describe('sales team operation layout', () => {
   it('uses product form capability when directly creating sanpin zhengtuan and santuan teams', () => {
     const source = readAppFile('src/views/sales/team/create.vue');
@@ -48,7 +206,7 @@ describe('sales team operation layout', () => {
     expect(source).toContain('createDefaultItineraryDay');
     expect(source).toContain('syncItineraryDaysWithTravelDays');
     expect(source).toContain('formState.itineraryDays');
-    expect(source).toContain('getControlledRoomResourceAll');
+    expect(source).not.toContain('getControlledRoomResourceAll');
     expect(source).toContain('getHotelResourcePage');
     expect(source).toContain('relatedHotelOptions');
     expect(source).toContain('选择关联酒店');
@@ -89,17 +247,29 @@ describe('sales team operation layout', () => {
 
   it('keeps the old-system operation order while using the new-system visual shell', () => {
     const source = readAppFile('src/views/sales/team/operation.vue');
+    const headerSource = readAppFile('src/views/sales/components/FormalTeamPageHeader.vue');
     const apiSource = readAppFile('src/api/sales/team.ts');
 
-    expect(source).toContain('team-operation-header');
-    expect(source).toContain('top-tool-actions');
-    expect(source).toContain('operation-flow-row');
-    expect(source).toContain('team-profile-block');
-    expect(source).toContain('team-description-stack');
-    expect(source).toContain('operation-icon-actions');
+    expect(source).toContain('FormalTeamPageHeader');
+    expect(source).toContain("import '../team-arrangement-layout.css'");
+    expect(source).toContain('team-arrangement-card');
+    expect(source).toContain('formal-team-arrangement-card');
+    expect(source).toContain('formal-operation-actions');
+    expect(source).toContain('operation-action-grid');
+    expect(source).toContain('.operation-action-grid {');
+    expect(source).toContain('flex-wrap: nowrap;');
+    expect(source).toContain('overflow-x: auto;');
+    expect(source).toContain('scrollbar-width: thin;');
+    expect(source).toContain('operation-action-tile');
+    expect(source).toContain('formal-description-stack');
+    expect(source).not.toContain('team-operation-shell');
+    expect(source).not.toContain('team-operation-header');
+    expect(headerSource).toContain('top-tool-actions');
+    expect(source).not.toContain('operation-flow-row');
+    expect(source).not.toContain('team-profile-block');
+    expect(source).not.toContain('team-description-stack');
+    expect(source).not.toContain('operation-icon-actions');
     expect(source).toContain('metric-teamNo');
-    expect(source).toContain('minmax(218px, 1.5fr)');
-    expect(source).toContain('display: flex;');
     expect(source).toContain('stageState');
     expect(source).toContain('price-modal-table');
     expect(source).toContain('itinerary-modal-content');
@@ -117,6 +287,9 @@ describe('sales team operation layout', () => {
     expect(source).toContain('saveSalesTeam');
     expect(source).toContain("action.code === 'teamArrangement' && team.value?.id");
     expect(source).toContain('router.push(`/sales/team/arrangement/${team.value.id}`)');
+    expect(source).toContain("action.code === 'shoppingReconciliation' && team.value?.id");
+    expect(source).toContain('openShoppingReconciliationModal(team.value.id)');
+    expect(source).toContain('ShoppingReconciliationModal');
     expect(source).toContain("action.code === 'editTeam' && team.value?.id");
     expect(source).toContain('router.push(`/sales/team/edit/${team.value.id}`)');
     expect(source).not.toContain('router.push(`/sales/product/team-arrangement/${team.value.productId}`)');
@@ -157,6 +330,9 @@ describe('sales team operation layout', () => {
     expect(source).toContain('mergeTeamColumns');
     expect(source).toContain('mergeTeamRowSelection');
     expect(source).toContain('mergeTeamPagination');
+    expect(source).toContain("teamType: 'sanpin'");
+    expect(source).toContain('拼团目标团队只显示散拼');
+    expect(source).not.toContain("teamType: mergeTeamSearchForm");
     expect(source).toContain('canTransferOrder');
     expect(source).toContain('transferDisabledReason');
     expect(source).toContain('validateSelectedTransferOrders');
@@ -206,16 +382,116 @@ describe('sales team operation layout', () => {
     expect(apiSource).not.toContain('splits: MergeOrderSplitParams[];');
 
     expectTextOrder(source, [
-      '团队操作',
-      'top-tool-actions',
-      'operation-flow-row',
-      'team-profile-block',
-      'team-description-stack',
-      'operation-icon-actions',
+      'FormalTeamPageHeader',
+      'formal-description-stack',
+      'formal-operation-actions',
       '该团相关订单',
     ]);
 
     expectTextOrder(source, ['产品说明', '收客须知', '内部备注']);
+  });
+
+  it('matches legacy inside memo fields on the team operation page', () => {
+    const source = readAppFile('src/views/sales/team/operation.vue');
+    const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
+    const productArrangementSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+    const headerSource = readAppFile('src/views/sales/components/FormalTeamPageHeader.vue');
+    const arrangementLayoutSource = readAppFile('src/views/sales/team-arrangement-layout.css');
+    const apiSource = readAppFile('src/api/sales/team.ts');
+
+    expect(apiSource).toContain('perCapitaPitAmount?: number;');
+    expect(apiSource).toContain('optionalMarkupRate?: number;');
+    expect(apiSource).toContain('perCapitaShoppingAmount?: number;');
+    expect(source).toContain('perCapitaPitAmount');
+    expect(source).toContain('optionalMarkupRate');
+    expect(source).toContain('perCapitaShoppingAmount');
+    expect(source).toContain('人均坑位');
+    expect(source).toContain('自费加点率');
+    expect(source).toContain('人均购物');
+    expect(source).toContain('内部备注');
+    expect(source).toContain('placeholder="填写导游、控房、控车、用餐和其它要求"');
+    expect(source).toContain('addon-before="¥"');
+    expect(source).toContain('addon-after="%"');
+    expect(source).toContain(':note="content?.internalRemark || \'无\'"');
+    expect(headerSource).toContain('class="internal-note-main"');
+    expect(headerSource).toContain('class="internal-note-heading"');
+    expect(headerSource).toContain('class="internal-note-text"');
+    expect(source).toContain(':width="profileEditorType === \'internal_note\' ? 760 : 460"');
+    expect(source).toContain('class="inside-memo-textarea"');
+    expect(source).toContain(':auto-size="{ minRows: 10, maxRows: 16 }"');
+    expect(source).toContain('DEFAULT_INTERNAL_REMARK_TEMPLATE');
+    expect(source).toContain('content.value?.internalRemark || DEFAULT_INTERNAL_REMARK_TEMPLATE');
+    expect(source).toContain('>导游要求：');
+    expect(source).toContain('>控房要求：');
+    expect(source).toContain('>控车要求：');
+    expect(source).toContain('>用餐要求：');
+    expect(source).toContain('>其它要求：');
+    expect(arrangementSource).toContain('DEFAULT_INTERNAL_REMARK_TEMPLATE');
+    expect(arrangementSource).toContain('content.value?.internalRemark || DEFAULT_INTERNAL_REMARK_TEMPLATE');
+    expect(arrangementSource).toContain(':note="content?.internalRemark || \'未填写\'"');
+    expect(arrangementSource).not.toContain('internalRemarkLines');
+    expect(arrangementSource).not.toContain('class="internal-note-line"');
+    expect(arrangementLayoutSource).toContain('.internal-note-main');
+    expect(arrangementLayoutSource).toContain('.internal-note-heading');
+    expect(arrangementLayoutSource).toContain('grid-template-columns: minmax(0, 1fr) auto;');
+    expect(arrangementLayoutSource).toContain('grid-column: 1 / -1;');
+    expect(arrangementLayoutSource).toContain('white-space: nowrap;');
+    expect(arrangementLayoutSource).toContain('.internal-note-text');
+    expect(arrangementLayoutSource).toContain('white-space: pre-wrap;');
+    expect(arrangementLayoutSource).not.toContain('.internal-note-line');
+    expect(arrangementSource).toContain(':width="quickProfileEditorType === \'internal_note\' ? 760 : 460"');
+    expect(arrangementSource).toContain('class="inside-memo-textarea"');
+    expect(arrangementSource).toContain(':auto-size="{ minRows: 10, maxRows: 16 }"');
+    expect(productArrangementSource).toContain('perCapitaPitAmount?: number;');
+    expect(productArrangementSource).toContain('optionalMarkupRate?: number;');
+    expect(productArrangementSource).toContain('perCapitaShoppingAmount?: number;');
+    expect(productArrangementSource).toContain(':note="teamProfile.internalNote || \'未填写\'"');
+    expect(productArrangementSource).toContain(':width="quickProfileEditorType === \'internal_note\' ? 760 : 460"');
+    expect(productArrangementSource).toContain('placeholder: \'填写导游、控房、控车、用餐和其它要求\'');
+    expect(productArrangementSource).toContain('DEFAULT_INTERNAL_REMARK_TEMPLATE');
+    expect(productArrangementSource).toContain('teamProfile.internalNote ||= DEFAULT_INTERNAL_REMARK_TEMPLATE;');
+    expect(productArrangementSource).toContain('v-if="quickProfileEditorType === \'internal_note\'"');
+    expect(productArrangementSource).toContain('class="inside-memo-textarea"');
+    expect(productArrangementSource).toContain(':auto-size="{ minRows: 10, maxRows: 16 }"');
+    expect(productArrangementSource).toContain(':maxlength="500"');
+    expect(productArrangementSource).toContain('v-model:value="teamProfile.perCapitaPitAmount"');
+    expect(productArrangementSource).toContain('v-model:value="teamProfile.optionalMarkupRate"');
+    expect(productArrangementSource).toContain('v-model:value="teamProfile.perCapitaShoppingAmount"');
+    expect(productArrangementSource).not.toContain(':maxlength="100"');
+  });
+
+  it('uses team optional markup rate as guide imprest default anchor', () => {
+    const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
+
+    expect(arrangementSource).toContain('function teamOptionalMarkupRateAnchor()');
+    expect(arrangementSource).toContain('content.value?.optionalMarkupRate');
+    expect(arrangementSource).toContain('return rate > 0 ? rate : undefined;');
+    expect(arrangementSource).toContain('guideImprestCompanyMarkupRate.value = teamOptionalMarkupRateAnchor();');
+    expect(arrangementSource).toContain('companyMarkupRate: guideImprestCompanyMarkupRate.value');
+  });
+
+  it('shows guide arrangement as a compact list with modal editing', () => {
+    const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
+
+    expect(arrangementSource).toContain('guide-arrangement-table-wrap');
+    expect(arrangementSource).toContain('guide-arrangement-table');
+    expect(arrangementSource).toContain('guide-name-line');
+    expect(arrangementSource).toContain('guide-phone-line');
+    expect(arrangementSource).toContain('guide-time-range');
+    expect(arrangementSource).toContain('guide-money-stack');
+    expect(arrangementSource).toContain('guide-imprest-inline-actions');
+    expect(arrangementSource).toContain('guide-remark-summary');
+    expect(arrangementSource).toContain('guide-row-actions');
+    expect(arrangementSource).toContain('openGuideEditModal(record)');
+    expect(arrangementSource).toContain('openGuidePickerForRow(record)');
+    expect(arrangementSource).toContain('submitGuideEditDraft');
+    expect(arrangementSource).toContain('title="修改导游安排"');
+    expect(arrangementSource).toContain('添加导游');
+    expect(arrangementSource).toContain('更换导游');
+    expect(arrangementSource).toContain('修改');
+    expect(arrangementSource).not.toContain('class="guide-plan-row guide-plan-card"');
+    expect(arrangementSource).not.toContain('class="guide-add-card"');
+    expect(arrangementSource).not.toContain('guide-note-textarea');
   });
 
   it('makes the arrangement cost overview easier to scan', () => {
@@ -242,14 +518,41 @@ describe('sales team operation layout', () => {
     expect(productArrangementSource).toContain("`cost-summary-card--${item.tone || 'normal'}`");
     expect(arrangementSource).toContain('costAmountClass');
     expect(productArrangementSource).toContain('costAmountClass');
+    expect(arrangementSource).toContain('function formatCostCashMoney');
+    expect(productArrangementSource).toContain('function formatCostCashMoney');
+    expect(arrangementSource).toContain('function formatCostDetailMoney');
+    expect(productArrangementSource).toContain('function formatCostDetailMoney');
+    expect(arrangementSource).toContain('return formatMoney(value);');
+    expect(productArrangementSource).toContain('return formatMoney(value);');
+    expect(arrangementSource).not.toContain("return numericMoney(value) === 0 ? '0.00' : formatMoney(value);");
+    expect(productArrangementSource).not.toContain("return Number(value || 0) === 0 ? '0.00' : formatMoney(value);");
+    expect(arrangementSource).not.toContain("return numericMoney(value) === 0 ? '--' : formatMoney(value);");
+    expect(productArrangementSource).not.toContain("return Number(value || 0) === 0 ? '--' : formatMoney(value);");
+    expect(arrangementSource).toContain("costAmountClass(item.cash, 'cost-amount-cash')");
+    expect(arrangementSource).toContain("formatCostCashMoney(item.cash)");
+    expect(arrangementSource).toContain("costAmountClass(item.credit, 'cost-amount-credit')");
+    expect(arrangementSource).toContain("formatCostDetailMoney(item.credit)");
+    expect(productArrangementSource).toContain("costAmountClass(arrangementSettlementTotal(item.value, 'cash'), 'cost-amount-cash')");
+    expect(productArrangementSource).toContain("formatCostCashMoney(arrangementSettlementTotal(item.value, 'cash'))");
+    expect(productArrangementSource).toContain("costAmountClass(arrangementSettlementTotal(item.value, 'credit'), 'cost-amount-credit')");
+    expect(productArrangementSource).toContain("formatCostDetailMoney(arrangementSettlementTotal(item.value, 'credit'))");
+    expect(arrangementSource).toContain('<th>现结</th>');
+    expect(productArrangementSource).toContain('<th>现结</th>');
     expect(arrangementLayoutSource).toContain('.cost-overview-summary');
     expect(arrangementLayoutSource).toContain('grid-template-columns: minmax(190px, 1.35fr)');
+    expect(arrangementLayoutSource).toContain('overflow-x: hidden;');
+    expect(arrangementLayoutSource).toContain('min-width: 0;');
+    expect(arrangementLayoutSource).toContain('table-layout: fixed;');
+    expect(arrangementLayoutSource).not.toContain('min-width: 1500px;');
     expect(arrangementLayoutSource).toContain('.cost-summary-card--primary');
     expect(arrangementLayoutSource).toContain('.cost-summary-card--strong');
     expect(arrangementLayoutSource).toContain('.cost-summary-amount');
     expect(arrangementLayoutSource).toContain('font-size: 20px;');
     expect(arrangementLayoutSource).toContain('.cost-amount-zero');
     expect(arrangementLayoutSource).toContain('.cost-amount-nonzero');
+    expect(arrangementLayoutSource).toContain('.cost-amount-cash');
+    expect(arrangementLayoutSource).toContain('.cost-amount-credit');
+    expect(arrangementLayoutSource).toContain('letter-spacing: 0;');
     expect(arrangementSource).not.toContain('<th colspan="2">合计</th>');
     expect(productArrangementSource).not.toContain('<th colspan="2">合计</th>');
     expect(arrangementSource).not.toContain('class="cost-total-cell"');
@@ -263,6 +566,8 @@ describe('sales team operation layout', () => {
     const routeSource = readAppFile('src/router/routes/modules/sales.ts');
     const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
     const productArrangementSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+    const operationSource = readAppFile('src/views/sales/team/operation.vue');
+    const headerSource = readAppFile('src/views/sales/components/FormalTeamPageHeader.vue');
     const editorSource = readAppFile('src/views/sales/components/ArrangementEditorModal.vue');
     const arrangementLayoutSource = readAppFile('src/views/sales/team-arrangement-layout.css');
 
@@ -272,29 +577,38 @@ describe('sales team operation layout', () => {
     expect(routeSource).toContain("title: '团队安排总览'");
     expect(arrangementSource).toContain("import '../team-arrangement-layout.css'");
     expect(productArrangementSource).toContain("import '../team-arrangement-layout.css'");
-    expect(arrangementSource).toContain('团队安排总览');
-    expect(arrangementSource).toContain('Group Arrange');
+    expect(operationSource).toContain("import '../team-arrangement-layout.css'");
+    expect(arrangementSource).toContain('FormalTeamPageHeader');
+    expect(productArrangementSource).toContain('FormalTeamPageHeader');
+    expect(operationSource).toContain('FormalTeamPageHeader');
+    expect(headerSource).toContain("name: 'FormalTeamPageHeader'");
+    expect(headerSource).toContain('formal-team-page-header');
+    expect(headerSource).toContain('arrangement-command-bar');
+    expect(headerSource).toContain('workflow-rail');
+    expect(headerSource).toContain('formal-team-badges-line');
+    expect(headerSource).toContain('formal-team-metric-strip');
+    expect(headerSource).toContain('internal-note-main');
+    expect(headerSource).toContain('团队安排总览');
+    expect(headerSource).toContain('Group Arrange');
     expect(arrangementSource).toContain('team-arrangement-card');
     expect(arrangementSource).toContain('formal-team-arrangement-card');
-    expect(arrangementSource).toContain('formal-arrangement-tool-strip');
-    expect(arrangementSource).toContain('formal-tool-strip-title');
-    expect(arrangementSource).toContain('formal-tool-strip-actions');
-    expect(arrangementSource).toContain('formal-arrangement-tool-button');
-    expect(arrangementSource).toContain('command-side');
-    expect(arrangementSource).toContain('workflow-rail');
-    expect(arrangementSource).toContain('stage-flow-item');
-    expect(arrangementSource).toContain('stage-index');
-    expect(arrangementSource).toContain('stage-label');
+    expect(headerSource).toContain('formal-arrangement-tool-strip');
+    expect(headerSource).toContain('formal-tool-strip-title');
+    expect(headerSource).toContain('formal-tool-strip-actions');
+    expect(headerSource).toContain('formal-arrangement-tool-button');
+    expect(headerSource).toContain('command-side');
+    expect(headerSource).toContain('workflow-rail');
+    expect(headerSource).toContain('stage-flow-item');
+    expect(headerSource).toContain('stage-index');
+    expect(headerSource).toContain('stage-label');
     expect(arrangementSource).toContain('arrangement-tabs-block');
     expect(productArrangementSource).toContain('arrangement-tabs-block');
     expect(arrangementSource).not.toContain('formal-arrangement-tabs-block');
     expect(arrangementSource).toContain('arrangement-icon-grid compact-category-strip');
-    expect(arrangementSource).toContain('team-title-line formal-team-title-line');
-    expect(arrangementSource).toContain('team-badges formal-team-badges');
-    expect(arrangementSource).toContain('team-metric-strip formal-team-metric-strip');
-    expect(productArrangementSource).toContain('team-title-line formal-team-title-line');
-    expect(productArrangementSource).toContain('team-badges formal-team-badges');
-    expect(productArrangementSource).toContain('team-metric-strip formal-team-metric-strip');
+    expect(headerSource).toContain('team-title-line formal-team-title-line');
+    expect(headerSource).toContain('team-badges formal-team-badges');
+    expect(headerSource).toContain('formal-team-badges-line');
+    expect(headerSource).toContain('team-metric-strip formal-team-metric-strip');
     expect(arrangementSource).toContain('calculateVehicleQuoteRule');
     expect(arrangementSource).toContain('const vehicleQuoteCalculating = ref(false);');
     expect(arrangementSource).toContain('lastVehicleQuoteResult');
@@ -315,13 +629,19 @@ describe('sales team operation layout', () => {
     expect(productArrangementSource).toContain('firstLine.projectName = selectedValue');
     expect(arrangementSource).not.toContain('正式排团用车测算后续接入');
     expect(arrangementSource).not.toContain('正式排团用车报价后续接入保存');
-    expect(arrangementSource).toContain(':class="`metric-${item.key}`"');
-    expect(productArrangementSource).toContain(':class="`metric-${item.key}`"');
+    expect(headerSource).toContain(':class="[`metric-${metric.key}`, { clickable: metric.clickable }]"');
     expect(arrangementLayoutSource).toContain('.metric-travelDays');
     expect(arrangementLayoutSource).toContain('.metric-orderStatus');
+    expect(arrangementLayoutSource).toContain('.formal-team-arrangement-card .formal-team-badges-line');
+    expect(arrangementLayoutSource).toContain('flex-wrap: nowrap;');
+    expect(arrangementLayoutSource).toContain('grid-template-columns: minmax(0, 1fr) 520px auto;');
+    expect(arrangementLayoutSource).toContain('grid-column: 1 / -1;');
+    expect(arrangementLayoutSource).toContain('grid-column: 3;');
+    expect(arrangementLayoutSource).toContain('grid-row: 1;');
+    expect(arrangementLayoutSource).toContain('grid-row: 2;');
+    expect(arrangementLayoutSource).toContain('white-space: nowrap;');
     expect(arrangementLayoutSource).toContain('.metric-paid');
     expect(arrangementLayoutSource).toContain('.metric-profit');
-    expect(arrangementLayoutSource).toContain('grid-column: 1 / -1;');
     expect(arrangementLayoutSource).toContain('flex-wrap: nowrap;');
     expect(arrangementLayoutSource).toContain('width: fit-content;');
     expect(arrangementLayoutSource).toContain('max-width: 100%;');
@@ -330,6 +650,19 @@ describe('sales team operation layout', () => {
     expect(arrangementLayoutSource).toContain('text-overflow: clip;');
     expect(arrangementLayoutSource).toContain('.formal-team-arrangement-card .arrangement-section-header');
     expect(arrangementLayoutSource).toContain('.formal-team-arrangement-card .arrangement-section-table th');
+    expect(arrangementLayoutSource).toContain('.formal-team-arrangement-card .cost-overview-summary');
+    expect(arrangementLayoutSource).toContain('grid-template-columns: minmax(170px, 1.15fr)');
+    expect(arrangementLayoutSource).toContain('.formal-team-arrangement-card .cost-summary-card');
+    expect(arrangementLayoutSource).toContain('padding: 8px 12px;');
+    expect(arrangementLayoutSource).toContain('.formal-team-arrangement-card .arrangement-overview-tab');
+    expect(arrangementLayoutSource).toContain('height: 30px;');
+    expect(arrangementLayoutSource).toContain('.formal-team-arrangement-card .arrangement-icon-grid');
+    expect(arrangementLayoutSource).toContain('min-height: 46px;');
+    expect(arrangementLayoutSource).toContain('.formal-team-arrangement-card .arrangement-section-heading');
+    expect(arrangementLayoutSource).toContain('flex-direction: row;');
+    expect(arrangementLayoutSource).toContain('align-items: center;');
+    expect(arrangementSource).toContain('.guide-arrangement-section .arrangement-section-header');
+    expect(arrangementSource).toContain('align-items: center;');
     expect(arrangementSource).not.toContain('formal-progress-panel');
     expect(arrangementSource).not.toContain('formal-print-more-button');
     expect(arrangementSource).not.toContain('formal-step-segment-row');
@@ -355,7 +688,11 @@ describe('sales team operation layout', () => {
     expect(productArrangementSource).toContain('formal-cost-overview-title');
     expect(arrangementSource).toContain('getSalesTeamOperationDetail');
     expect(arrangementSource).toContain('showTeamItineraryModal');
-    expect(arrangementSource).toContain('@click="showItineraryModal"');
+    expect(arrangementSource).toContain('formalHeaderActions');
+    expect(arrangementSource).toContain("key: 'itinerary'");
+    expect(arrangementSource).toContain('@action-click="handleFormalHeaderAction"');
+    expect(arrangementSource).toContain('function handleFormalHeaderAction(action: { key: string })');
+    expect(arrangementSource).toContain("if (action.key === 'itinerary')");
     expect(arrangementSource).not.toContain("@click=\"handleToolAction({ label: '查看行程' })\"");
     expect(arrangementSource).toContain('quickProfileEditorOpen');
     expect(arrangementSource).toContain('openTeamProfileEditor');
@@ -364,8 +701,10 @@ describe('sales team operation layout', () => {
     expect(arrangementSource).toContain('getEnterpriseDepartmentAll');
     expect(arrangementSource).toContain('getEnterpriseEmployeeAll');
     expect(arrangementSource).toContain('saveSalesTeam');
-    expect(arrangementSource).toContain(':class="{ editable: badge.editorType }"');
-    expect(arrangementSource).toContain("@click=\"badge.editorType && openTeamProfileEditor(badge.editorType)\"");
+    expect(headerSource).toContain(':class="{ editable: badge.editable }"');
+    expect(headerSource).toContain("@click=\"badge.editable && emit('badgeClick', badge)\"");
+    expect(arrangementSource).toContain('@badge-click="handleFormalHeaderBadge"');
+    expect(arrangementSource).toContain('function handleFormalHeaderBadge(badge: { label: string })');
     expect(arrangementSource).toContain("editorType: 'business_type'");
     expect(arrangementSource).toContain("editorType: 'department'");
     expect(arrangementSource).toContain("editorType: 'operator'");
@@ -466,6 +805,101 @@ describe('sales team operation layout', () => {
     expect(editorSource).toContain('按人数均摊');
   });
 
+  it('keeps guide arrangement editing compact and avoids showing zero as the default guide', () => {
+    const guideApiSource = readAppFile('src/api/dispatch/guide-schedule.ts');
+    const financeApiSource = readAppFile('src/api/finance/guide-imprest.ts');
+    const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
+
+    expect(guideApiSource).toContain('getGuideAvailability');
+    expect(guideApiSource).toContain('/dispatch/guide-schedule/availability');
+    expect(guideApiSource).toContain('approvedImprestAmount?: number;');
+    expect(guideApiSource).toContain('pendingImprestAmount?: number;');
+    expect(guideApiSource).toContain('paidImprestAmount?: number;');
+    expect(guideApiSource).toContain('imprestBalanceAmount?: number;');
+    expect(guideApiSource).toContain('imprestApprovalStatus?:');
+    expect(financeApiSource).toContain('companyMarkupRate?: number;');
+    expect(financeApiSource).toContain('requestedAmount?: number;');
+    expect(financeApiSource).toContain('params: { companyMarkupRate?: number; guideId: number; teamId: number }');
+    expect(arrangementSource).toContain(":title=\"guideModalEditing ? '更换导游' : '选择导游'\"");
+    expect(arrangementSource).toContain('ok-text="提交保存"');
+    expect(arrangementSource).toContain('class="guide-summary-chips"');
+    expect(arrangementSource).toContain('class="guide-arrangement-table-wrap"');
+    expect(arrangementSource).toContain('class="guide-arrangement-table"');
+    expect(arrangementSource).toContain('class="guide-name-line"');
+    expect(arrangementSource).toContain('class="guide-phone-line"');
+    expect(arrangementSource).toContain('class="guide-time-range"');
+    expect(arrangementSource).toContain('class="guide-money-stack"');
+    expect(arrangementSource).toContain('class="guide-remark-summary"');
+    expect(arrangementSource).toContain('class="guide-row-actions"');
+    expect(arrangementSource).toContain('@click="openGuidePickerForRow(record)"');
+    expect(arrangementSource).toContain('@click="openGuideEditModal(record)"');
+    expect(arrangementSource).toContain('guideEditOpen');
+    expect(arrangementSource).toContain('submitGuideEditDraft');
+    expect(arrangementSource).toContain('title="修改导游安排"');
+    expect(arrangementSource).not.toContain('guide-note-textarea');
+    expect(arrangementSource).not.toContain('class="guide-add-card"');
+    expect(arrangementSource).toContain('导游信息');
+    expect(arrangementSource).toContain('更换导游');
+    expect(arrangementSource).toContain('待定中');
+    expect(arrangementSource).toContain('const guideModalEditingRecord = ref<TeamGuideRow>();');
+    expect(arrangementSource).toContain('async function openGuidePickerForRow(record: TeamGuideRow)');
+    expect(arrangementSource).not.toContain('guide-table-subtext');
+    expect(arrangementSource).toContain('class="guide-modal-form"');
+    expect(arrangementSource).toContain('class="guide-modal-section"');
+    expect(arrangementSource).toContain('class="guide-picker-tabs"');
+    expect(arrangementSource).toContain('class="guide-picker-search"');
+    expect(arrangementSource).toContain('class="guide-picker-table"');
+    expect(arrangementSource).toContain('导游姓名');
+    expect(arrangementSource).toContain('不能出团原因');
+    expect(arrangementSource).toContain("guidePickerActiveTab = ref<GuidePickerTabKey>('available')");
+    expect(arrangementSource).toContain("{ key: 'all', label: '全部导游' }");
+    expect(arrangementSource).not.toContain('就近安排');
+    expect(arrangementSource).toContain('@click="selectGuideForDraft(item)"');
+    expect(arrangementSource).toContain(':disabled="!item.available"');
+    expect(arrangementSource).toContain('guideId: undefined');
+    expect(arrangementSource).not.toContain('guideId: 0');
+    expect(arrangementSource).not.toContain('placeholder="请选择导游"');
+    expect(arrangementSource).toContain('addon-before="¥"');
+    expect(arrangementSource).toContain('previewGuideImprest');
+    expect(arrangementSource).toContain('submitGuideImprest');
+    expect(arrangementSource).toContain('class="guide-imprest-inline-actions"');
+    expect(arrangementSource).toContain('@click="openGuideImprestCalculator(record)"');
+    expect(arrangementSource).toContain('v-model:open="guideImprestModalOpen"');
+    expect(arrangementSource).toContain('title="计算导游备用金"');
+    expect(arrangementSource).toContain('计划备用金');
+    expect(arrangementSource).toContain('累计已批备用金');
+    expect(arrangementSource).toContain('待审批备用金');
+    expect(arrangementSource).toContain('本次公司加点率');
+    expect(arrangementSource).toContain('本次申请金额');
+    expect(arrangementSource).not.toContain('当前可申请');
+    expect(arrangementSource).toContain('已申请/已批');
+    expect(arrangementSource).toContain('建议余额参考');
+    expect(arrangementSource).toContain('仅作风险提示，不限制本次申请');
+    expect(arrangementSource).toContain('超过系统建议金额');
+    expect(arrangementSource).toContain('guideImprestCompanyMarkupRate');
+    expect(arrangementSource).toContain('guideImprestRequestedAmount');
+    expect(arrangementSource).toContain('refreshGuideImprestPreview');
+    expect(arrangementSource).toContain('guideImprestApprovalStatusLabel');
+    expect(arrangementSource).toContain('guideImprestApprovalStatusTone(record.imprestApprovalStatus)');
+    expect(arrangementSource).toContain('companyMarkupRate: guideImprestCompanyMarkupRate.value');
+    expect(arrangementSource).toContain('requestedAmount: guideImprestRequestedAmount.value');
+    expect(arrangementSource).toContain('现付总成本');
+    expect(arrangementSource).toContain('自费抵扣');
+    expect(arrangementSource).toContain("line.lineType === 'optional_deduction' ? formatPercent(line.companyMarkupRate) : '--'");
+    expect(arrangementSource).toContain('function guideImprestLineFormula');
+    expect(arrangementSource).toContain('function guideImprestSummaryFormula');
+    expect(arrangementSource).toContain('class="guide-imprest-formula-panel"');
+    expect(arrangementSource).toContain('class="guide-imprest-formula-row"');
+    expect(arrangementSource).toContain('建议备用金 = 现付总成本');
+    expect(arrangementSource).toContain('× ${formatPercent(line.companyMarkupRate)} × ${guestCount}人');
+    expect(arrangementSource).toContain('导游应上交');
+    expect(arrangementSource).toContain('使用此金额');
+    expect(arrangementSource).toContain('提交备用金申请');
+    expect(arrangementSource).toContain('async function openGuideImprestCalculator(record: TeamGuideRow)');
+    expect(arrangementSource).toContain('async function useGuideImprestSuggestedAmount()');
+    expect(arrangementSource).toContain('async function submitGuideImprestApplication()');
+  });
+
   it('downloads scenic ticket guest excel from formal team arrangements only', () => {
     const apiSource = readAppFile('src/api/sales/team.ts');
     const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
@@ -504,35 +938,21 @@ describe('sales team operation layout', () => {
     expect(layoutSource).toContain('.arrangement-summary-chip');
   });
 
-  it('calculates formal team budget profit using the old-system gross profit formula', () => {
+  it('loads formal team sensitive money summary from backend instead of calculating it in the page', () => {
+    const apiSource = readAppFile('src/api/sales/team.ts');
     const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
-    const regularCostSnippet = arrangementSource.slice(
-      arrangementSource.indexOf('const regularArrangementCostTotal'),
-      arrangementSource.indexOf('const teamTravelDays'),
-    );
-    const budgetProfitSnippet = arrangementSource.slice(
-      arrangementSource.indexOf('const budgetProfit'),
-      arrangementSource.indexOf('const teamTravelDays'),
-    );
 
-    expect(arrangementSource).toContain('const regularArrangementCostTotal = computed(() =>');
-    expect(regularCostSnippet).toContain("!['optional', 'shopping'].includes(item.arrangementType)");
-    expect(arrangementSource).toContain('item.totalAmount || item.costAmount');
-    expect(arrangementSource).toContain('const optionalCompanyProfitTotal = computed(() =>');
-    expect(regularCostSnippet).toContain('numericMoney(item.saleAmount)');
-    expect(regularCostSnippet).toContain('numericMoney(item.costAmount)');
-    expect(regularCostSnippet).toContain('numericMoney(item.guideCommissionAmount)');
-    expect(arrangementSource).toContain('const shoppingCompanyProfitTotal = computed(() =>');
-    expect(regularCostSnippet).toContain('numericMoney(item.headFeeAmount)');
-    expect(regularCostSnippet).toContain('numericMoney(item.companyRebateAmount)');
-    expect(budgetProfitSnippet).toContain('orderReceivable.value');
-    expect(budgetProfitSnippet).toContain('optionalCompanyProfitTotal.value');
-    expect(budgetProfitSnippet).toContain('shoppingCompanyProfitTotal.value');
-    expect(budgetProfitSnippet).toContain('regularArrangementCostTotal.value');
-    expect(budgetProfitSnippet).toContain('guideFeeTotal.value');
-    expect(budgetProfitSnippet).not.toContain('guideOperationFeeTotal');
-    expect(budgetProfitSnippet).not.toContain('guideImprestTotal');
-    expect(arrangementSource).toContain("{ key: 'profit', label: '预算利润', value: formatPlainMoney(budgetProfit.value) }");
+    expect(apiSource).toContain('TeamArrangementSummary');
+    expect(apiSource).toContain('getTeamArrangementSummary');
+    expect(apiSource).toContain('/sales/team/${teamId}/arrangements/summary');
+    expect(arrangementSource).toContain('getTeamArrangementSummary');
+    expect(arrangementSource).toContain('teamArrangementSummary');
+    expect(arrangementSource).toContain('await loadArrangementSummary()');
+    expect(arrangementSource).not.toContain('const regularArrangementCostTotal = computed(() =>');
+    expect(arrangementSource).not.toContain('const optionalCompanyProfitTotal = computed(() =>');
+    expect(arrangementSource).not.toContain('const shoppingCompanyProfitTotal = computed(() =>');
+    expect(arrangementSource).not.toContain('const budgetProfit = computed(() =>');
+    expect(arrangementSource).not.toContain("{ key: 'profit', label: '预算利润', value: formatPlainMoney(budgetProfit.value) }");
     expect(arrangementSource).not.toContain("{ key: 'profit', label: '预算利润', value: '0 元' }");
   });
 
@@ -540,6 +960,7 @@ describe('sales team operation layout', () => {
     const routeSource = readAppFile('src/router/routes/modules/sales.ts');
     const apiSource = readAppFile('src/api/sales/team.ts');
     const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
+    const headerSource = readAppFile('src/views/sales/components/FormalTeamPageHeader.vue');
     const previewSource = readAppFile('src/views/sales/team/gross-profit.vue');
 
     expect(routeSource).toContain('TeamGrossProfitPage');
@@ -554,9 +975,11 @@ describe('sales team operation layout', () => {
     expect(arrangementSource).toContain('openGrossProfitPreview');
     expect(arrangementSource).toContain('router.push(`/sales/team/gross-profit/${teamId.value}`)');
     expect(arrangementSource).toContain("action.label === '打印毛利表'");
+    expect(arrangementSource).toContain('formalHeaderMetrics');
     expect(arrangementSource).toContain("item.key === 'profit'");
-    expect(arrangementSource).toContain('@click="handleMetricClick(item)"');
-    expect(arrangementSource).toContain('team-metric-item clickable');
+    expect(arrangementSource).toContain('@metric-click="handleMetricClick"');
+    expect(headerSource).toContain('@click="metric.clickable && emit(\'metricClick\', metric)"');
+    expect(headerSource).toContain(':class="[`metric-${metric.key}`, { clickable: metric.clickable }]"');
     expect(previewSource).toContain('团队毛利表(预算)');
     expect(previewSource).toContain('Word文件');
     expect(previewSource).toContain('Pdf文件');
@@ -633,5 +1056,93 @@ describe('sales team operation layout', () => {
     expect(apiSource).toContain('mealType?: string;');
     expect(apiSource).toContain('fundIncluded?: string;');
     expect(apiSource).toContain('confirmationNo?: string;');
+  });
+
+  it('keeps the optional cost modal aligned with the old-system field order', () => {
+    const editorSource = readAppFile('src/views/sales/components/ArrangementEditorModal.vue');
+    const optionalBranch = editorSource.slice(
+      editorSource.indexOf(`<template v-else-if="activeEditorType === 'optional'">`),
+      editorSource.indexOf(`<template v-else-if="activeEditorType === 'shopping'">`),
+    );
+
+    expect(editorSource).toContain('const showCostModeTabs = computed(() =>');
+    expect(editorSource).toContain(`props.activeEditorType !== 'optional'`);
+    expect(editorSource).toContain('v-if="showCostModeTabs"');
+    expect(optionalBranch).not.toContain('traffic-cost-mode-tabs');
+    expectTextOrder(optionalBranch, [
+      '景区名称',
+      '游玩日期',
+      '添加景区',
+      '供应商',
+      '价格信息',
+      '销售价',
+      '成本价',
+      '导游提成',
+      '合计人数',
+      '合计收入',
+      '合计成本',
+      '合计现结',
+      '合计挂账',
+      '合计提成',
+      '费用合计',
+      '人数：',
+      '收入：',
+      '成本：',
+      '现结：',
+      '挂账：',
+      '提成：',
+      '订单信息：',
+      '备注信息：',
+    ]);
+    expect(optionalBranch).toContain('class="optional-summary-order-field"');
+    expect(optionalBranch).toContain('class="optional-summary-remark-field"');
+    expect(optionalBranch).toContain('class="optional-overview-item"');
+    expect(optionalBranch).toContain('class="optional-fee-number-grid"');
+    expect(optionalBranch).toContain('class="optional-fee-meta-grid"');
+    expect(editorSource).not.toContain('overflow-x: auto;');
+    expect(editorSource).not.toContain('min-width: 1280px;');
+  });
+
+  it('calculates optional fee summary amounts by people count and unit prices', () => {
+    const teamArrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
+    const productArrangementSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+
+    [teamArrangementSource, productArrangementSource].forEach((source) => {
+      const syncStart = source.indexOf('function syncOptionalLineToForm()');
+      const syncEnd = source.indexOf('function syncShoppingLineToForm()', syncStart);
+      const syncSnippet = source.slice(
+        syncStart,
+        syncEnd,
+      );
+
+      expect(syncSnippet).toContain('saleAmount += quantity * salePrice;');
+      expect(syncSnippet).toContain('costAmount += quantity * costPrice;');
+      expect(syncSnippet).toContain('guideCommissionAmount += quantity * guideCommissionUnitAmount;');
+    });
+
+    const editorSource = readAppFile('src/views/sales/components/ArrangementEditorModal.vue');
+    expect(editorSource).toContain('const optionalPrimaryLine = computed<SalesProductApi.ArrangementPriceLine>');
+    expect(editorSource).toContain('v-model:value="optionalPrimaryLine.salePrice"');
+    expect(editorSource).toContain('v-model:value="optionalPrimaryLine.costPrice"');
+    expect(editorSource).toContain('v-model:value="optionalPrimaryLine.guideCommissionAmount"');
+    expect(editorSource).toContain(':value="optionalLineSaleAmount(line)"');
+    expect(editorSource).toContain(':value="optionalLineCostAmount(line)"');
+    expect(editorSource).toContain(':value="optionalLineGuideCommissionAmount(line)"');
+  });
+
+  it('persists formal team arrangement section done and none states', () => {
+    const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
+    const editorModelSource = readAppFile('src/views/sales/components/arrangement-editor-model.ts');
+    const apiSource = readAppFile('src/api/sales/team.ts');
+
+    expect(apiSource).toContain('getTeamArrangementSectionStatuses');
+    expect(apiSource).toContain('saveTeamArrangementSectionStatus');
+    expect(arrangementSource).toContain('getTeamArrangementSectionStatuses');
+    expect(arrangementSource).toContain('saveTeamArrangementSectionStatus');
+    expect(arrangementSource).toContain('loadSectionStatuses');
+    expect(arrangementSource).toContain('await saveTeamArrangementSectionStatus');
+    expect(arrangementSource).not.toContain('分类状态后续接入团队流程状态表');
+    expect(editorModelSource).toContain('confirmed: false');
+    expect(editorModelSource).not.toContain("confirmed: type === 'hotel'");
   });
 });

@@ -1,7 +1,9 @@
 <script lang="ts" setup>
 import { Page } from '@vben/common-ui';
-import { Button, Card, DatePicker, Select, Table, Tag } from 'ant-design-vue';
-import { ref } from 'vue';
+import { Button, Card, DatePicker, Form, Select, Table, Tag } from 'ant-design-vue';
+import { reactive, ref } from 'vue';
+
+import BusinessSearchForm from '#/components/business/BusinessSearchForm.vue';
 
 const columns = [
   { title: '操作时间', dataIndex: 'time', key: 'time', width: 180 },
@@ -26,20 +28,40 @@ const data = ref([
 ]);
 
 const moduleOptions = ref(['全部', '系统', '团队管理', '订单管理', '财务管理', '导游管理', '资源管理', '客户管理', '合同管理']);
-const selectedModule = ref('全部');
+const query = reactive({
+  dateRange: undefined,
+  module: '全部',
+});
+
+function handleSearch() {
+  // 操作日志页面当前仍是静态数据页，先统一查询区交互，后续接真实接口时复用该入口。
+}
+
+function resetQuery() {
+  query.dateRange = undefined;
+  query.module = '全部';
+}
 </script>
 
 <template>
   <Page title="系统操作日志" description="查看系统操作日志记录">
     <Card>
-      <div class="mb-4 flex items-center gap-4">
-        <DatePicker.RangePicker style="width: 260px" :placeholder="['开始日期', '结束日期']" />
-        <Select v-model:value="selectedModule" style="width: 150px" placeholder="操作模块">
+      <BusinessSearchForm
+        :model="query"
+        :show-create="false"
+        @reset="resetQuery"
+        @search="handleSearch"
+      >
+        <Form.Item class="business-search-item--wide" label="操作时间">
+          <DatePicker.RangePicker v-model:value="query.dateRange" :placeholder="['开始日期', '结束日期']" />
+        </Form.Item>
+        <Form.Item label="操作模块">
+        <Select v-model:value="query.module" placeholder="操作模块">
           <Select.Option v-for="item in moduleOptions" :key="item" :value="item">{{ item }}</Select.Option>
         </Select>
-        <Button type="primary">查询</Button>
-        <Button>重置</Button>
-        <div class="flex-1"></div>
+        </Form.Item>
+      </BusinessSearchForm>
+      <div class="operation-log-table-toolbar">
         <Button>导出日志</Button>
       </div>
       <Table :columns="columns" :data-source="data" :pagination="{ pageSize: 10, total: 156, showTotal: (total: number) => `共 ${total} 条记录` }">
@@ -57,3 +79,13 @@ const selectedModule = ref('全部');
     </Card>
   </Page>
 </template>
+
+<style scoped>
+.operation-log-table-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 10px 0 8px;
+  padding-top: 10px;
+  border-top: 1px solid #f0f2f5;
+}
+</style>

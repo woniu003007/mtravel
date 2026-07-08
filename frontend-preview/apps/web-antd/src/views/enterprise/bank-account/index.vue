@@ -26,6 +26,7 @@ import {
   updateEnterpriseBankAccountPrintEnabled,
   type EnterpriseBankAccountApi,
 } from '#/api/enterprise/bank-account';
+import BusinessSearchForm from '#/components/business/BusinessSearchForm.vue';
 
 const columns: TableColumnsType<EnterpriseBankAccountApi.Item> = [
   { title: '开户行', dataIndex: 'bankName', key: 'bankName', width: 210 },
@@ -245,36 +246,31 @@ onMounted(loadData);
 <template>
   <Page title="银行账号" description="维护企业收付款账户，供收款、付款、备用金和打印单据使用">
     <Card>
-      <Form
-        class="bank-account-search-form"
+      <BusinessSearchForm
         :model="query"
-        :label-col="{ style: { width: '76px' } }"
-        :wrapper-col="{ flex: 1 }"
+        :search-loading="loading"
+        create-text="新增"
+        @create="openCreateModal"
+        @reset="resetQuery"
+        @search="handleSearch"
       >
-        <div class="bank-account-search-grid">
-          <Form.Item label="关键词">
-            <Input
-              v-model:value="query.keyword"
-              allow-clear
-              placeholder="开户行 / 户名 / 账号 / 其它说明"
-              @press-enter="handleSearch"
-            />
-          </Form.Item>
-          <Form.Item label="状态">
-            <Select
-              v-model:value="query.status"
-              allow-clear
-              :options="statusOptions"
-              placeholder="请选择状态"
-            />
-          </Form.Item>
-        </div>
-        <div class="bank-account-search-actions">
-          <Button @click="resetQuery">重置</Button>
-          <Button type="primary" @click="handleSearch">查询</Button>
-          <Button type="primary" @click="openCreateModal">添加账号</Button>
-        </div>
-      </Form>
+        <Form.Item label="关键词">
+          <Input
+            v-model:value="query.keyword"
+            allow-clear
+            placeholder="开户行 / 户名 / 账号 / 其它说明"
+            @press-enter="handleSearch"
+          />
+        </Form.Item>
+        <Form.Item label="状态">
+          <Select
+            v-model:value="query.status"
+            allow-clear
+            :options="statusOptions"
+            placeholder="请选择状态"
+          />
+        </Form.Item>
+      </BusinessSearchForm>
 
       <Table
         :columns="columns"
@@ -394,22 +390,6 @@ onMounted(loadData);
 </template>
 
 <style scoped>
-.bank-account-search-form {
-  margin-bottom: 16px;
-}
-
-.bank-account-search-grid {
-  display: grid;
-  grid-template-columns: minmax(280px, 1.5fr) minmax(180px, 0.7fr);
-  gap: 12px;
-}
-
-.bank-account-search-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
 .bank-account-form-row {
   display: flex;
   gap: 32px;
@@ -426,13 +406,8 @@ onMounted(loadData);
 }
 
 @media (max-width: 768px) {
-  .bank-account-search-grid,
   .bank-account-form-row {
     display: block;
-  }
-
-  .bank-account-search-actions {
-    justify-content: flex-start;
   }
 }
 </style>

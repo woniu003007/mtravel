@@ -29,6 +29,7 @@ import {
   updateEnterpriseRole,
   type EnterpriseRoleApi,
 } from '#/api/enterprise/role';
+import BusinessSearchForm from '#/components/business/BusinessSearchForm.vue';
 
 const columns: TableColumnsType<EnterpriseRoleApi.Item> = [
   { title: '角色名称', dataIndex: 'roleName', key: 'roleName', width: 150 },
@@ -281,36 +282,31 @@ onMounted(loadData);
 <template>
   <Page title="角色管理" description="维护企业角色，并提供菜单、按钮和数据权限配置入口">
     <Card>
-      <Form
-        class="role-search-form"
+      <BusinessSearchForm
         :model="query"
-        :label-col="{ style: { width: '76px' } }"
-        :wrapper-col="{ flex: 1 }"
+        :search-loading="loading"
+        create-text="新增"
+        @create="openCreateModal"
+        @reset="resetQuery"
+        @search="handleSearch"
       >
-        <div class="role-search-grid">
-          <Form.Item label="关键词">
-            <Input
-              v-model:value="query.keyword"
-              allow-clear
-              placeholder="角色名称 / 编码"
-              @press-enter="handleSearch"
-            />
-          </Form.Item>
-          <Form.Item label="状态">
-            <Select
-              v-model:value="query.status"
-              allow-clear
-              :options="statusOptions"
-              placeholder="请选择状态"
-            />
-          </Form.Item>
-        </div>
-        <div class="role-search-actions">
-          <Button @click="resetQuery">重置</Button>
-          <Button type="primary" @click="handleSearch">查询</Button>
-          <Button type="primary" @click="openCreateModal">添加角色</Button>
-        </div>
-      </Form>
+        <Form.Item label="关键词">
+          <Input
+            v-model:value="query.keyword"
+            allow-clear
+            placeholder="角色名称 / 编码"
+            @press-enter="handleSearch"
+          />
+        </Form.Item>
+        <Form.Item label="状态">
+          <Select
+            v-model:value="query.status"
+            allow-clear
+            :options="statusOptions"
+            placeholder="请选择状态"
+          />
+        </Form.Item>
+      </BusinessSearchForm>
 
       <Table
         :columns="columns"
@@ -447,22 +443,6 @@ onMounted(loadData);
 </template>
 
 <style scoped>
-.role-search-form {
-  margin-bottom: 16px;
-}
-
-.role-search-grid {
-  display: grid;
-  grid-template-columns: minmax(300px, 1.2fr) minmax(180px, 0.6fr);
-  gap: 12px;
-}
-
-.role-search-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
 .role-form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -507,13 +487,8 @@ onMounted(loadData);
 }
 
 @media (max-width: 768px) {
-  .role-search-grid,
   .role-form-row {
     display: block;
-  }
-
-  .role-search-actions {
-    justify-content: flex-start;
   }
 }
 </style>

@@ -58,8 +58,11 @@ describe('sales product form helpers', () => {
 
     expect(schedulePageSource).toContain('schedule-list-card');
     expect(schedulePageSource).toContain('团期信息列表');
-    expect(schedulePageSource).toContain('schedule-search-row');
-    expect(schedulePageSource).toContain('schedule-search-actions');
+    expect(schedulePageSource).toContain("BusinessSearchForm from '#/components/business/BusinessSearchForm.vue'");
+    expect(schedulePageSource).toContain('<BusinessSearchForm');
+    expect(schedulePageSource).toContain('class="business-search-item--wide" label="出团日期"');
+    expect(schedulePageSource).not.toContain('schedule-search-row');
+    expect(schedulePageSource).not.toContain('schedule-search-actions');
     expect(schedulePageSource).toContain('schedule-tabs');
     expect(schedulePageSource).toContain('schedule-shell-card');
     expect(schedulePageSource).toContain('schedule-bottom-actions');
@@ -130,7 +133,6 @@ describe('sales product form helpers', () => {
     expect(schedulePageSource).toContain('closeBatchModalAfterCreate');
     expect(schedulePageSource).toContain('batchModalOpen.value = false');
     expect(schedulePageSource).toContain('Card');
-    expect(schedulePageSource).not.toContain('BusinessSearchForm');
     expect(schedulePageSource).not.toContain('从产品模板生成正式散拼团队');
     expect(schedulePageSource).not.toContain('old-system-panel');
     expect(schedulePageSource).not.toContain('old-system-frame');
@@ -171,7 +173,8 @@ describe('sales product form helpers', () => {
     expect(teamPageSource).toContain('router.push(`/sales/team/operation/${record.id}`)');
     expect(teamPageSource).toContain('客户单位/业务员');
     expect(teamPageSource).toContain('操作计调');
-    expect(teamPageSource).toContain('出团日期始');
+    expect(teamPageSource).toContain('label="出团日期"');
+    expect(teamPageSource).toContain('<DatePicker.RangePicker');
     expect(teamPageSource).toContain('添加日期');
     expect(teamPageSource).toContain('全部团队');
     expect(teamPageSource).toContain('预控 / 实收');
@@ -1264,7 +1267,7 @@ describe('sales product form helpers', () => {
   it('uses hotel select options for itinerary related hotel', () => {
     const formSource = readAppFile('src/views/sales/product/form.vue');
 
-    expect(formSource).toContain('getControlledRoomResourceAll');
+    expect(formSource).not.toContain('getControlledRoomResourceAll');
     expect(formSource).toContain('getHotelResourcePage');
     expect(formSource).toContain('loadRelatedHotelOptions');
     expect(formSource).toContain('relatedHotelOptions');

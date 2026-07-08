@@ -39,8 +39,10 @@ import {
   saveSalesTeam,
   saveSalesTeamPrice,
 } from '#/api/sales/team';
+import BusinessSearchForm from '#/components/business/BusinessSearchForm.vue';
 
 type DatePickerValue = Dayjs | string | null | undefined;
+type DateRangeValue = [string, string] | undefined;
 type TeamRow = SalesTeamApi.Item;
 type EditCategoryItem = SalesTeamApi.BatchEditCustomerCategory;
 type PriceRow = SalesTeamApi.PriceItem & {
@@ -112,6 +114,17 @@ const query = reactive<SalesTeamApi.QueryParams>({
   page: 1,
   pageSize: 20,
   productId: 0,
+});
+
+const departureDateRange = computed<DateRangeValue>({
+  get(): DateRangeValue {
+    if (!query.startDate || !query.endDate) return undefined;
+    return [query.startDate, query.endDate];
+  },
+  set(value: DateRangeValue) {
+    query.startDate = value?.[0];
+    query.endDate = value?.[1];
+  },
 });
 
 const pagination = reactive<TablePaginationConfig>({
@@ -738,40 +751,38 @@ onMounted(async () => {
 
       <Card class="schedule-list-card">
         <div class="schedule-section-title">团期信息列表</div>
-        <div class="schedule-search-row">
-          <span class="schedule-search-label">团号：</span>
+        <BusinessSearchForm
+          :model="query"
+          :search-loading="loading"
+          search-text="搜索"
+          :show-create="false"
+          @reset="resetQuery"
+          @search="handleSearch"
+        >
+          <Form.Item label="团号">
           <Input
             v-model:value="query.keyword"
             allow-clear
-            class="schedule-keyword"
             placeholder="团号 / 操作计调"
             @press-enter="handleSearch"
           />
-          <span class="schedule-search-label">出团日期：</span>
-          <DatePicker
-            class="schedule-date"
-            :value="dateValue(query.startDate)"
-            @update:value="(value) => setDate(query, 'startDate', value)"
-          />
-          <span class="schedule-date-split">至</span>
-          <DatePicker
-            class="schedule-date"
-            :value="dateValue(query.endDate)"
-            @update:value="(value) => setDate(query, 'endDate', value)"
-          />
-          <span class="schedule-search-label">状态：</span>
+          </Form.Item>
+          <Form.Item class="business-search-item--wide" label="出团日期">
+            <DatePicker.RangePicker
+              v-model:value="departureDateRange"
+              value-format="YYYY-MM-DD"
+              :placeholder="['开始日期', '结束日期']"
+            />
+          </Form.Item>
+          <Form.Item label="状态">
           <Select
             v-model:value="query.status"
             allow-clear
-            class="schedule-status"
             :options="statusOptions"
             placeholder="全部"
           />
-          <div class="schedule-search-actions">
-            <Button type="primary" :loading="loading" @click="handleSearch">搜索</Button>
-            <Button @click="resetQuery">重置</Button>
-          </div>
-        </div>
+          </Form.Item>
+        </BusinessSearchForm>
 
       <Table
         :columns="columns"
@@ -1219,44 +1230,7 @@ onMounted(async () => {
   border-bottom: 1px solid #eef2f7;
 }
 
-.schedule-search-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  padding: 10px 12px;
-  margin-bottom: 12px;
-  background: #f8fafc;
-  border: 1px solid #eef2f7;
-  border-radius: 6px;
-}
-
-.schedule-search-label,
-.schedule-date-split {
-  font-size: 13px;
-  color: #475569;
-}
-
-.schedule-keyword {
-  width: 190px;
-}
-
-.schedule-date {
-  width: 142px;
-}
-
-.schedule-status {
-  width: 116px;
-}
-
-.schedule-search-actions {
-  display: inline-flex;
-  gap: 8px;
-  margin-left: auto;
-}
-
 .top-batch-button,
-.schedule-search-actions :deep(.ant-btn),
 .schedule-bottom-actions :deep(.ant-btn) {
   height: 32px;
   padding: 0 12px;
@@ -1828,16 +1802,9 @@ onMounted(async () => {
 
 @media (max-width: 900px) {
   .schedule-header,
-  .schedule-search-actions,
   .schedule-bottom-actions {
     flex-direction: column;
     align-items: stretch;
-  }
-
-  .schedule-keyword,
-  .schedule-date,
-  .schedule-status {
-    width: 100%;
   }
 
   .inline-grid,

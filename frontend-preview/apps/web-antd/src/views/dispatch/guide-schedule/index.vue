@@ -5,12 +5,13 @@ import type { DispatchGuideApi } from '#/api/dispatch/guide-schedule';
 import { Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 
-import { Button, Card, DatePicker, Empty, Input, Spin, Tag, message } from 'ant-design-vue';
+import { Card, DatePicker, Empty, Form, Input, Spin, Tag, message } from 'ant-design-vue';
 import dayjs from 'dayjs';
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { getGuideScheduleCalendar } from '#/api/dispatch/guide-schedule';
+import BusinessSearchForm from '#/components/business/BusinessSearchForm.vue';
 
 const router = useRouter();
 const loading = ref(false);
@@ -95,26 +96,32 @@ onMounted(loadCalendar);
 <template>
   <Page title="导游排班汇总" description="查看导游团队占用和请假不可上团时间">
     <Card class="guide-schedule-card">
-      <div class="guide-schedule-search">
-        <Input
-          v-model:value="query.guideName"
-          allow-clear
-          class="guide-search-input"
-          placeholder="导游名称"
-          @press-enter="loadCalendar"
-        />
-        <span class="search-label">开始日期</span>
-        <DatePicker
-          :value="query.startDate"
-          class="guide-date-picker"
-          format="YYYY-MM-DD"
-          value-format="YYYY-MM-DD"
-          @change="handleDateChange"
-        />
-        <Button @click="resetQuery">重置</Button>
-        <Button type="primary" @click="loadCalendar">搜索</Button>
-        <span class="schedule-range-tip">统计区间为开始日期后一个月，并额外显示后一周跨期占用</span>
-      </div>
+      <BusinessSearchForm
+        :model="query"
+        search-text="搜索"
+        :search-loading="loading"
+        :show-create="false"
+        @reset="resetQuery"
+        @search="loadCalendar"
+      >
+        <Form.Item label="导游">
+          <Input
+            v-model:value="query.guideName"
+            allow-clear
+            placeholder="导游名称"
+            @press-enter="loadCalendar"
+          />
+        </Form.Item>
+        <Form.Item label="开始日期">
+          <DatePicker
+            :value="query.startDate"
+            format="YYYY-MM-DD"
+            value-format="YYYY-MM-DD"
+            @change="handleDateChange"
+          />
+        </Form.Item>
+      </BusinessSearchForm>
+      <div class="schedule-range-tip">统计区间为开始日期后一个月，并额外显示后一周跨期占用</div>
 
       <Spin :spinning="loading">
         <div v-if="rows.length" class="schedule-table-wrap">
@@ -170,24 +177,8 @@ onMounted(loadCalendar);
   border-radius: 6px;
 }
 
-.guide-schedule-search {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.guide-search-input {
-  width: 180px;
-}
-
-.guide-date-picker {
-  width: 160px;
-}
-
-.search-label,
 .schedule-range-tip {
+  margin: -2px 0 10px;
   font-size: 13px;
   color: #64748b;
 }

@@ -42,18 +42,31 @@ const emit = defineEmits<{
 <style scoped>
 .business-action-buttons {
   display: flex;
-  flex-wrap: wrap;
+  width: 100%;
+  height: 30px;
+  flex-wrap: nowrap;
+  align-items: center;
   justify-content: flex-end;
-  gap: 12px;
-  margin-top: 16px;
+  gap: 8px;
+  margin-top: 0;
+  white-space: nowrap;
 }
 
 .business-action-buttons :deep(.ant-btn) {
-  min-width: 82px;
+  min-width: 64px;
+  height: 30px;
+  padding-inline: 12px;
+  border-radius: 6px;
+}
+
+.business-action-buttons :deep(.ant-btn:last-child) {
+  min-width: 78px;
 }
 
 @media (max-width: 768px) {
   .business-action-buttons {
+    height: auto;
+    flex-wrap: wrap;
     justify-content: flex-start;
   }
 }

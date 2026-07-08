@@ -53,6 +53,7 @@ import {
   getSupplierAll,
   type SupplierApi,
 } from '#/api/purchase/supplier';
+import BusinessSearchForm from '#/components/business/BusinessSearchForm.vue';
 
 import {
   contractTabLabel,
@@ -1009,58 +1010,53 @@ watch(attachmentPreviewOpen, (open) => {
         当前客户：{{ selectedCustomer.customerName }}
       </div>
 
-      <Form
-        class="contract-search-form"
+      <BusinessSearchForm
         :model="query"
-        :label-col="{ style: { width: '88px' } }"
-        :wrapper-col="{ flex: 1 }"
+        :search-loading="loading"
+        create-text="新增"
+        @create="openCreateModal"
+        @reset="resetQuery"
+        @search="handleSearch"
       >
-        <div class="contract-search-grid">
-          <Form.Item label="合同/公司">
-            <Input
-              v-model:value="query.keyword"
-              allow-clear
-              placeholder="合同编号 / 公司名称"
-              @press-enter="handleSearch"
-            />
-          </Form.Item>
-          <Form.Item v-if="isCustomerTab" label="客户单位">
-            <Select
-              v-model:value="query.customerId"
-              allow-clear
-              :loading="customerLoading"
-              :options="customerOptions"
-              placeholder="请选择客户单位"
-              show-search
-              :filter-option="(input, option) => String(option?.label || '').includes(input)"
-            />
-          </Form.Item>
-          <Form.Item v-else label="供应商" :required="supplierRequired">
-            <Select
-              v-model:value="query.supplierId"
-              allow-clear
-              :loading="supplierLoading"
-              :options="supplierOptions"
-              placeholder="请选择供应商"
-              show-search
-              :filter-option="(input, option) => String(option?.label || '').includes(input)"
-            />
-          </Form.Item>
-          <Form.Item label="状态">
-            <Select
-              v-model:value="query.status"
-              allow-clear
-              :options="statusOptions"
-              placeholder="请选择合同状态"
-            />
-          </Form.Item>
-        </div>
-        <div class="contract-search-actions">
-          <Button @click="resetQuery">重置</Button>
-          <Button type="primary" @click="handleSearch">查询</Button>
-          <Button type="primary" @click="openCreateModal">新增合同</Button>
-        </div>
-      </Form>
+        <Form.Item label="合同/公司">
+          <Input
+            v-model:value="query.keyword"
+            allow-clear
+            placeholder="合同编号 / 公司名称"
+            @press-enter="handleSearch"
+          />
+        </Form.Item>
+        <Form.Item v-if="isCustomerTab" label="客户单位">
+          <Select
+            v-model:value="query.customerId"
+            allow-clear
+            :loading="customerLoading"
+            :options="customerOptions"
+            placeholder="请选择客户单位"
+            show-search
+            :filter-option="(input, option) => String(option?.label || '').includes(input)"
+          />
+        </Form.Item>
+        <Form.Item v-else label="供应商" :required="supplierRequired">
+          <Select
+            v-model:value="query.supplierId"
+            allow-clear
+            :loading="supplierLoading"
+            :options="supplierOptions"
+            placeholder="请选择供应商"
+            show-search
+            :filter-option="(input, option) => String(option?.label || '').includes(input)"
+          />
+        </Form.Item>
+        <Form.Item label="状态">
+          <Select
+            v-model:value="query.status"
+            allow-clear
+            :options="statusOptions"
+            placeholder="请选择合同状态"
+          />
+        </Form.Item>
+      </BusinessSearchForm>
 
       <Table
         :columns="columns"
@@ -1525,28 +1521,6 @@ watch(attachmentPreviewOpen, (open) => {
   border-radius: 6px;
 }
 
-.contract-search-form {
-  margin-bottom: 16px;
-}
-
-.contract-search-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(260px, 1fr));
-  column-gap: 24px;
-  row-gap: 12px;
-}
-
-.contract-search-form :deep(.ant-form-item) {
-  margin-bottom: 0;
-}
-
-.contract-search-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 16px;
-}
-
 .contract-modal-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1642,20 +1616,9 @@ watch(attachmentPreviewOpen, (open) => {
   color: #64748b;
 }
 
-@media (max-width: 1200px) {
-  .contract-search-grid {
-    grid-template-columns: repeat(2, minmax(260px, 1fr));
-  }
-}
-
 @media (max-width: 768px) {
-  .contract-search-grid,
   .contract-modal-grid {
     grid-template-columns: 1fr;
-  }
-
-  .contract-search-actions {
-    justify-content: flex-start;
   }
 }
 </style>
