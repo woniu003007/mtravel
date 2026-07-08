@@ -564,6 +564,24 @@ const costColumns = computed<CostColumn[]>(() => {
     { cash: guideImprestTotal.value, credit: 0, key: 'reserve_fund', label: '备用金' },
   ];
 });
+function costColumnAmount(key: string, field: 'cash' | 'credit') {
+  return costColumns.value.find((item) => item.key === key)?.[field] || 0;
+}
+
+const costOverviewSummaryItems = computed(() => {
+  const cashTotal = costColumnAmount('total', 'cash');
+  const creditTotal = costColumnAmount('total', 'credit');
+  return [
+    { key: 'cost_total', label: '成本合计', tone: 'primary', value: cashTotal + creditTotal },
+    { key: 'cash_total', label: '现结合计', tone: 'strong', value: cashTotal },
+    { key: 'credit_total', label: '挂账合计', tone: 'strong', value: creditTotal },
+    { key: 'reserve_fund', label: '备用金', tone: 'strong', value: costColumnAmount('reserve_fund', 'cash') },
+    { key: 'guide_service', label: '导服', value: costColumnAmount('guide_service', 'cash') },
+    { key: 'operation_fee', label: '操作费', value: costColumnAmount('operation_fee', 'cash') },
+    { key: 'self_pay_income', label: '自费收入', value: 0 },
+  ];
+});
+
 const metricItems = computed(() => [
   { key: 'travelDays', label: '旅游天数', value: `${team.value?.travelDays ?? 1} 天` },
   { key: 'standard', label: '接待标准', value: product.value?.receptionStandard || '--' },
@@ -612,6 +630,14 @@ function formatDistanceMeters(value?: number) {
 
 function formatMoney(value?: number) {
   return `¥${Number(value || 0).toFixed(2)}`;
+}
+
+function costAmountClass(value?: number, extraClass?: string) {
+  const classes = [Number(value || 0) === 0 ? 'cost-amount-zero' : 'cost-amount-nonzero'];
+  if (extraClass) {
+    classes.push(extraClass);
+  }
+  return classes;
 }
 
 function formatPlainMoney(value?: number) {
@@ -2032,6 +2058,21 @@ onMounted(loadDetail);
           </div>
           <small>现结 / 挂账 / 收入摘要</small>
         </div>
+        <div class="cost-overview-summary" aria-label="成本总览重点金额">
+          <div
+            v-for="item in costOverviewSummaryItems"
+            :key="item.key"
+            :class="['cost-summary-card', `cost-summary-card--${item.tone || 'normal'}`]"
+          >
+            <span class="cost-summary-label">{{ item.label }}</span>
+            <strong
+              class="cost-summary-amount"
+              :class="costAmountClass(item.value, item.tone === 'primary' ? 'cost-summary-total' : undefined)"
+            >
+              {{ formatMoney(item.value) }}
+            </strong>
+          </div>
+        </div>
         <div class="arrangement-overview-table">
           <table>
             <thead>
@@ -2043,11 +2084,6 @@ onMounted(loadDetail);
                 >
                   {{ item.label }}
                 </th>
-                <th colspan="2">合计</th>
-                <th rowspan="2">自费收入</th>
-                <th rowspan="2">导服</th>
-                <th rowspan="2">操作费</th>
-                <th rowspan="2">备用金</th>
               </tr>
               <tr>
                 <template
@@ -2057,8 +2093,6 @@ onMounted(loadDetail);
                   <th>现结</th>
                   <th>挂账</th>
                 </template>
-                <th>现结</th>
-                <th>挂账</th>
               </tr>
             </thead>
             <tbody>
@@ -2067,15 +2101,9 @@ onMounted(loadDetail);
                   v-for="item in costColumns.slice(0, 10)"
                   :key="`${item.key}-amount`"
                 >
-                  <td>{{ formatMoney(item.cash) }}</td>
-                  <td>{{ formatMoney(item.credit) }}</td>
+                  <td :class="costAmountClass(item.cash)">{{ formatMoney(item.cash) }}</td>
+                  <td :class="costAmountClass(item.credit)">{{ formatMoney(item.credit) }}</td>
                 </template>
-                <td>{{ formatMoney(costColumns.find((item) => item.key === 'total')?.cash) }}</td>
-                <td>{{ formatMoney(costColumns.find((item) => item.key === 'total')?.credit) }}</td>
-                <td>{{ formatMoney(0) }}</td>
-                <td>{{ formatMoney(0) }}</td>
-                <td>{{ formatMoney(0) }}</td>
-                <td>{{ formatMoney(0) }}</td>
               </tr>
             </tbody>
           </table>

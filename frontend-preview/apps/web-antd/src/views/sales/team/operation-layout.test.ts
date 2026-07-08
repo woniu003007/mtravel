@@ -218,6 +218,47 @@ describe('sales team operation layout', () => {
     expectTextOrder(source, ['产品说明', '收客须知', '内部备注']);
   });
 
+  it('makes the arrangement cost overview easier to scan', () => {
+    const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
+    const productArrangementSource = readAppFile('src/views/sales/product/team-arrangement.vue');
+    const arrangementLayoutSource = readAppFile('src/views/sales/team-arrangement-layout.css');
+
+    expect(arrangementSource).toContain('costOverviewSummaryItems');
+    expect(productArrangementSource).toContain('arrangementCostSummaryItems');
+    expect(arrangementSource).toContain('class="cost-overview-summary"');
+    expect(productArrangementSource).toContain('class="cost-overview-summary"');
+    expect(arrangementSource).toContain('现结合计');
+    expect(arrangementSource).toContain('挂账合计');
+    expect(arrangementSource).toContain('成本合计');
+    expect(arrangementSource).toContain('自费收入');
+    expect(arrangementSource).toContain('导服');
+    expect(arrangementSource).toContain('操作费');
+    expect(arrangementSource).toContain('备用金');
+    expect(arrangementSource).toContain("tone: 'primary'");
+    expect(arrangementSource).toContain("tone: 'strong'");
+    expect(productArrangementSource).toContain("tone: 'primary'");
+    expect(productArrangementSource).toContain("tone: 'strong'");
+    expect(arrangementSource).toContain("`cost-summary-card--${item.tone || 'normal'}`");
+    expect(productArrangementSource).toContain("`cost-summary-card--${item.tone || 'normal'}`");
+    expect(arrangementSource).toContain('costAmountClass');
+    expect(productArrangementSource).toContain('costAmountClass');
+    expect(arrangementLayoutSource).toContain('.cost-overview-summary');
+    expect(arrangementLayoutSource).toContain('grid-template-columns: minmax(190px, 1.35fr)');
+    expect(arrangementLayoutSource).toContain('.cost-summary-card--primary');
+    expect(arrangementLayoutSource).toContain('.cost-summary-card--strong');
+    expect(arrangementLayoutSource).toContain('.cost-summary-amount');
+    expect(arrangementLayoutSource).toContain('font-size: 20px;');
+    expect(arrangementLayoutSource).toContain('.cost-amount-zero');
+    expect(arrangementLayoutSource).toContain('.cost-amount-nonzero');
+    expect(arrangementSource).not.toContain('<th colspan="2">合计</th>');
+    expect(productArrangementSource).not.toContain('<th colspan="2">合计</th>');
+    expect(arrangementSource).not.toContain('class="cost-total-cell"');
+    expect(productArrangementSource).not.toContain('class="cost-total-cell"');
+    expect(arrangementSource).toContain("v-for=\"item in costColumns.slice(0, 10)\"");
+    expect(arrangementSource).not.toContain('</template>\n                <th>现结</th>\n                <th>挂账</th>');
+    expect(productArrangementSource).not.toContain('</template>\n                <th>现结</th>\n                <th>挂账</th>');
+  });
+
   it('routes formal team arrangement by team id instead of product template id', () => {
     const routeSource = readAppFile('src/router/routes/modules/sales.ts');
     const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');

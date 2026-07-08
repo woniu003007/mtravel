@@ -384,6 +384,20 @@ const arrangementTotal = computed(() => calculateArrangementTotal(formState.arra
 const overviewSummary = computed(() => createArrangementOverviewSummary(formState.arrangementItems));
 const arrangementCashTotal = computed(() => overviewSummary.value.total.cash);
 const arrangementCreditTotal = computed(() => overviewSummary.value.total.credit);
+const arrangementCostSummaryItems = computed(() => {
+  const cashTotal = arrangementCashTotal.value;
+  const creditTotal = arrangementCreditTotal.value;
+  const extraColumns = overviewSummary.value.extraColumns;
+  return [
+    { key: 'cost_total', label: '成本合计', tone: 'primary', value: cashTotal + creditTotal },
+    { key: 'cash_total', label: '现结合计', tone: 'strong', value: cashTotal },
+    { key: 'credit_total', label: '挂账合计', tone: 'strong', value: creditTotal },
+    { key: 'reserve_fund', label: '备用金', tone: 'strong', value: extraColumns.reserveFund },
+    { key: 'guide_service', label: '导服', value: extraColumns.guideService },
+    { key: 'operation_fee', label: '操作费', value: extraColumns.operationFee },
+    { key: 'self_pay_income', label: '自费收入', value: extraColumns.selfPayIncome },
+  ];
+});
 const totalRoadbookDistanceKilometers = computed(() => (
   ((formState.itineraryDays || []).reduce((sum, item) => (
     sum + Number(item.roadbookTotalDistanceMeters || 0)
@@ -495,6 +509,14 @@ function formatMoney(value?: number) {
     minimumFractionDigits: 2,
     style: 'currency',
   }).format(Number(value || 0));
+}
+
+function costAmountClass(value?: number, extraClass?: string) {
+  const classes = [Number(value || 0) === 0 ? 'cost-amount-zero' : 'cost-amount-nonzero'];
+  if (extraClass) {
+    classes.push(extraClass);
+  }
+  return classes;
 }
 
 function formatPlainMoney(value?: number) {
@@ -2003,6 +2025,21 @@ onMounted(loadDetail);
           </div>
           <small>现结 / 挂账 / 收入摘要</small>
         </div>
+        <div class="cost-overview-summary" aria-label="成本总览重点金额">
+          <div
+            v-for="item in arrangementCostSummaryItems"
+            :key="item.key"
+            :class="['cost-summary-card', `cost-summary-card--${item.tone || 'normal'}`]"
+          >
+            <span class="cost-summary-label">{{ item.label }}</span>
+            <strong
+              class="cost-summary-amount"
+              :class="costAmountClass(item.value, item.tone === 'primary' ? 'cost-summary-total' : undefined)"
+            >
+              {{ formatMoney(item.value) }}
+            </strong>
+          </div>
+        </div>
         <div class="arrangement-overview-table">
           <table>
             <thead>
@@ -2014,11 +2051,6 @@ onMounted(loadDetail);
                 >
                   {{ item.label }}
                 </th>
-                <th colspan="2">合计</th>
-                <th rowspan="2">自费收入</th>
-                <th rowspan="2">导服</th>
-                <th rowspan="2">操作费</th>
-                <th rowspan="2">备用金</th>
               </tr>
               <tr>
                 <template
@@ -2028,8 +2060,6 @@ onMounted(loadDetail);
                   <th>现结</th>
                   <th>挂账</th>
                 </template>
-                <th>现结</th>
-                <th>挂账</th>
               </tr>
             </thead>
             <tbody>
@@ -2038,15 +2068,13 @@ onMounted(loadDetail);
                   v-for="item in arrangementOverviewColumns"
                   :key="`${item.value}-amount`"
                 >
-                  <td>{{ formatMoney(arrangementSettlementTotal(item.value, 'cash')) }}</td>
-                  <td>{{ formatMoney(arrangementSettlementTotal(item.value, 'credit')) }}</td>
+                  <td :class="costAmountClass(arrangementSettlementTotal(item.value, 'cash'))">
+                    {{ formatMoney(arrangementSettlementTotal(item.value, 'cash')) }}
+                  </td>
+                  <td :class="costAmountClass(arrangementSettlementTotal(item.value, 'credit'))">
+                    {{ formatMoney(arrangementSettlementTotal(item.value, 'credit')) }}
+                  </td>
                 </template>
-                <td>{{ formatMoney(arrangementCashTotal) }}</td>
-                <td>{{ formatMoney(arrangementCreditTotal) }}</td>
-                <td>{{ formatMoney(overviewSummary.extraColumns.selfPayIncome) }}</td>
-                <td>{{ formatMoney(overviewSummary.extraColumns.guideService) }}</td>
-                <td>{{ formatMoney(overviewSummary.extraColumns.operationFee) }}</td>
-                <td>{{ formatMoney(overviewSummary.extraColumns.reserveFund) }}</td>
               </tr>
             </tbody>
           </table>

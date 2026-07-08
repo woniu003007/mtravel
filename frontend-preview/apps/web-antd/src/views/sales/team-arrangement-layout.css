@@ -473,7 +473,7 @@
 
 .arrangement-overview-table table {
   width: 100%;
-  min-width: 1320px;
+  min-width: 1500px;
   border-collapse: collapse;
   background: #fff;
 }
@@ -499,6 +499,87 @@
   color: #0f172a;
 }
 
+.cost-overview-summary {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.35fr) repeat(3, minmax(145px, 1fr)) repeat(3, minmax(118px, 0.82fr));
+  gap: 0;
+  margin-bottom: 8px;
+  overflow-x: auto;
+  background: #fff;
+  border: 1px solid #dbe7f5;
+  border-radius: 7px;
+}
+
+.cost-summary-card {
+  min-width: 0;
+  padding: 10px 14px 11px;
+  background: #fbfdff;
+  border-right: 1px solid #e3edf8;
+}
+
+.cost-summary-card:last-child {
+  border-right: 0;
+}
+
+.cost-summary-card--primary {
+  background: #eef6ff;
+  box-shadow: inset 3px 0 0 #1677ff;
+}
+
+.cost-summary-card--strong {
+  background: #f7fbff;
+}
+
+.cost-summary-label {
+  display: block;
+  margin-bottom: 4px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: #52657a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cost-summary-amount {
+  display: block;
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1.25;
+  color: #0f172a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cost-summary-card--primary .cost-summary-label {
+  color: #1554ad;
+}
+
+.cost-summary-card--primary .cost-summary-amount {
+  font-size: 20px;
+  line-height: 1.18;
+}
+
+.cost-summary-card--strong .cost-summary-amount {
+  font-size: 17px;
+}
+
+.cost-summary-total {
+  color: #1554ad;
+}
+
+.cost-amount-zero {
+  color: #9aa8b7 !important;
+  font-weight: 700 !important;
+}
+
+.cost-amount-nonzero {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
 .formal-team-arrangement-card .arrangement-overview-table {
   margin-bottom: 8px;
   border-color: var(--formal-border);
@@ -508,9 +589,9 @@
 
 .formal-team-arrangement-card .arrangement-overview-table th,
 .formal-team-arrangement-card .arrangement-overview-table td {
-  height: 30px;
-  padding: 0 5px;
-  font-size: 10.8px;
+  height: 36px;
+  padding: 0 7px;
+  font-size: 12.5px;
   border-color: var(--formal-border-soft);
 }
 
@@ -520,7 +601,7 @@
 }
 
 .formal-team-arrangement-card .arrangement-overview-table td {
-  font-weight: 750;
+  font-weight: 850;
 }
 
 .formal-cost-overview-title {
