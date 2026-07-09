@@ -4,6 +4,7 @@ import com.mtravel.platform.common.ApiResponse;
 import com.mtravel.platform.common.ControllerSupport;
 import com.mtravel.platform.common.PageResult;
 import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferMergeRequest;
+import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferMergeResult;
 import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferMoveRequest;
 import com.mtravel.platform.sales.ordertransfer.service.SalesOrderTransferService;
 import com.mtravel.platform.sales.team.dto.SalesTeamDirectCreateRequest;
@@ -194,17 +195,34 @@ public class SalesTeamController extends ControllerSupport {
      * @param teamId 当前团队 ID
      * @param request 拼团请求
      * @param authentication 当前登录信息
-     * @return 空响应
+     * @return 拼团执行结果
      */
     @OperationLog(module = "销售管理", type = "修改")
     @PostMapping("/{teamId}/operation/merge")
-    public ApiResponse<Void> mergeOrders(
+    public ApiResponse<SalesOrderTransferMergeResult> mergeOrders(
             @PathVariable Long teamId,
             @Valid @RequestBody SalesOrderTransferMergeRequest request,
             Authentication authentication
     ) {
-        transferService.mergeOrders(teamId, request, currentTenantId(), currentOperator(authentication));
-        return ApiResponse.ok();
+        return ApiResponse.ok(transferService.mergeOrders(teamId, request, currentTenantId(), currentOperator(authentication)));
+    }
+
+    /**
+     * 执行订单管理全局拼团。
+     *
+     * <p>该入口没有固定来源团队，服务层会按每个来源订单自己的团队生成拼团关系。</p>
+     *
+     * @param request 拼团请求
+     * @param authentication 当前登录信息
+     * @return 拼团执行结果
+     */
+    @OperationLog(module = "销售管理", type = "修改")
+    @PostMapping("/operation/merge")
+    public ApiResponse<SalesOrderTransferMergeResult> mergeOrdersFromOrderManage(
+            @Valid @RequestBody SalesOrderTransferMergeRequest request,
+            Authentication authentication
+    ) {
+        return ApiResponse.ok(transferService.mergeOrders(null, request, currentTenantId(), currentOperator(authentication)));
     }
 
     /**

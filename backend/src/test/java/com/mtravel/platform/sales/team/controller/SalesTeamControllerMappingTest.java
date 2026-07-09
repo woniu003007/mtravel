@@ -50,6 +50,10 @@ class SalesTeamControllerMappingTest {
                 endDate,
                 3,
                 "normal",
+                "王导",
+                "销售部",
+                "confirmed",
+                LocalDate.of(2026, 7, 8),
                 2,
                 50
         )).thenReturn(expected);
@@ -65,6 +69,10 @@ class SalesTeamControllerMappingTest {
                 endDate,
                 3,
                 "normal",
+                "王导",
+                "销售部",
+                "confirmed",
+                LocalDate.of(2026, 7, 8),
                 2,
                 50
         );
@@ -84,6 +92,10 @@ class SalesTeamControllerMappingTest {
                 LocalDate.class,
                 Integer.class,
                 String.class,
+                String.class,
+                String.class,
+                String.class,
+                LocalDate.class,
                 long.class,
                 long.class
         ).getAnnotation(GetMapping.class).value()).containsExactly("/page");
@@ -99,6 +111,10 @@ class SalesTeamControllerMappingTest {
                 endDate,
                 3,
                 "normal",
+                "王导",
+                "销售部",
+                "confirmed",
+                LocalDate.of(2026, 7, 8),
                 2,
                 50
         );
@@ -142,6 +158,11 @@ class SalesTeamControllerMappingTest {
                 SalesOrderTransferMergeRequest.class,
                 org.springframework.security.core.Authentication.class
         ).getAnnotation(PostMapping.class).value()).containsExactly("/{teamId}/operation/merge");
+        assertThat(SalesTeamController.class.getMethod(
+                "mergeOrdersFromOrderManage",
+                SalesOrderTransferMergeRequest.class,
+                org.springframework.security.core.Authentication.class
+        ).getAnnotation(PostMapping.class).value()).containsExactly("/operation/merge");
         assertThat(SalesTeamController.class.getMethod(
                 "moveOrders",
                 Long.class,

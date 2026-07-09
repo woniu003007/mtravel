@@ -34,6 +34,8 @@ import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderEntity;
 import com.mtravel.platform.sales.booking.order.enums.SalesBookingOrderRole;
 import com.mtravel.platform.sales.booking.order.enums.SalesBookingOrderStatus;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderMapper;
+import com.mtravel.platform.sales.ordertransfer.entity.SalesOrderTransferLogEntity;
+import com.mtravel.platform.sales.ordertransfer.mapper.SalesOrderTransferLogMapper;
 import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
 import com.mtravel.platform.sales.team.mapper.SalesTeamMapper;
 import java.math.BigDecimal;
@@ -96,6 +98,7 @@ public class DispatchTeamArrangementService {
     private final DispatchTeamArrangementSectionStatusMapper sectionStatusMapper;
     private final SalesTeamMapper teamMapper;
     private final SalesBookingOrderMapper orderMapper;
+    private final SalesOrderTransferLogMapper transferLogMapper;
     private final DispatchTeamGuideMapper guideMapper;
     private final FinanceShoppingSettlementMapper shoppingSettlementMapper;
 
@@ -118,6 +121,7 @@ public class DispatchTeamArrangementService {
                 null,
                 teamMapper,
                 orderMapper,
+                null,
                 null,
                 null
         );
@@ -144,6 +148,7 @@ public class DispatchTeamArrangementService {
                 sectionStatusMapper,
                 teamMapper,
                 orderMapper,
+                null,
                 guideMapper,
                 null
         );
@@ -161,6 +166,7 @@ public class DispatchTeamArrangementService {
             DispatchTeamArrangementSectionStatusMapper sectionStatusMapper,
             SalesTeamMapper teamMapper,
             SalesBookingOrderMapper orderMapper,
+            SalesOrderTransferLogMapper transferLogMapper,
             DispatchTeamGuideMapper guideMapper,
             FinanceShoppingSettlementMapper shoppingSettlementMapper
     ) {
@@ -171,6 +177,7 @@ public class DispatchTeamArrangementService {
         this.sectionStatusMapper = sectionStatusMapper;
         this.teamMapper = teamMapper;
         this.orderMapper = orderMapper;
+        this.transferLogMapper = transferLogMapper;
         this.guideMapper = guideMapper;
         this.shoppingSettlementMapper = shoppingSettlementMapper;
     }
@@ -248,7 +255,7 @@ public class DispatchTeamArrangementService {
      * 查询团队安排页后端权威金额汇总。
      *
      * <p>团队安排页的应收、成本总览和预算利润属于敏感经营金额，不能由前端按页面数组自行聚合。
-     * 这里统一套用老系统预算利润口径，并过滤取消订单和拼出来源订单，避免重复计入收入。</p>
+     * 这里统一套用老系统预算利润口径，仅过滤取消订单；历史拼出来源订单继续按来源团订单参与统计。</p>
      *
      * @param teamId 团队 ID
      * @param tenantId 当前租户 ID
@@ -798,7 +805,46 @@ public class DispatchTeamArrangementService {
         }
         Map<Long, SalesBookingOrderEntity> orderById = orders.stream()
                 .collect(Collectors.toMap(SalesBookingOrderEntity::getId, Function.identity(), (a, b) -> a, LinkedHashMap::new));
+        List<Long> missingIds = ids.stream()
+                .filter(id -> !orderById.containsKey(id))
+                .toList();
+        if (!missingIds.isEmpty()) {
+            loadMergedSourceOrders(teamId, missingIds, tenantId).forEach(order -> orderById.put(order.getId(), order));
+        }
         return ids.stream().map(orderById::get).filter(item -> item != null).toList();
+    }
+
+    /**
+     * 加载已拼入当前目标团的来源订单。
+     *
+     * <p>老系统团队安排成本的订单下拉显示来源订单，而不只是目标团子订单。这里只根据已完成拼团日志放行
+     * 来源订单，避免把没有拼团关系的外团订单错误挂到当前执行团成本上。</p>
+     */
+    private List<SalesBookingOrderEntity> loadMergedSourceOrders(Long targetTeamId, List<Long> sourceOrderIds, Long tenantId) {
+        if (transferLogMapper == null || sourceOrderIds.isEmpty()) {
+            return List.of();
+        }
+        List<SalesOrderTransferLogEntity> logs = transferLogMapper.selectList(new QueryWrapper<SalesOrderTransferLogEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq("transfer_type", "merge")
+                .eq("transfer_status", "completed")
+                .eq("target_team_id", targetTeamId)
+                .in("source_order_id", sourceOrderIds));
+        List<Long> allowedSourceOrderIds = Objects.requireNonNullElse(logs, List.<SalesOrderTransferLogEntity>of())
+                .stream()
+                .map(SalesOrderTransferLogEntity::getSourceOrderId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (allowedSourceOrderIds.isEmpty()) {
+            return List.of();
+        }
+        return Objects.requireNonNullElse(orderMapper.selectList(new QueryWrapper<SalesBookingOrderEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .in("id", allowedSourceOrderIds)
+                .in("status", List.of("pending", "confirmed"))), List.<SalesBookingOrderEntity>of());
     }
 
     /** 查询团队安排金额汇总使用的有效订单。 */
@@ -814,7 +860,7 @@ public class DispatchTeamArrangementService {
                 .toList();
     }
 
-    /** 订单收入统计只包含未取消的普通订单和拼入订单，拼出来源订单只作留痕不重复计入。 */
+    /** 订单收入统计包含未取消的普通订单、拼入订单和历史拼出来源订单。 */
     private boolean isEffectiveOrder(SalesBookingOrderEntity order) {
         String status = order.getStatus();
         boolean activeStatus = Objects.equals(status, SalesBookingOrderStatus.PENDING.value())
@@ -823,7 +869,8 @@ public class DispatchTeamArrangementService {
                 ? order.getOrderRole()
                 : SalesBookingOrderRole.NORMAL.value();
         boolean activeRole = Objects.equals(role, SalesBookingOrderRole.NORMAL.value())
-                || Objects.equals(role, SalesBookingOrderRole.MERGE_CHILD.value());
+                || Objects.equals(role, SalesBookingOrderRole.MERGE_CHILD.value())
+                || Objects.equals(role, SalesBookingOrderRole.MERGE_SOURCE.value());
         return activeStatus && activeRole;
     }
 

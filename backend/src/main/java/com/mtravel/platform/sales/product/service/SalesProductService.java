@@ -60,6 +60,8 @@ import org.springframework.util.StringUtils;
 @Service
 public class SalesProductService extends BusinessCrudService<SalesProductEntity, SalesProductResponse> {
 
+    private static final String PRODUCT_SCOPE_TEMPLATE = "template";
+
     private final SalesProductMapper productMapper;
     private final SalesProductItineraryDayMapper itineraryMapper;
     private final SalesProductDescriptionMapper descriptionMapper;
@@ -114,6 +116,7 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
             long pageSize
     ) {
         QueryWrapper<SalesProductEntity> wrapper = baseQuery(tenantId)
+                .eq("product_scope", PRODUCT_SCOPE_TEMPLATE)
                 .eq(StringUtils.hasText(businessType), "business_type", clean(businessType))
                 .eq(StringUtils.hasText(receptionStandard), "reception_standard", clean(receptionStandard))
                 .eq(StringUtils.hasText(domesticInternational), "domestic_international",
@@ -159,6 +162,7 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
         assertDuplicateName(tenantId, request.productName(), null);
         SalesProductEntity entity = new SalesProductEntity();
         entity.setTenantId(tenantId);
+        entity.setProductScope(PRODUCT_SCOPE_TEMPLATE);
         applyProductFields(entity, request);
         entity.setCreatedBy(operator);
         entity.setIsDeleted(false);
@@ -184,6 +188,7 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
         validateItineraryDays(request);
         assertDuplicateName(tenantId, request.productName(), id);
         SalesProductEntity entity = new SalesProductEntity();
+        entity.setProductScope(PRODUCT_SCOPE_TEMPLATE);
         applyProductFields(entity, request);
         int updated = productMapper.update(entity, baseUpdate(tenantId).eq("id", id));
         if (updated == 0) {
@@ -720,6 +725,7 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
     /** 校验同租户未删除产品名称唯一。 */
     private void assertDuplicateName(Long tenantId, String productName, Long excludeId) {
         Long count = productMapper.selectCount(baseQuery(tenantId)
+                .eq("product_scope", PRODUCT_SCOPE_TEMPLATE)
                 .eq("product_name", cleanRequired(productName))
                 .ne(excludeId != null, "id", excludeId));
         if (count != null && count > 0) {

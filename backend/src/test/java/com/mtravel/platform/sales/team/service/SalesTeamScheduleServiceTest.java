@@ -393,7 +393,8 @@ class SalesTeamScheduleServiceTest {
 
         verify(productMapper).insert(productCaptor.capture());
         SalesProductEntity product = productCaptor.getValue();
-        assertThat(product.getProductName()).isEqualTo("HD3流浪地球计划-CS-BK-260623A");
+        assertThat(product.getProductName()).isEqualTo("HD3流浪地球计划");
+        assertThat(product.getProductScope()).isEqualTo("team_snapshot");
         assertThat(product.getBusinessType()).isEqualTo("红色培训");
         assertThat(product.getDomesticInternational()).isEqualTo("domestic");
         assertThat(product.getProvince()).isEqualTo("重庆市");
@@ -633,7 +634,8 @@ class SalesTeamScheduleServiceTest {
         );
 
         verify(productMapper).insert(productCaptor.capture());
-        assertThat(productCaptor.getValue().getProductName()).isEqualTo("重庆三日整团-CS-BK-260623B");
+        assertThat(productCaptor.getValue().getProductName()).isEqualTo("重庆三日整团");
+        assertThat(productCaptor.getValue().getProductScope()).isEqualTo("team_snapshot");
     }
 
     @Test
@@ -794,7 +796,7 @@ class SalesTeamScheduleServiceTest {
         verify(productMapper, never()).insert(any(SalesProductEntity.class));
         verify(teamMapper, never()).insert(any(SalesTeamEntity.class));
         verify(productMapper).update(productUpdateCaptor.capture(), any(Wrapper.class));
-        assertThat(productUpdateCaptor.getValue().getProductName()).isEqualTo("西湖深度游-CS-BK-260628A");
+        assertThat(productUpdateCaptor.getValue().getProductName()).isEqualTo("西湖深度游");
         assertThat(productUpdateCaptor.getValue().getTravelDays()).isEqualTo(2);
         verify(teamMapper).update(teamUpdateCaptor.capture(), any(Wrapper.class));
         assertThat(teamUpdateCaptor.getValue().getTeamNo()).isNull();
@@ -1080,6 +1082,7 @@ class SalesTeamScheduleServiceTest {
                 null,
                 null,
                 teamMapper,
+                null,
                 priceMapper,
                 mock(SalesTeamStatusLogMapper.class),
                 null,
@@ -1097,7 +1100,9 @@ class SalesTeamScheduleServiceTest {
         team.setUsedSeats(4);
         team.setRemainingSeats(26);
         when(teamMapper.selectPage(any(), any(Wrapper.class))).thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<SalesTeamEntity>(1, 20, 1).setRecords(List.of(team)));
-        when(productMapper.selectList(any(Wrapper.class))).thenReturn(List.of(product()));
+        SalesProductEntity product = product();
+        product.setProductName("测试产品-CS-SP-BK-260701A");
+        when(productMapper.selectList(any(Wrapper.class))).thenReturn(List.of(product));
         when(teamArrangementMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
                 teamArrangement(1001L, "traffic", true, "active"),
                 teamArrangement(1001L, "hotel", false, "active"),
@@ -1147,7 +1152,7 @@ class SalesTeamScheduleServiceTest {
         assertThat(item.departurePlace()).isEqualTo("浙江省杭州市西湖区");
         assertThat(item.totalSeats()).isEqualTo(30);
         assertThat(item.usedSeats()).isEqualTo(4);
-        assertThat(item.customerSummary()).isEqualTo("测试地接社、游天下");
+        assertThat(item.customerSummary()).isEqualTo("测试地接社、游天下、拼团来源客户");
         assertThat(item.guideSummary()).isEqualTo("测试导游[Tel:13800138000]、备用导游[Tel:13900139000]");
         assertThat(item.guidePlan()).isEqualTo("confirmed");
         assertThat(item.trafficPlan()).isEqualTo("confirmed");
@@ -1173,6 +1178,7 @@ class SalesTeamScheduleServiceTest {
                 null,
                 null,
                 teamMapper,
+                null,
                 mock(SalesTeamPriceMapper.class),
                 mock(SalesTeamStatusLogMapper.class),
                 null,
@@ -1256,7 +1262,9 @@ class SalesTeamScheduleServiceTest {
         description.setProductDescription("产品说明正文");
         description.setBookingNotice("收客须知正文");
         when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(team);
-        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
+        SalesProductEntity product = product();
+        product.setProductName("测试产品-CS-SP-CS-260706A");
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product);
         when(descriptionMapper.selectOne(any(Wrapper.class))).thenReturn(description);
         when(itineraryMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
                 itineraryDay(1, "DAY-1：杭州接站", "抵达杭州，入住酒店。", 12_300, 1_800),

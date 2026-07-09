@@ -6,11 +6,14 @@ import com.mtravel.platform.common.BizException;
 import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderChargeLineEntity;
 import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderEntity;
 import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderGuestEntity;
+import com.mtravel.platform.sales.booking.order.enums.SalesBookingGuestType;
 import com.mtravel.platform.sales.booking.order.enums.SalesBookingOrderRole;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderChargeLineMapper;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderGuestMapper;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderMapper;
+import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferMergeItemRequest;
 import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferMergeRequest;
+import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferMergeResult;
 import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferMoveRequest;
 import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferRemarkRequest;
 import com.mtravel.platform.sales.ordertransfer.entity.SalesOrderTransferLogEntity;
@@ -25,8 +28,12 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.DayOfWeek;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import org.springframework.stereotype.Service;
@@ -79,59 +86,127 @@ public class SalesOrderTransferService {
     /**
      * 执行团队操作页拼团。
      *
-     * <p>拼团固定为多个完整来源订单并入同一个实际执行团队。一个来源订单不能拆到多个目标团；
-     * 如果业务需要拆到多个团队，必须先在订单模块拆单，再分别拼团。</p>
+     * <p>按老系统实测口径，多个来源订单可以一次拼到多个目标团队，实际生成
+     * “来源订单 x 目标团队”的拼团子订单矩阵。来源订单保留在来源团，不再改成统计过滤角色；
+     * 目标团子订单金额只取确认页填写的拼团单价和价格类型，不复制来源订单原价。</p>
      *
-     * @param currentTeamId 当前团队 ID
+     * @param currentTeamId 当前团队 ID；订单管理全局入口传 null
      * @param request 拼团请求
      * @param tenantId 当前租户 ID
      * @param operator 当前操作人
+     * @return 拼团执行结果
      */
     @Transactional
-    public void mergeOrders(Long currentTeamId, SalesOrderTransferMergeRequest request, Long tenantId, String operator) {
+    public SalesOrderTransferMergeResult mergeOrders(
+            Long currentTeamId,
+            SalesOrderTransferMergeRequest request,
+            Long tenantId,
+            String operator
+    ) {
         List<Long> orderIds = distinctIds(request.orderIds());
         if (CollectionUtils.isEmpty(orderIds)) {
             throw new BizException("请选择订单");
         }
-        if (Objects.equals(currentTeamId, request.targetTeamId())) {
+        List<Long> targetTeamIds = distinctIds(request.targetTeamIds());
+        if (CollectionUtils.isEmpty(targetTeamIds)) {
+            throw new BizException("请选择目标团队");
+        }
+        if (currentTeamId != null && targetTeamIds.contains(currentTeamId)) {
             throw new BizException("不能拼到当前团队");
         }
-        SalesTeamEntity sourceTeam = requireTeam(currentTeamId, tenantId);
-        SalesTeamEntity targetTeam = requireTargetTeam(request.targetTeamId(), tenantId);
-        assertTeamCanReceive(targetTeam);
-        assertMergeTargetTeamType(targetTeam);
+        SalesTeamEntity currentTeam = currentTeamId == null ? null : requireTeam(currentTeamId, tenantId);
+        Map<Long, SalesTeamEntity> targetTeams = new LinkedHashMap<>();
+        for (Long targetTeamId : targetTeamIds) {
+            SalesTeamEntity targetTeam = requireTargetTeam(targetTeamId, tenantId);
+            assertTeamCanReceive(targetTeam);
+            assertMergeTargetTeamType(targetTeam);
+            targetTeams.put(targetTeamId, targetTeam);
+        }
+        Map<Long, SalesBookingOrderEntity> sourceOrders = new LinkedHashMap<>();
+        Map<Long, SalesTeamEntity> sourceTeams = new LinkedHashMap<>();
         for (Long orderId : orderIds) {
             SalesBookingOrderEntity sourceOrder = requireOrder(orderId, tenantId);
             assertOrderCanMerge(sourceOrder, currentTeamId);
-            List<SalesBookingOrderGuestEntity> sourceGuests = loadSourceGuests(sourceOrder.getId(), tenantId);
-            if (sourceGuests.isEmpty()) {
-                throw new BizException("拼团订单必须先维护游客名单");
-            }
-            SalesBookingOrderEntity childOrder = copyOrderForTarget(
-                    sourceOrder,
-                    sourceTeam,
-                    targetTeam,
-                    tenantId,
-                    operator
-            );
-            orderMapper.insert(childOrder);
-            copyChargeLines(sourceOrder.getId(), childOrder.getId(), targetTeam.getId(), tenantId, operator);
-            copyGuests(sourceGuests, childOrder.getId(), targetTeam.getId(), tenantId, operator);
-            insertLog(
-                    tenantId,
-                    "merge",
-                    sourceOrder.getId(),
-                    sourceTeam.getId(),
-                    targetTeam.getId(),
-                    childOrder.getId(),
-                    request.tagFlag(),
-                    remarkFor(request, sourceOrder.getId(), targetTeam.getId()),
-                    operator
-            );
-            markSourceOrderMerged(sourceOrder.getId(), tenantId);
+            SalesTeamEntity sourceTeam = currentTeam == null ? requireTeam(sourceOrder.getTeamId(), tenantId) : currentTeam;
+            sourceOrders.put(orderId, sourceOrder);
+            sourceTeams.put(orderId, sourceTeam);
         }
-        refreshTeamSeats(sourceTeam.getId(), tenantId);
-        refreshTeamSeats(targetTeam.getId(), tenantId);
+        Set<String> existingPairs = existingMergePairs(tenantId, orderIds);
+        Map<Long, List<SalesBookingOrderGuestEntity>> guestsByOrder = new LinkedHashMap<>();
+        List<SalesOrderTransferMergeResult.SkippedItem> skippedItems = new ArrayList<>();
+        Set<Long> changedTeamIds = new LinkedHashSet<>();
+        int createdCount = 0;
+        for (Long targetTeamId : targetTeamIds) {
+            SalesTeamEntity targetTeam = targetTeams.get(targetTeamId);
+            for (Long orderId : orderIds) {
+                SalesBookingOrderEntity sourceOrder = sourceOrders.get(orderId);
+                SalesTeamEntity sourceTeam = sourceTeams.get(orderId);
+                if (sourceOrder == null || sourceTeam == null || targetTeam == null) {
+                    continue;
+                }
+                if (Objects.equals(sourceOrder.getTeamId(), targetTeamId)) {
+                    skippedItems.add(new SalesOrderTransferMergeResult.SkippedItem(orderId, targetTeamId, "不能拼到来源团队"));
+                    continue;
+                }
+                String pairKey = mergePairKey(orderId, targetTeamId);
+                if (existingPairs.contains(pairKey)) {
+                    skippedItems.add(new SalesOrderTransferMergeResult.SkippedItem(orderId, targetTeamId, "已存在拼团关系"));
+                    continue;
+                }
+                List<SalesBookingOrderGuestEntity> sourceGuests = guestsByOrder.computeIfAbsent(
+                        orderId,
+                        key -> loadSourceGuests(sourceOrder.getId(), tenantId)
+                );
+                if (sourceGuests.isEmpty()) {
+                    throw new BizException("拼团订单必须先维护游客名单");
+                }
+                SalesOrderTransferMergeItemRequest item = itemFor(request, orderId, targetTeamId);
+                int guestCount = mergeGuestCount(sourceOrder, sourceGuests);
+                BigDecimal unitPrice = money(item == null ? null : item.unitPrice());
+                BigDecimal quantity = new BigDecimal(guestCount).setScale(2, RoundingMode.HALF_UP);
+                BigDecimal receivableAmount = unitPrice.multiply(quantity).setScale(2, RoundingMode.HALF_UP);
+                SalesBookingOrderEntity childOrder = copyOrderForTarget(
+                        sourceOrder,
+                        sourceTeam,
+                        targetTeam,
+                        sourceGuests,
+                        receivableAmount,
+                        tenantId,
+                        operator
+                );
+                orderMapper.insert(childOrder);
+                insertMergePriceLine(
+                        childOrder.getId(),
+                        targetTeam.getId(),
+                        item == null ? null : item.priceType(),
+                        unitPrice,
+                        quantity,
+                        receivableAmount,
+                        tenantId,
+                        operator
+                );
+                copyGuests(sourceGuests, childOrder.getId(), targetTeam.getId(), tenantId, operator);
+                insertLog(
+                        tenantId,
+                        "merge",
+                        sourceOrder.getId(),
+                        sourceTeam.getId(),
+                        targetTeam.getId(),
+                        childOrder.getId(),
+                        request.tagFlag(),
+                        remarkFor(request, sourceOrder.getId(), targetTeam.getId()),
+                        operator
+                );
+                existingPairs.add(pairKey);
+                changedTeamIds.add(sourceTeam.getId());
+                changedTeamIds.add(targetTeam.getId());
+                createdCount++;
+            }
+        }
+        for (Long changedTeamId : changedTeamIds) {
+            refreshTeamSeats(changedTeamId, tenantId);
+        }
+        return new SalesOrderTransferMergeResult(createdCount, skippedItems.size(), skippedItems);
     }
 
     /**
@@ -186,6 +261,8 @@ public class SalesOrderTransferService {
             SalesBookingOrderEntity source,
             SalesTeamEntity sourceTeam,
             SalesTeamEntity targetTeam,
+            List<SalesBookingOrderGuestEntity> sourceGuests,
+            BigDecimal receivableAmount,
             Long tenantId,
             String operator
     ) {
@@ -215,16 +292,18 @@ public class SalesOrderTransferService {
         child.setGuidePhone(source.getGuidePhone());
         child.setGuideRemark(source.getGuideRemark());
         child.setHotelInfo(source.getHotelInfo());
-        child.setAdultCount(source.getAdultCount());
-        child.setChildCount(source.getChildCount());
-        child.setChildNoBedCount(source.getChildNoBedCount());
-        child.setSeniorCount(source.getSeniorCount());
-        child.setEscortCount(source.getEscortCount());
-        child.setGuestCount(source.getGuestCount());
-        child.setReceivableAmount(source.getReceivableAmount());
+        int guestCount = mergeGuestCount(source, sourceGuests);
+        // 拼团计价、目标团实收和列表人数按来源订单占位人数走；游客名单只作为明细追溯复制。
+        child.setGuestCount(guestCount);
+        child.setAdultCount(Math.min(guestCount, number(source.getAdultCount())));
+        child.setChildCount(numberWithinTotal(source.getChildCount(), guestCount, child.getAdultCount()));
+        child.setChildNoBedCount(numberWithinTotal(source.getChildNoBedCount(), guestCount, child.getAdultCount() + child.getChildCount()));
+        child.setSeniorCount(numberWithinTotal(source.getSeniorCount(), guestCount, child.getAdultCount() + child.getChildCount() + child.getChildNoBedCount()));
+        child.setEscortCount(numberWithinTotal(source.getEscortCount(), guestCount, child.getAdultCount() + child.getChildCount() + child.getChildNoBedCount() + child.getSeniorCount()));
+        child.setReceivableAmount(money(receivableAmount));
         // 拼团子订单承接目标团收入，但不能复制来源订单已收金额；收款后续由收款核销链路回写。
         child.setReceivedAmount(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
-        child.setBalanceAmount(money(source.getReceivableAmount()));
+        child.setBalanceAmount(money(receivableAmount));
         child.setFeeRemark(source.getFeeRemark());
         child.setConfirmRemark(source.getConfirmRemark());
         child.setOrderRemark(source.getOrderRemark());
@@ -305,48 +384,33 @@ public class SalesOrderTransferService {
         return copy;
     }
 
-    private void copyChargeLines(
-            Long sourceOrderId,
+    private void insertMergePriceLine(
             Long childOrderId,
             Long targetTeamId,
+            String priceType,
+            BigDecimal unitPrice,
+            BigDecimal quantity,
+            BigDecimal amount,
             Long tenantId,
             String operator
     ) {
-        List<SalesBookingOrderChargeLineEntity> lines = chargeLineMapper.selectList(baseChargeQuery(tenantId)
-                .eq("order_id", sourceOrderId)
-                .eq("line_kind", "base_price")
-                .orderByAsc("sort_order")
-                .orderByAsc("id"));
-        int sortOrder = 1;
-        for (SalesBookingOrderChargeLineEntity source : lines) {
-            SalesBookingOrderChargeLineEntity copy = new SalesBookingOrderChargeLineEntity();
-            copy.setTenantId(tenantId);
-            copy.setOrderId(childOrderId);
-            copy.setTeamId(targetTeamId);
-            copy.setLineKind("base_price");
-            copy.setLineType(clean(source.getLineType()));
-            copy.setItemName(clean(source.getItemName()));
-            copy.setUnitPrice(money(source.getUnitPrice()));
-            copy.setQuantity(money(source.getQuantity()));
-            copy.setAmount(money(source.getAmount()));
-            copy.setStatus(clean(source.getStatus()));
-            copy.setRegisteredBy(operator);
-            copy.setRegisteredAt(OffsetDateTime.now());
-            copy.setSortOrder(sortOrder++);
-            copy.setCreatedBy(operator);
-            copy.setRemark(source.getRemark());
-            copy.setIsDeleted(false);
-            chargeLineMapper.insert(copy);
-        }
-    }
-
-    private void markSourceOrderMerged(Long orderId, Long tenantId) {
-        SalesBookingOrderEntity update = new SalesBookingOrderEntity();
-        update.setOrderRole(SalesBookingOrderRole.MERGE_SOURCE.value());
-        int updated = orderMapper.update(update, baseOrderUpdate(tenantId).eq("id", orderId));
-        if (updated == 0) {
-            throw new BizException("订单状态已变化，请刷新后重试");
-        }
+        SalesBookingOrderChargeLineEntity line = new SalesBookingOrderChargeLineEntity();
+        line.setTenantId(tenantId);
+        line.setOrderId(childOrderId);
+        line.setTeamId(targetTeamId);
+        line.setLineKind("base_price");
+        line.setLineType(priceLineType(priceType));
+        line.setItemName(priceLineName(priceType));
+        line.setUnitPrice(money(unitPrice));
+        line.setQuantity(money(quantity));
+        line.setAmount(money(amount));
+        line.setStatus("effective");
+        line.setRegisteredBy(operator);
+        line.setRegisteredAt(OffsetDateTime.now());
+        line.setSortOrder(1);
+        line.setCreatedBy(operator);
+        line.setIsDeleted(false);
+        chargeLineMapper.insert(line);
     }
 
     private List<SalesBookingOrderGuestEntity> loadSourceGuests(Long sourceOrderId, Long tenantId) {
@@ -484,16 +548,15 @@ public class SalesOrderTransferService {
     }
 
     private void assertOrderCanMerge(SalesBookingOrderEntity order, Long currentTeamId) {
-        assertOrderBelongsToTeam(order, currentTeamId);
+        if (currentTeamId != null) {
+            assertOrderBelongsToTeam(order, currentTeamId);
+        }
         if ("cancelled".equals(order.getStatus())) {
             throw new BizException("已取消订单不能拼团");
         }
         String role = StringUtils.hasText(order.getOrderRole())
                 ? order.getOrderRole()
                 : SalesBookingOrderRole.NORMAL.value();
-        if (SalesBookingOrderRole.MERGE_SOURCE.value().equals(role)) {
-            throw new BizException("该订单已执行过拼团，不能重复拼团");
-        }
         if (SalesBookingOrderRole.MERGE_CHILD.value().equals(role)) {
             throw new BizException("拼团子订单不能再次拼团");
         }
@@ -523,6 +586,10 @@ public class SalesOrderTransferService {
     }
 
     private String remarkFor(SalesOrderTransferMergeRequest request, Long orderId, Long targetTeamId) {
+        SalesOrderTransferMergeItemRequest mergeItem = itemFor(request, orderId, targetTeamId);
+        if (mergeItem != null && StringUtils.hasText(mergeItem.remark())) {
+            return clean(mergeItem.remark());
+        }
         List<SalesOrderTransferRemarkRequest> remarks = Objects.requireNonNullElse(request.remarks(), List.of());
         return remarks.stream()
                 .filter(item -> Objects.equals(item.orderId(), orderId) && Objects.equals(item.targetTeamId(), targetTeamId))
@@ -531,6 +598,80 @@ public class SalesOrderTransferService {
                 .findFirst()
                 .map(this::clean)
                 .orElse(clean(request.remark()));
+    }
+
+    private SalesOrderTransferMergeItemRequest itemFor(
+            SalesOrderTransferMergeRequest request,
+            Long orderId,
+            Long targetTeamId
+    ) {
+        return Objects.requireNonNullElse(request.items(), List.<SalesOrderTransferMergeItemRequest>of()).stream()
+                .filter(item -> Objects.equals(item.orderId(), orderId) && Objects.equals(item.targetTeamId(), targetTeamId))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private Set<String> existingMergePairs(Long tenantId, List<Long> orderIds) {
+        List<SalesOrderTransferLogEntity> logs = Objects.requireNonNullElse(
+                logMapper.selectCompletedMergeBySourceOrders(tenantId, orderIds),
+                List.of()
+        );
+        Set<String> keys = new HashSet<>();
+        for (SalesOrderTransferLogEntity log : logs) {
+            if (log != null && log.getSourceOrderId() != null && log.getTargetTeamId() != null) {
+                keys.add(mergePairKey(log.getSourceOrderId(), log.getTargetTeamId()));
+            }
+        }
+        return keys;
+    }
+
+    private String mergePairKey(Long orderId, Long targetTeamId) {
+        return orderId + ":" + targetTeamId;
+    }
+
+    private int mergeGuestCount(SalesBookingOrderEntity sourceOrder, List<SalesBookingOrderGuestEntity> guests) {
+        int occupiedSeats = number(sourceOrder.getGuestCount());
+        if (occupiedSeats > 0) {
+            return occupiedSeats;
+        }
+        return CollectionUtils.isEmpty(guests) ? 0 : guests.size();
+    }
+
+    private int numberWithinTotal(Integer value, int total, int used) {
+        return Math.min(Math.max(0, total - used), number(value));
+    }
+
+    private int countGuests(List<SalesBookingOrderGuestEntity> guests, SalesBookingGuestType type) {
+        if (CollectionUtils.isEmpty(guests)) {
+            return 0;
+        }
+        return (int) guests.stream()
+                .filter(guest -> type.value().equals(guest.getGuestType()))
+                .count();
+    }
+
+    private String priceLineType(String priceType) {
+        String text = StringUtils.hasText(priceType) ? priceType.trim() : "成人";
+        return switch (text) {
+            case "adult", "成人" -> "adult";
+            case "child", "儿童", "儿童占床" -> "child";
+            case "child_no_bed", "儿童不占床" -> "child_no_bed";
+            case "senior", "老人" -> "senior";
+            case "escort", "全陪" -> "escort";
+            default -> text;
+        };
+    }
+
+    private String priceLineName(String priceType) {
+        String text = StringUtils.hasText(priceType) ? priceType.trim() : "成人";
+        return switch (text) {
+            case "adult" -> "成人";
+            case "child" -> "儿童";
+            case "child_no_bed" -> "儿童不占床";
+            case "senior" -> "老人";
+            case "escort" -> "全陪";
+            default -> text;
+        };
     }
 
     private String sourceSummary(SalesBookingOrderEntity order, SalesTeamEntity sourceTeam) {

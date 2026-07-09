@@ -17,6 +17,10 @@ public class SalesProductEntity extends TenantSoftDeleteEntity {
     @TableField("product_name")
     private String productName;
 
+    /** 产品记录用途：template 正式产品模板，team_snapshot 团队专属快照。 */
+    @TableField("product_scope")
+    private String productScope;
+
     /** 业务类型，例如疗休养、定制团、地接团。 */
     @TableField("business_type")
     private String businessType;
@@ -75,6 +79,14 @@ public class SalesProductEntity extends TenantSoftDeleteEntity {
 
     public void setProductName(String productName) {
         this.productName = productName;
+    }
+
+    public String getProductScope() {
+        return productScope;
+    }
+
+    public void setProductScope(String productScope) {
+        this.productScope = productScope;
     }
 
     public String getBusinessType() {

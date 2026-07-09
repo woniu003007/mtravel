@@ -249,7 +249,9 @@ public record SalesTeamOperationResponse(
                 ),
                 product == null ? null : new ProductInfo(
                         product.getId(),
-                        product.getProductName(),
+                        team.getTeamName() == null || team.getTeamName().isBlank()
+                                ? SalesTeamDisplayNameFormatter.productDisplayName(product.getProductName(), team.getTeamNo())
+                                : team.getTeamName().trim(),
                         product.getBusinessType(),
                         product.getDomesticInternational(),
                         product.getReceptionStandard(),

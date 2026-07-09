@@ -360,12 +360,31 @@ export namespace SalesTeamApi {
     targetTeamId: number;
   }
 
+  export interface MergeOrderItemParams {
+    orderId: number;
+    priceType?: string;
+    remark?: string;
+    targetTeamId: number;
+    unitPrice?: number;
+  }
+
   export interface MergeOrderParams {
+    items: MergeOrderItemParams[];
     orderIds: number[];
     remark?: string;
     remarks?: TransferRemarkParams[];
     tagFlag: boolean;
-    targetTeamId: number;
+    targetTeamIds: number[];
+  }
+
+  export interface MergeOrderResult {
+    createdCount: number;
+    skippedCount: number;
+    skippedItems?: {
+      orderId?: number;
+      reason?: string;
+      targetTeamId?: number;
+    }[];
   }
 
   export interface MoveOrderParams {
@@ -679,7 +698,12 @@ export function updateSalesTeam(teamId: number, data: SalesTeamApi.DirectCreateP
 
 /** 执行团队操作页拼团。 */
 export function mergeSalesTeamOrders(teamId: number, data: SalesTeamApi.MergeOrderParams) {
-  return requestClient.post<void>(`/sales/team/${teamId}/operation/merge`, data);
+  return requestClient.post<SalesTeamApi.MergeOrderResult>(`/sales/team/${teamId}/operation/merge`, data);
+}
+
+/** 执行订单管理全局拼团。 */
+export function mergeSalesOrders(data: SalesTeamApi.MergeOrderParams) {
+  return requestClient.post<SalesTeamApi.MergeOrderResult>('/sales/team/operation/merge', data);
 }
 
 /** 执行团队操作页转团。 */

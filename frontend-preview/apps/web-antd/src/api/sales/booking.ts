@@ -41,6 +41,7 @@ export namespace SalesBookingApi {
     id?: number;
     itemName?: string;
     lineType?: string;
+    occupySeat?: boolean;
     quantity?: number;
     remark?: string;
     subtotalAmount?: number;

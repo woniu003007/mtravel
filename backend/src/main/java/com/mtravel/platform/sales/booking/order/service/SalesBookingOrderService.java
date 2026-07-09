@@ -246,8 +246,8 @@ public class SalesBookingOrderService {
     /**
      * 汇总团队操作页顶部展示的领队信息。
      *
-     * <p>领队来源于收客游客名单的 leader_flag 字段，只统计当前团有效订单：普通订单和拼入目标团的子订单。
-     * 取消订单与拼团来源留痕订单不参与团队执行信息展示，避免把已拼出或作废名单算入当前团。</p>
+     * <p>领队来源于收客游客名单的 leader_flag 字段，只统计当前团有效订单。
+     * 历史 merge_source 来源订单按老系统复测口径继续参与来源团执行信息展示；取消订单仍不参与。</p>
      *
      * @param tenantId 当前租户 ID
      * @param orders 当前团队操作页可见订单
@@ -1134,6 +1134,7 @@ public class SalesBookingOrderService {
             entity.setItemName(resolveItemName(request.itemName(), entity.getLineType()));
             entity.setUnitPrice(money(request.unitPrice()));
             entity.setQuantity(money(request.quantity()));
+            entity.setOccupySeat(resolveOccupySeat(request));
             entity.setAmount(entity.getUnitPrice().multiply(entity.getQuantity()).setScale(2, RoundingMode.HALF_UP));
             entity.setStatus("effective");
             entity.setRegisteredBy(operator);
@@ -1269,8 +1270,8 @@ public class SalesBookingOrderService {
     /**
      * 校验当前订单是否允许在收客页继续修改。
      *
-     * <p>拼团来源订单只是来源团队的留痕，不再参与来源团队人数、收入和毛利统计；继续修改价格、
-     * 游客或费用变更会造成来源团留痕和目标团拼入订单不一致，因此必须到目标团队处理拼入订单。</p>
+     * <p>新拼团不再写入 merge_source。历史 merge_source 仍参与来源团队统计，但为避免旧留痕订单和
+     * 已生成目标子订单继续发生价格、游客不一致，历史来源留痕单仍禁止在收客页直接修改。</p>
      */
     private void assertOrderEditable(SalesBookingOrderEntity order) {
         if (order != null && SalesBookingOrderRole.MERGE_SOURCE.value().equals(orderRole(order))) {
@@ -1330,14 +1331,20 @@ public class SalesBookingOrderService {
             SalesBookingGuestType type
     ) {
         int priceCount = priceLineQuantity(priceLines, type);
-        if (priceCount > 0) {
-            return priceCount;
+        int guestCount = countGuests(guests, type);
+        if (hasNamedGuests(guests)) {
+            return guestCount;
         }
-        return countGuests(guests, type);
+        return priceCount;
+    }
+
+    private boolean hasNamedGuests(List<SalesBookingOrderGuestRequest> guests) {
+        return Objects.requireNonNullElse(guests, List.<SalesBookingOrderGuestRequest>of()).stream()
+                .anyMatch(request -> request != null && StringUtils.hasText(request.guestName()));
     }
 
     private int countGuests(List<SalesBookingOrderGuestRequest> guests, SalesBookingGuestType type) {
-        return (int) guests.stream()
+        return (int) Objects.requireNonNullElse(guests, List.<SalesBookingOrderGuestRequest>of()).stream()
                 .filter(request -> StringUtils.hasText(request.guestName()))
                 .filter(request -> type.value().equals(resolveGuestType(request.guestType())))
                 .count();
@@ -1347,7 +1354,7 @@ public class SalesBookingOrderService {
             List<SalesBookingOrderPriceLineRequest> priceLines,
             List<SalesBookingOrderGuestRequest> guests
     ) {
-        int pricePassengerCount = passengerPriceQuantity(priceLines);
+        int pricePassengerCount = occupySeatQuantity(priceLines);
         if (pricePassengerCount > 0) {
             return pricePassengerCount;
         }
@@ -1356,12 +1363,13 @@ public class SalesBookingOrderService {
                 .count();
     }
 
-    private int passengerPriceQuantity(List<SalesBookingOrderPriceLineRequest> priceLines) {
-        return priceLineQuantity(priceLines, SalesBookingGuestType.ADULT)
-                + priceLineQuantity(priceLines, SalesBookingGuestType.CHILD)
-                + priceLineQuantity(priceLines, SalesBookingGuestType.CHILD_NO_BED)
-                + priceLineQuantity(priceLines, SalesBookingGuestType.SENIOR)
-                + priceLineQuantity(priceLines, SalesBookingGuestType.ESCORT);
+    private int occupySeatQuantity(List<SalesBookingOrderPriceLineRequest> priceLines) {
+        return Objects.requireNonNullElse(priceLines, List.<SalesBookingOrderPriceLineRequest>of()).stream()
+                .filter(request -> request != null && Boolean.TRUE.equals(resolveOccupySeat(request)))
+                .map(SalesBookingOrderPriceLineRequest::quantity)
+                .filter(Objects::nonNull)
+                .mapToInt(BigDecimal::intValue)
+                .sum();
     }
 
     private int priceLineQuantity(List<SalesBookingOrderPriceLineRequest> priceLines, SalesBookingGuestType type) {
@@ -1371,6 +1379,20 @@ public class SalesBookingOrderService {
                 .filter(Objects::nonNull)
                 .mapToInt(BigDecimal::intValue)
                 .sum();
+    }
+
+    private Boolean resolveOccupySeat(SalesBookingOrderPriceLineRequest request) {
+        if (request == null) {
+            return false;
+        }
+        if (request.occupySeat() != null) {
+            return request.occupySeat();
+        }
+        String lineType = resolveLineType(request.lineType());
+        return SalesBookingGuestType.ADULT.value().equals(lineType)
+                || SalesBookingGuestType.CHILD.value().equals(lineType)
+                || SalesBookingGuestType.SENIOR.value().equals(lineType)
+                || SalesBookingGuestType.ESCORT.value().equals(lineType);
     }
 
     private boolean isBlankPriceLine(SalesBookingOrderPriceLineRequest request) {
@@ -1875,7 +1897,7 @@ public class SalesBookingOrderService {
         }
         Map<Long, List<com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse.OrderRelationInfo>> result = new HashMap<>();
         Map<Long, List<SalesBookingOrderEntity>> ordersByTenantId = orders.stream()
-                .filter(order -> SalesBookingOrderRole.MERGE_SOURCE.value().equals(orderRole(order)))
+                .filter(order -> !SalesBookingOrderRole.MERGE_CHILD.value().equals(orderRole(order)))
                 .filter(order -> order.getTenantId() != null && order.getId() != null)
                 .collect(Collectors.groupingBy(SalesBookingOrderEntity::getTenantId));
         for (Map.Entry<Long, List<SalesBookingOrderEntity>> entry : ordersByTenantId.entrySet()) {
@@ -2020,7 +2042,7 @@ public class SalesBookingOrderService {
             return false;
         }
         String role = StringUtils.hasText(order.getOrderRole()) ? order.getOrderRole() : "normal";
-        return "normal".equals(role) || "merge_child".equals(role);
+        return "normal".equals(role) || "merge_child".equals(role) || "merge_source".equals(role);
     }
 
     private String leaderSummaryText(SalesBookingOrderGuestEntity leader) {

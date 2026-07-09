@@ -320,6 +320,7 @@ CREATE TABLE IF NOT EXISTS sales_order_charge_lines (
   item_name varchar(120) NOT NULL,
   unit_price numeric(14,2) NOT NULL DEFAULT 0,
   quantity numeric(12,2) NOT NULL DEFAULT 0,
+  occupy_seat boolean NOT NULL DEFAULT true,
   amount numeric(14,2) NOT NULL DEFAULT 0,
   change_type varchar(20),
   fee_project_id bigint,
@@ -566,7 +567,7 @@ COMMENT ON COLUMN sales_orders.contact_name IS '客户联系人姓名。';
 COMMENT ON COLUMN sales_orders.contact_phone IS '客户联系人电话。';
 COMMENT ON COLUMN sales_orders.customer_team_no IS '客户方团队编号或客户团号。';
 COMMENT ON COLUMN sales_orders.original_order_info IS '原始订单摘要，用于拼团、转团或来源订单在团队操作页追溯显示。';
-COMMENT ON COLUMN sales_orders.order_role IS '订单业务角色：normal普通订单，merge_source拼团来源留痕订单，merge_child拼团目标子订单。';
+COMMENT ON COLUMN sales_orders.order_role IS '订单业务角色：normal普通订单，merge_source历史拼团来源留痕订单，merge_child拼团目标子订单；新拼团不再写入merge_source，历史merge_source继续参与来源团统计。';
 COMMENT ON COLUMN sales_orders.tagging IS '订单管理页标记状态，用于筛选重点订单。';
 COMMENT ON COLUMN sales_orders.salesperson_employee_id IS '业务员员工 ID，用于销售归属和收款统计。';
 COMMENT ON COLUMN sales_orders.salesperson_employee_name IS '业务员姓名快照。';
@@ -684,6 +685,7 @@ COMMENT ON COLUMN sales_order_charge_lines.line_type IS '业务分项类型，�
 COMMENT ON COLUMN sales_order_charge_lines.item_name IS '业务分项名称，用于页面展示和报表说明。';
 COMMENT ON COLUMN sales_order_charge_lines.unit_price IS '单价，原始价格行使用。';
 COMMENT ON COLUMN sales_order_charge_lines.quantity IS '数量，原始价格行使用。';
+COMMENT ON COLUMN sales_order_charge_lines.occupy_seat IS '是否占用团队人数名额，仅原始价格行使用；单房差、附加费等费用项通常不占位。';
 COMMENT ON COLUMN sales_order_charge_lines.amount IS '金额，原始价格为非负小计，应收调整按加收正数、退减负数保存。';
 COMMENT ON COLUMN sales_order_charge_lines.change_type IS '调整方向：increase 加收，decrease 退减；原始价格行为空。';
 COMMENT ON COLUMN sales_order_charge_lines.fee_project_id IS '费用项目 ID，应收调整行引用企业资料附加费用项目。';

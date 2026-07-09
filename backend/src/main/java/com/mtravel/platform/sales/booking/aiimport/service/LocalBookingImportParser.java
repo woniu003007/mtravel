@@ -51,6 +51,12 @@ public class LocalBookingImportParser {
     private static final Pattern NAME_ID_GUEST_LINE = Pattern.compile(
             "^\\s*([\\p{IsHan}A-Za-z·]{2,20})\\s*(\\d{17}[0-9Xx])(?:\\s+(1[3-9]\\d{9}))?(?:\\s+(.+))?\\s*$"
     );
+    private static final Pattern NAME_GENDER_PHONE_ID_GUEST_LINE = Pattern.compile(
+            "^\\s*([\\p{IsHan}A-Za-z·]{2,20})[\\s,，]+[男女MFmf][\\s,，]+(1[3-9]\\d{9})[\\s,，]+(\\d{17}[0-9Xx])(?:[\\s,，]+(.+))?\\s*$"
+    );
+    private static final Pattern NAME_GENDER_ID_PHONE_GUEST_LINE = Pattern.compile(
+            "^\\s*([\\p{IsHan}A-Za-z·]{2,20})[\\s,，]+[男女MFmf][\\s,，]+(\\d{17}[0-9Xx])(?:[\\s,，]+(1[3-9]\\d{9}))?(?:[\\s,，]+(.+))?\\s*$"
+    );
     private static final Pattern BRACKETED_NAME_ID_GUEST = Pattern.compile(
             "([\\p{IsHan}A-Za-z·]{2,20})\\s*[\\[【(（]\\s*(\\d{17}[0-9Xx])(?:\\s*[/／,，\\s]\\s*(1[3-9]\\d{9}))?\\s*[\\]】)）]"
     );
@@ -422,6 +428,36 @@ public class LocalBookingImportParser {
                         StringUtils.hasText(explicitRooming) ? explicitRooming : lastMergedRooming,
                         groupedCompactMatcher.group(7),
                         StringUtils.hasText(explicitRooming),
+                        false
+                ));
+            }
+            Matcher nameGenderPhoneIdMatcher = NAME_GENDER_PHONE_ID_GUEST_LINE.matcher(line.trim());
+            if (nameGenderPhoneIdMatcher.matches()) {
+                parsedGuests.add(new ParsedGuest(
+                        nextGuestIndex(parsedGuests),
+                        nameGenderPhoneIdMatcher.group(1),
+                        nameGenderPhoneIdMatcher.group(3),
+                        null,
+                        null,
+                        nameGenderPhoneIdMatcher.group(2),
+                        null,
+                        nameGenderPhoneIdMatcher.group(4),
+                        false,
+                        false
+                ));
+            }
+            Matcher nameGenderIdPhoneMatcher = NAME_GENDER_ID_PHONE_GUEST_LINE.matcher(line.trim());
+            if (nameGenderIdPhoneMatcher.matches()) {
+                parsedGuests.add(new ParsedGuest(
+                        nextGuestIndex(parsedGuests),
+                        nameGenderIdPhoneMatcher.group(1),
+                        nameGenderIdPhoneMatcher.group(2),
+                        null,
+                        null,
+                        nameGenderIdPhoneMatcher.group(3),
+                        null,
+                        nameGenderIdPhoneMatcher.group(4),
+                        false,
                         false
                 ));
             }

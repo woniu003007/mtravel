@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS sales_products (
   id BIGSERIAL PRIMARY KEY,
   tenant_id bigint NOT NULL REFERENCES tenants(id),
   product_name varchar(200) NOT NULL,
+  product_scope varchar(30) NOT NULL DEFAULT 'template',
   business_type varchar(120),
   domestic_international varchar(20) NOT NULL DEFAULT 'domestic',
   province varchar(80),
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS sales_products (
   is_deleted boolean NOT NULL DEFAULT false,
   deleted_at timestamptz,
   deleted_by varchar(64),
+  CONSTRAINT chk_sales_products_scope CHECK (product_scope IN ('template', 'team_snapshot')),
   CONSTRAINT chk_sales_products_domestic CHECK (domestic_international IN ('domestic', 'international')),
   CONSTRAINT chk_sales_products_trip_type CHECK (trip_type IN ('daily', 'weekly', 'irregular')),
   CONSTRAINT chk_sales_products_days CHECK (travel_days >= 1),
@@ -56,7 +58,7 @@ BEFORE UPDATE ON sales_products
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE INDEX IF NOT EXISTS idx_sales_products_tenant_deleted_status
-  ON sales_products (tenant_id, is_deleted, status);
+  ON sales_products (tenant_id, is_deleted, product_scope, status);
 
 CREATE INDEX IF NOT EXISTS idx_sales_products_tenant_deleted_city
   ON sales_products (tenant_id, is_deleted, province, city, district);
@@ -66,7 +68,7 @@ CREATE INDEX IF NOT EXISTS idx_sales_products_tenant_deleted_type
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_sales_products_tenant_name_active
   ON sales_products (tenant_id, product_name)
-  WHERE is_deleted = false;
+  WHERE is_deleted = false AND product_scope = 'template';
 
 CREATE TABLE IF NOT EXISTS sales_product_itinerary_days (
   id BIGSERIAL PRIMARY KEY,
@@ -624,6 +626,7 @@ COMMENT ON TABLE sales_products IS '销售产品模板主表。用于维护线�
 COMMENT ON COLUMN sales_products.id IS '销售产品主键ID，系统内部使用。';
 COMMENT ON COLUMN sales_products.tenant_id IS '租户ID，标识该产品属于哪一家地接公司。';
 COMMENT ON COLUMN sales_products.product_name IS '产品名称，也就是线路名称。';
+COMMENT ON COLUMN sales_products.product_scope IS '产品记录用途。template 表示正式产品模板；team_snapshot 表示直接建团产生的团队专属产品快照，不进入产品管理列表。';
 COMMENT ON COLUMN sales_products.business_type IS '业务类型，例如疗休养、定制团、红色培训。';
 COMMENT ON COLUMN sales_products.domestic_international IS '国内国际标记。domestic表示国内，international表示国际。';
 COMMENT ON COLUMN sales_products.province IS '接团省份。';

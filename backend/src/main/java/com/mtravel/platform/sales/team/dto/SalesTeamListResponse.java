@@ -2,6 +2,7 @@ package com.mtravel.platform.sales.team.dto;
 
 import com.mtravel.platform.sales.product.entity.SalesProductEntity;
 import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
+import com.mtravel.platform.sales.team.entity.SalesTeamListSummaryEntity;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -46,6 +47,41 @@ public record SalesTeamListResponse(
         String remark,
         OffsetDateTime createdAt
 ) {
+    /** 将团队列表汇总行转换为前端列表返回对象。 */
+    public static SalesTeamListResponse fromSummary(SalesTeamListSummaryEntity summary) {
+        return new SalesTeamListResponse(
+                summary.getTeamId(),
+                null,
+                summary.getTeamNo(),
+                summary.getTeamType(),
+                summary.getStatus(),
+                summary.getTeamName(),
+                summary.getBusinessType(),
+                summary.getTravelDays(),
+                summary.getDepartureDate(),
+                summary.getEndDate(),
+                summary.getDeparturePlace(),
+                summary.getTotalSeats(),
+                summary.getUsedSeats(),
+                summary.getRemainingSeats(),
+                summary.getCustomerSummary(),
+                summary.getGuideSummary(),
+                summary.getGuidePlan(),
+                summary.getTrafficPlan(),
+                summary.getHotelPlan(),
+                summary.getVehiclePlan(),
+                summary.getScenicPlan(),
+                summary.getMealPlan(),
+                summary.getOtherPlan(),
+                summary.getOptionalPlan(),
+                summary.getShoppingPlan(),
+                summary.getGroundAgentPlan(),
+                summary.getOperatorEmployeeName(),
+                summary.getRemark(),
+                summary.getCreatedAt()
+        );
+    }
+
     /** 将团队实体和产品实体合并为团队管理列表行。 */
     public static SalesTeamListResponse fromEntity(SalesTeamEntity team, SalesProductEntity product) {
         return fromEntity(team, product, ArrangePlans.empty(), null);
@@ -89,7 +125,9 @@ public record SalesTeamListResponse(
                 team.getTeamNo(),
                 team.getTeamType(),
                 team.getStatus(),
-                product == null ? null : product.getProductName(),
+                team.getTeamName() == null || team.getTeamName().isBlank()
+                        ? product == null ? null : SalesTeamDisplayNameFormatter.productDisplayName(product.getProductName(), team.getTeamNo())
+                        : team.getTeamName().trim(),
                 team.getBusinessType() == null ? product == null ? null : product.getBusinessType() : team.getBusinessType(),
                 days,
                 team.getDepartureDate(),

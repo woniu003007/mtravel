@@ -12,6 +12,7 @@ import java.math.BigDecimal;
  * @param itemName 明细名称。
  * @param unitPrice 单价。
  * @param quantity 数量。
+ * @param occupySeat 是否占用团队人数名额。
  * @param remark 业务备注。
  */
 public record SalesBookingOrderPriceLineRequest(
@@ -24,6 +25,7 @@ public record SalesBookingOrderPriceLineRequest(
         BigDecimal unitPrice,
         @DecimalMin(value = "0.00", message = "数量不能小于0")
         BigDecimal quantity,
+        Boolean occupySeat,
         String remark
 ) {
 }

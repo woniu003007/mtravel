@@ -41,6 +41,7 @@ import com.mtravel.platform.sales.team.dto.SalesTeamBatchEditRequest;
 import com.mtravel.platform.sales.team.dto.SalesTeamBatchCreateRequest;
 import com.mtravel.platform.sales.team.dto.SalesTeamDirectEditResponse;
 import com.mtravel.platform.sales.team.dto.SalesTeamDirectCreateRequest;
+import com.mtravel.platform.sales.team.dto.SalesTeamDisplayNameFormatter;
 import com.mtravel.platform.sales.team.dto.SalesTeamListResponse;
 import com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse;
 import com.mtravel.platform.sales.team.dto.SalesTeamPriceResponse;
@@ -48,6 +49,7 @@ import com.mtravel.platform.sales.team.dto.SalesTeamPriceSaveRequest;
 import com.mtravel.platform.sales.team.dto.SalesTeamResponse;
 import com.mtravel.platform.sales.team.dto.SalesTeamSaveRequest;
 import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
+import com.mtravel.platform.sales.team.entity.SalesTeamListSummaryEntity;
 import com.mtravel.platform.sales.team.entity.SalesTeamNoLogEntity;
 import com.mtravel.platform.sales.team.entity.SalesTeamPriceEntity;
 import com.mtravel.platform.sales.team.entity.SalesTeamStatusLogEntity;
@@ -56,6 +58,7 @@ import com.mtravel.platform.sales.team.enums.SalesTeamStatus;
 import com.mtravel.platform.sales.team.enums.SalesTeamStatusAction;
 import com.mtravel.platform.sales.team.enums.SalesTeamType;
 import com.mtravel.platform.sales.team.mapper.SalesTeamMapper;
+import com.mtravel.platform.sales.team.mapper.SalesTeamListSummaryMapper;
 import com.mtravel.platform.sales.team.mapper.SalesTeamNoLogMapper;
 import com.mtravel.platform.sales.team.mapper.SalesTeamPriceMapper;
 import com.mtravel.platform.sales.team.mapper.SalesTeamStatusLogMapper;
@@ -71,6 +74,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Stream;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -91,6 +95,7 @@ public class SalesTeamScheduleService {
 
     private static final String DEFAULT_TEAM_NO_PREFIX = "CS-SP-BK";
     private static final int PRODUCT_NAME_MAX_LENGTH = 200;
+    private static final String PRODUCT_SCOPE_TEAM_SNAPSHOT = "team_snapshot";
     private static final DateTimeFormatter TEAM_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyMMdd");
     private static final Pattern TEAM_SUFFIX_PATTERN = Pattern.compile("([A-Z](?:\\d+)?)$");
     private static final String TEAM_PROFILE_MARKER = "[[TEAM_PROFILE_JSON]]";
@@ -107,6 +112,7 @@ public class SalesTeamScheduleService {
     private final SalesProductArrangementItemMapper productArrangementMapper;
     private final SalesProductArrangementPriceLineMapper productArrangementPriceLineMapper;
     private final SalesTeamMapper teamMapper;
+    private final SalesTeamListSummaryMapper teamListSummaryMapper;
     private final SalesTeamPriceMapper priceMapper;
     private final SalesTeamStatusLogMapper statusLogMapper;
     private final SalesTeamNoLogMapper noLogMapper;
@@ -129,7 +135,7 @@ public class SalesTeamScheduleService {
             SalesTeamPriceMapper priceMapper,
             SalesTeamStatusLogMapper statusLogMapper
     ) {
-        this(productMapper, null, null, null, null, null, teamMapper, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null);
+        this(productMapper, null, null, null, null, null, teamMapper, null, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -142,7 +148,7 @@ public class SalesTeamScheduleService {
             SalesTeamPriceMapper priceMapper,
             SalesTeamStatusLogMapper statusLogMapper
     ) {
-        this(productMapper, descriptionMapper, null, null, null, null, teamMapper, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null);
+        this(productMapper, descriptionMapper, null, null, null, null, teamMapper, null, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -156,7 +162,7 @@ public class SalesTeamScheduleService {
             SalesTeamPriceMapper priceMapper,
             SalesTeamStatusLogMapper statusLogMapper
     ) {
-        this(productMapper, descriptionMapper, itineraryDayMapper, null, null, null, teamMapper, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null);
+        this(productMapper, descriptionMapper, itineraryDayMapper, null, null, null, teamMapper, null, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -171,7 +177,7 @@ public class SalesTeamScheduleService {
             SalesTeamPriceMapper priceMapper,
             SalesTeamStatusLogMapper statusLogMapper
     ) {
-        this(productMapper, descriptionMapper, itineraryDayMapper, roadbookPointMapper, null, null, teamMapper, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null);
+        this(productMapper, descriptionMapper, itineraryDayMapper, roadbookPointMapper, null, null, teamMapper, null, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -201,6 +207,7 @@ public class SalesTeamScheduleService {
                 productArrangementMapper,
                 productArrangementPriceLineMapper,
                 teamMapper,
+                null,
                 priceMapper,
                 statusLogMapper,
                 noLogMapper,
@@ -208,7 +215,9 @@ public class SalesTeamScheduleService {
                 null,
                 teamArrangementMapper,
                 teamArrangementPriceLineMapper,
-                teamArrangementAllocationMapper
+                teamArrangementAllocationMapper,
+                null,
+                null
         );
     }
 
@@ -240,6 +249,7 @@ public class SalesTeamScheduleService {
                 productArrangementMapper,
                 productArrangementPriceLineMapper,
                 teamMapper,
+                null,
                 priceMapper,
                 statusLogMapper,
                 noLogMapper,
@@ -265,6 +275,7 @@ public class SalesTeamScheduleService {
             SalesProductArrangementItemMapper productArrangementMapper,
             SalesProductArrangementPriceLineMapper productArrangementPriceLineMapper,
             SalesTeamMapper teamMapper,
+            SalesTeamListSummaryMapper teamListSummaryMapper,
             SalesTeamPriceMapper priceMapper,
             SalesTeamStatusLogMapper statusLogMapper,
             SalesTeamNoLogMapper noLogMapper,
@@ -283,6 +294,7 @@ public class SalesTeamScheduleService {
         this.productArrangementMapper = productArrangementMapper;
         this.productArrangementPriceLineMapper = productArrangementPriceLineMapper;
         this.teamMapper = teamMapper;
+        this.teamListSummaryMapper = teamListSummaryMapper;
         this.priceMapper = priceMapper;
         this.statusLogMapper = statusLogMapper;
         this.noLogMapper = noLogMapper;
@@ -427,6 +439,27 @@ public class SalesTeamScheduleService {
             long page,
             long pageSize
     ) {
+        if (teamListSummaryMapper != null) {
+            return globalPageFromSummary(
+                    tenantId,
+                    teamType,
+                    keyword,
+                    customerKeyword,
+                    operatorKeyword,
+                    departurePlace,
+                    businessType,
+                    startDate,
+                    endDate,
+                    travelDays,
+                    teamStatus,
+                    guideKeyword,
+                    departmentName,
+                    orderStatus,
+                    addDate,
+                    page,
+                    pageSize
+            );
+        }
         QueryWrapper<SalesTeamEntity> wrapper = baseTeamQuery(tenantId)
                 .eq(StringUtils.hasText(teamType), "team_type", clean(teamType))
                 .like(StringUtils.hasText(operatorKeyword), "operator_employee_name", clean(operatorKeyword))
@@ -439,7 +472,7 @@ public class SalesTeamScheduleService {
         applyGlobalOrderStatusFilter(wrapper, tenantId, orderStatus);
         applyGlobalProductFilters(wrapper, tenantId, keyword, departurePlace, businessType, travelDays);
         applyGlobalCustomerFilter(wrapper, tenantId, customerKeyword);
-        wrapper.orderByDesc("departure_date").orderByAsc("team_no");
+        wrapper.orderByDesc("created_at").orderByAsc("team_no");
 
         Page<SalesTeamEntity> result = teamMapper.selectPage(Page.of(page, Math.min(pageSize, 200)), wrapper);
         if (result.getRecords().isEmpty()) {
@@ -459,6 +492,99 @@ public class SalesTeamScheduleService {
                         guideSummaries.get(team.getId())))
                 .toList();
         return new PageResult<>(items, result.getTotal());
+    }
+
+    /**
+     * 从团队列表汇总表分页查询团队管理列表。
+     *
+     * <p>该路径是千万级数据量下的正式查询路径，只访问 sales_team_list_summaries，避免实时联查产品、订单、导游和安排表。</p>
+     */
+    private PageResult<SalesTeamListResponse> globalPageFromSummary(
+            Long tenantId,
+            String teamType,
+            String keyword,
+            String customerKeyword,
+            String operatorKeyword,
+            String departurePlace,
+            String businessType,
+            LocalDate startDate,
+            LocalDate endDate,
+            Integer travelDays,
+            String teamStatus,
+            String guideKeyword,
+            String departmentName,
+            String orderStatus,
+            LocalDate addDate,
+            long page,
+            long pageSize
+    ) {
+        QueryWrapper<SalesTeamListSummaryEntity> wrapper = new QueryWrapper<SalesTeamListSummaryEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq(StringUtils.hasText(teamType), "team_type", clean(teamType))
+                .eq(StringUtils.hasText(businessType), "business_type", clean(businessType))
+                .eq(travelDays != null, "travel_days", travelDays)
+                .ge(startDate != null, "departure_date", startDate)
+                .le(endDate != null, "departure_date", endDate)
+                .like(StringUtils.hasText(operatorKeyword), "operator_employee_name", clean(operatorKeyword))
+                .eq(StringUtils.hasText(departmentName), "department_name", clean(departmentName));
+        applySummaryStatusFilter(wrapper, teamStatus);
+        if (addDate != null) {
+            wrapper.apply("created_at::date = {0}", addDate);
+        }
+        if (StringUtils.hasText(keyword)) {
+            String value = clean(keyword);
+            wrapper.and(nested -> nested
+                    .like("team_no", value)
+                    .or()
+                    .like("team_name", value)
+                    .or()
+                    .like("remark", value));
+        }
+        if (StringUtils.hasText(customerKeyword)) {
+            String value = clean(customerKeyword);
+            wrapper.and(nested -> nested
+                    .like("customer_summary", value)
+                    .or()
+                    .like("salesperson_summary", value));
+        }
+        if (StringUtils.hasText(departurePlace)) {
+            wrapper.like("departure_place", clean(departurePlace));
+        }
+        if (StringUtils.hasText(guideKeyword)) {
+            wrapper.like("guide_summary", clean(guideKeyword));
+        }
+        if (StringUtils.hasText(orderStatus) && !"all".equals(orderStatus)) {
+            if ("none".equals(orderStatus)) {
+                wrapper.and(nested -> nested.isNull("order_status_summary").or().eq("order_status_summary", ""));
+            } else {
+                wrapper.like("order_status_summary", clean(orderStatus));
+            }
+        }
+        wrapper.orderByDesc("created_at").orderByAsc("team_no");
+        Page<SalesTeamListSummaryEntity> result = teamListSummaryMapper.selectPage(Page.of(page, Math.min(pageSize, 200)), wrapper);
+        List<SalesTeamListResponse> items = result.getRecords().stream()
+                .map(SalesTeamListResponse::fromSummary)
+                .toList();
+        return new PageResult<>(items, result.getTotal());
+    }
+
+    /** 按团队列表页状态下拉语义过滤汇总表。 */
+    private void applySummaryStatusFilter(QueryWrapper<SalesTeamListSummaryEntity> wrapper, String teamStatus) {
+        if (!StringUtils.hasText(teamStatus) || "all".equals(teamStatus)) {
+            return;
+        }
+        if ("not_departed".equals(teamStatus)) {
+            wrapper.ne("status", SalesTeamStatus.CANCELLED.getValue())
+                    .ge("departure_date", LocalDate.now());
+            return;
+        }
+        if ("departed".equals(teamStatus)) {
+            wrapper.ne("status", SalesTeamStatus.CANCELLED.getValue())
+                    .lt("departure_date", LocalDate.now());
+            return;
+        }
+        wrapper.eq("status", clean(teamStatus));
     }
 
     /**
@@ -532,6 +658,7 @@ public class SalesTeamScheduleService {
 
         insertStatusLog(tenantId, team.getId(), null, team.getStatus(), SalesTeamStatusAction.CREATE, operator, "团队管理直接新增");
         insertNoLog(tenantId, product.getId(), request.departureDate(), teamNo, suffixOf(teamNo), operator);
+        refreshTeamListSummary(team.getId(), tenantId);
         return SalesTeamResponse.fromEntity(team, List.of());
     }
 
@@ -557,7 +684,7 @@ public class SalesTeamScheduleService {
                 product.getId(),
                 team.getTeamNo(),
                 team.getTeamType(),
-                directProductDisplayName(product.getProductName(), team.getTeamNo()),
+                displayTeamName(team, product),
                 firstText(team.getBusinessType(), product.getBusinessType()),
                 product.getDomesticInternational(),
                 product.getProvince(),
@@ -626,6 +753,7 @@ public class SalesTeamScheduleService {
 
         SalesTeamEntity teamUpdate = new SalesTeamEntity();
         teamUpdate.setTeamType(teamType.getValue());
+        teamUpdate.setTeamName(clean(request.teamName()));
         teamUpdate.setBusinessType(clean(request.businessType()));
         teamUpdate.setDepartureDate(request.departureDate());
         teamUpdate.setTotalSeats(totalSeats);
@@ -642,6 +770,7 @@ public class SalesTeamScheduleService {
         saveDirectProductDescription(product.getId(), request, tenantId, operator);
         saveDirectProductItineraryDays(product.getId(), request, tenantId, operator);
         SalesTeamEntity latest = requireTeam(teamId, tenantId);
+        refreshTeamListSummary(teamId, tenantId);
         return SalesTeamResponse.fromEntity(latest, loadPricesForTeams(tenantId, List.of(latest)).getOrDefault(teamId, List.of()));
     }
 
@@ -683,6 +812,7 @@ public class SalesTeamScheduleService {
             insertStatusLog(tenantId, team.getId(), null, team.getStatus(), SalesTeamStatusAction.CREATE, operator, "批量生成团期");
             insertNoLog(tenantId, productId, departureDate, teamNo, suffixOf(teamNo), operator);
             copyProductArrangementsToTeam(team, productArrangements, productPriceLines, tenantId, operator);
+            refreshTeamListSummary(team.getId(), tenantId);
             created.add(SalesTeamResponse.fromEntity(team, List.of(SalesTeamPriceResponse.fromEntity(price))));
         }
         return created;
@@ -1319,7 +1449,7 @@ public class SalesTeamScheduleService {
                   AND so.team_id = sales_teams.id
                   AND so.is_deleted = false
                   AND so.status <> 'cancelled'
-                  AND COALESCE(so.order_role, 'normal') IN ('normal', 'merge_child')
+                  AND COALESCE(so.order_role, 'normal') IN ('normal', 'merge_child', 'merge_source')
                   AND (so.customer_name ILIKE {1} OR so.salesperson_employee_name ILIKE {1})
                 """, tenantId, "%" + value + "%");
     }
@@ -1352,7 +1482,7 @@ public class SalesTeamScheduleService {
                     WHERE so.tenant_id = {0}
                       AND so.team_id = sales_teams.id
                       AND so.is_deleted = false
-                      AND COALESCE(so.order_role, 'normal') IN ('normal', 'merge_child')
+                      AND COALESCE(so.order_role, 'normal') IN ('normal', 'merge_child', 'merge_source')
                     """, tenantId);
             return;
         }
@@ -1362,7 +1492,7 @@ public class SalesTeamScheduleService {
                 WHERE so.tenant_id = {0}
                   AND so.team_id = sales_teams.id
                   AND so.is_deleted = false
-                  AND COALESCE(so.order_role, 'normal') IN ('normal', 'merge_child')
+                  AND COALESCE(so.order_role, 'normal') IN ('normal', 'merge_child', 'merge_source')
                   AND so.status = {1}
                 """, tenantId, status);
     }
@@ -1452,6 +1582,7 @@ public class SalesTeamScheduleService {
         entity.setTenantId(tenantId);
         entity.setProductId(product.getId());
         entity.setTeamNo(teamNo);
+        entity.setTeamName(SalesTeamDisplayNameFormatter.productDisplayName(product.getProductName(), teamNo));
         entity.setTeamType(SalesTeamType.SANPIN.getValue());
         entity.setBusinessType(firstText(profile.businessType(), product.getBusinessType()));
         entity.setDepartureDate(departureDate);
@@ -1491,6 +1622,7 @@ public class SalesTeamScheduleService {
         SalesProductEntity entity = new SalesProductEntity();
         entity.setTenantId(tenantId);
         applyDirectProductFields(entity, request, teamNo);
+        entity.setProductScope(PRODUCT_SCOPE_TEAM_SNAPSHOT);
         entity.setCreatedBy(operator);
         entity.setIsDeleted(false);
         return entity;
@@ -1520,17 +1652,14 @@ public class SalesTeamScheduleService {
     }
 
     /**
-     * 直接建团创建的是团队专属产品快照，名称追加团号，避免同一线路多次建团时撞产品名称唯一索引。
+     * 直接建团创建的是团队专属产品快照，不进入产品模板唯一性校验，名称保持用户录入的团队名称。
      */
     private String directProductSnapshotName(String teamName, String teamNo) {
         String baseName = clean(teamName);
-        String suffix = "-" + clean(teamNo);
-        if (!StringUtils.hasText(baseName) || !StringUtils.hasText(teamNo)) {
+        if (!StringUtils.hasText(baseName) || baseName.length() <= PRODUCT_NAME_MAX_LENGTH) {
             return baseName;
         }
-        int maxBaseLength = Math.max(0, PRODUCT_NAME_MAX_LENGTH - suffix.length());
-        String trimmedBase = baseName.length() > maxBaseLength ? baseName.substring(0, maxBaseLength) : baseName;
-        return trimmedBase + suffix;
+        return baseName.substring(0, PRODUCT_NAME_MAX_LENGTH);
     }
 
     /**
@@ -1559,6 +1688,7 @@ public class SalesTeamScheduleService {
         entity.setTenantId(tenantId);
         entity.setProductId(product.getId());
         entity.setTeamNo(teamNo);
+        entity.setTeamName(clean(request.teamName()));
         entity.setTeamType(teamType.getValue());
         entity.setBusinessType(clean(request.businessType()));
         entity.setDepartureDate(request.departureDate());
@@ -2020,7 +2150,7 @@ public class SalesTeamScheduleService {
                         .in("team_id", teamIds)
                         .ne("status", "cancelled")
                         .and(wrapper -> wrapper
-                                .in("order_role", List.of("normal", "merge_child"))
+                                .in("order_role", List.of("normal", "merge_child", "merge_source"))
                                 .or()
                                 .isNull("order_role"))
                         .orderByAsc("team_id")
@@ -2042,7 +2172,7 @@ public class SalesTeamScheduleService {
             return false;
         }
         String role = StringUtils.hasText(order.getOrderRole()) ? order.getOrderRole() : "normal";
-        return "normal".equals(role) || "merge_child".equals(role);
+        return "normal".equals(role) || "merge_child".equals(role) || "merge_source".equals(role);
     }
 
     private List<DispatchTeamGuideEntity> loadActiveGuidesForTeams(Long tenantId, List<SalesTeamEntity> teams) {
@@ -2083,6 +2213,106 @@ public class SalesTeamScheduleService {
             return name;
         }
         return name + "[Tel:" + clean(guide.getGuideMobile()) + "]";
+    }
+
+    /**
+     * 刷新单个团队的列表汇总行。
+     *
+     * <p>列表页只查汇总表；团队、订单、导游或安排变化后调用该方法，将相关来源表提前聚合为一行。</p>
+     */
+    public void refreshTeamListSummary(Long teamId, Long tenantId) {
+        if (teamListSummaryMapper == null || teamId == null || tenantId == null) {
+            return;
+        }
+        SalesTeamEntity team = teamMapper.selectOne(baseTeamQuery(tenantId).eq("id", teamId));
+        if (team == null) {
+            SalesTeamListSummaryEntity deleted = new SalesTeamListSummaryEntity();
+            deleted.setIsDeleted(true);
+            teamListSummaryMapper.update(deleted, new UpdateWrapper<SalesTeamListSummaryEntity>()
+                    .eq("tenant_id", tenantId)
+                    .eq("team_id", teamId));
+            return;
+        }
+        SalesProductEntity product = team.getProductId() == null
+                ? null
+                : productMapper.selectOne(baseProductQuery(tenantId).eq("id", team.getProductId()));
+        List<SalesBookingOrderEntity> orders = bookingOrderMapper == null
+                ? List.of()
+                : bookingOrderMapper.selectList(new QueryWrapper<SalesBookingOrderEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .eq("team_id", teamId)
+                        .orderByAsc("id"));
+        List<SalesBookingOrderEntity> visibleOrders = orders.stream().filter(this::visibleCustomerOrder).toList();
+        List<DispatchTeamGuideEntity> guides = loadActiveGuidesForTeams(tenantId, List.of(team));
+        SalesTeamListResponse.ArrangePlans plans = loadArrangePlansForTeams(tenantId, List.of(team), guides)
+                .getOrDefault(teamId, SalesTeamListResponse.ArrangePlans.empty());
+
+        SalesTeamListSummaryEntity summary = new SalesTeamListSummaryEntity();
+        summary.setTenantId(tenantId);
+        summary.setTeamId(teamId);
+        summary.setTeamNo(team.getTeamNo());
+        summary.setTeamName(displayTeamName(team, product));
+        summary.setTeamType(team.getTeamType());
+        summary.setStatus(team.getStatus());
+        summary.setDepartureDate(team.getDepartureDate());
+        int days = product != null && product.getTravelDays() != null && product.getTravelDays() > 0 ? product.getTravelDays() : 1;
+        summary.setTravelDays(days);
+        summary.setEndDate(team.getDepartureDate() == null ? null : team.getDepartureDate().plusDays(days - 1L));
+        summary.setDeparturePlace(product == null ? null : joinPlaceText(product.getProvince(), product.getCity(), product.getDistrict()));
+        summary.setBusinessType(firstText(team.getBusinessType(), product == null ? null : product.getBusinessType()));
+        summary.setDepartmentName(clean(team.getDepartmentName()));
+        summary.setOperatorEmployeeName(clean(team.getOperatorEmployeeName()));
+        summary.setCustomerSummary(joinDistinct(visibleOrders.stream().map(SalesBookingOrderEntity::getCustomerName).toList()));
+        summary.setSalespersonSummary(joinDistinct(visibleOrders.stream().map(SalesBookingOrderEntity::getSalespersonEmployeeName).toList()));
+        summary.setOrderStatusSummary(joinDistinct(visibleOrders.stream().map(SalesBookingOrderEntity::getStatus).toList()));
+        summary.setGuideSummary(buildGuideSummaries(guides).get(teamId));
+        summary.setTotalSeats(number(team.getTotalSeats()));
+        summary.setUsedSeats(number(team.getUsedSeats()));
+        summary.setRemainingSeats(number(team.getRemainingSeats()));
+        summary.setGuidePlan(plans.guidePlan());
+        summary.setTrafficPlan(plans.trafficPlan());
+        summary.setHotelPlan(plans.hotelPlan());
+        summary.setVehiclePlan(plans.vehiclePlan());
+        summary.setScenicPlan(plans.scenicPlan());
+        summary.setMealPlan(plans.mealPlan());
+        summary.setOtherPlan(plans.otherPlan());
+        summary.setOptionalPlan(plans.optionalPlan());
+        summary.setShoppingPlan(plans.shoppingPlan());
+        summary.setGroundAgentPlan(plans.groundAgentPlan());
+        summary.setCreatedBy(team.getCreatedBy());
+        summary.setCreatedAt(team.getCreatedAt());
+        summary.setRemark(team.getRemark());
+        summary.setIsDeleted(false);
+
+        int updated = teamListSummaryMapper.update(summary, new UpdateWrapper<SalesTeamListSummaryEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("team_id", teamId));
+        if (updated == 0) {
+            teamListSummaryMapper.insert(summary);
+        }
+    }
+
+    private String displayTeamName(SalesTeamEntity team, SalesProductEntity product) {
+        if (StringUtils.hasText(team.getTeamName())) {
+            return clean(team.getTeamName());
+        }
+        return product == null ? null : SalesTeamDisplayNameFormatter.productDisplayName(product.getProductName(), team.getTeamNo());
+    }
+
+    private String joinDistinct(List<String> values) {
+        java.util.LinkedHashSet<String> cleaned = values.stream()
+                .map(this::clean)
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toCollection(java.util.LinkedHashSet::new));
+        return cleaned.isEmpty() ? null : String.join("、", cleaned);
+    }
+
+    private String joinPlaceText(String province, String city, String district) {
+        return Stream.of(province, city, district)
+                .map(this::clean)
+                .filter(StringUtils::hasText)
+                .collect(Collectors.joining());
     }
 
     private List<Long> teamIds(List<SalesTeamEntity> teams) {

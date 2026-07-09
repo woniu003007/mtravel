@@ -531,6 +531,7 @@ const formalHeaderNoteMetrics = computed(() => [
   `自费加点率：${Number(teamProfile.optionalMarkupRate || 0)}%`,
   `人均购物：${formatMoney(teamProfile.perCapitaShoppingAmount)}`,
 ]);
+const internalNoteDisplay = computed(() => teamProfile.internalNote || DEFAULT_INTERNAL_REMARK_TEMPLATE);
 
 function formatMoney(value?: number) {
   return new Intl.NumberFormat('zh-CN', {
@@ -2017,7 +2018,7 @@ onMounted(loadDetail);
           :actions="formalHeaderActions"
           :badges="formalHeaderBadges"
           :metrics="teamMetricItems"
-          :note="teamProfile.internalNote || '未填写'"
+          :note="internalNoteDisplay"
           :note-metrics="formalHeaderNoteMetrics"
           :stages="arrangementStages"
           :title="formState.productName || '未命名产品'"

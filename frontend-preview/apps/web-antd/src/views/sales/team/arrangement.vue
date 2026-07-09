@@ -522,10 +522,18 @@ const product = computed(() => detail.value?.product);
 const content = computed(() => detail.value?.content);
 const teamItineraryDays = computed(() => detail.value?.itineraryDays || []);
 const orders = computed(() => detail.value?.orders || []);
-const orderOptions = computed<SelectOption[]>(() => [
-  ...orders.value
+const orderOptions = computed<SelectOption[]>(() => {
+  const uniqueOptions = new Map<string, SelectOption>();
+  const addOption = (value?: number | string, label?: string) => {
+    if (value === undefined || value === null) return;
+    const key = String(value);
+    if (!uniqueOptions.has(key)) {
+      uniqueOptions.set(key, { label: label || `订单${key}`, value: key });
+    }
+  };
+  orders.value
     .filter((item) => item.orderRole !== 'merge_source')
-    .map((item) => {
+    .forEach((item) => {
       const customerText = item.orderInfo || item.guestName || '未命名订单';
       const contactText = item.orderInfo ? item.guestName : '';
       const bookingText = item.bookingInfo;
@@ -537,12 +545,18 @@ const orderOptions = computed<SelectOption[]>(() => [
         bookingText,
         guestText,
       ].filter(Boolean).join(' / ');
-      return {
-        label,
-        value: String(item.id),
-      };
-    }),
-]);
+      addOption(item.id, label);
+      (item.sourceOrderInfos || []).forEach((source) => {
+        addOption(source.orderId, [
+          '来源订单',
+          source.summary,
+          source.orderId ? `订单${source.orderId}` : '',
+          guestText,
+        ].filter(Boolean).join(' / '));
+      });
+    });
+  return [...uniqueOptions.values()];
+});
 const pageTitle = computed(() => (team.value?.teamNo ? `团队安排 - ${team.value.teamNo}` : '团队安排'));
 const teamDisplayName = computed(() => product.value?.productName || team.value?.teamNo || '--');
 const orderReceivable = computed(() => numericMoney(teamArrangementSummary.value?.orderReceivableAmount));
@@ -2519,7 +2533,7 @@ onMounted(async () => {
           :actions="formalHeaderActions"
           :badges="formalHeaderBadges"
           :metrics="formalHeaderMetrics"
-          :note="content?.internalRemark || '未填写'"
+          :note="content?.internalRemark || DEFAULT_INTERNAL_REMARK_TEMPLATE"
           :note-metrics="formalHeaderNoteMetrics"
           :stages="arrangementStages"
           :title="teamDisplayName"

@@ -43,6 +43,10 @@ public class SalesBookingOrderChargeLineEntity extends TenantSoftDeleteEntity {
     @TableField("quantity")
     private BigDecimal quantity;
 
+    /** 是否占用团队人数名额，原始价格行使用。 */
+    @TableField("occupy_seat")
+    private Boolean occupySeat;
+
     /** 金额。原始价格为单价乘数量，应收变更按正负号保存。 */
     @TableField("amount")
     private BigDecimal amount;
@@ -133,6 +137,14 @@ public class SalesBookingOrderChargeLineEntity extends TenantSoftDeleteEntity {
 
     public void setQuantity(BigDecimal quantity) {
         this.quantity = quantity;
+    }
+
+    public Boolean getOccupySeat() {
+        return occupySeat;
+    }
+
+    public void setOccupySeat(Boolean occupySeat) {
+        this.occupySeat = occupySeat;
     }
 
     public BigDecimal getAmount() {

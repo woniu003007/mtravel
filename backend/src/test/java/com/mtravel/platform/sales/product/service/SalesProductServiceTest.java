@@ -110,6 +110,7 @@ class SalesProductServiceTest {
         assertThat(response.id()).isEqualTo(88L);
         verify(productMapper).insert(productCaptor.capture());
         assertThat(productCaptor.getValue().getProductName()).isEqualTo("苏州园林二日游");
+        assertThat(productCaptor.getValue().getProductScope()).isEqualTo("template");
         assertThat(productCaptor.getValue().getTripType()).isEqualTo("daily");
         verify(itineraryMapper).insert(itineraryCaptor.capture());
         assertThat(itineraryCaptor.getValue().getProductId()).isEqualTo(88L);

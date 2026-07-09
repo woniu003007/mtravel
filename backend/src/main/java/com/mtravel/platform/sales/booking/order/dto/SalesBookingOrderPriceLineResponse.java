@@ -12,6 +12,7 @@ public record SalesBookingOrderPriceLineResponse(
         String itemName,
         BigDecimal unitPrice,
         BigDecimal quantity,
+        Boolean occupySeat,
         BigDecimal subtotalAmount,
         String remark
 ) {
@@ -23,6 +24,7 @@ public record SalesBookingOrderPriceLineResponse(
                 entity.getItemName(),
                 entity.getUnitPrice(),
                 entity.getQuantity(),
+                entity.getOccupySeat(),
                 entity.getAmount(),
                 entity.getRemark()
         );

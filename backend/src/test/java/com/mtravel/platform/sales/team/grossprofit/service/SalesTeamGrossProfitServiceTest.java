@@ -65,13 +65,14 @@ class SalesTeamGrossProfitServiceTest {
 
         SalesTeamGrossProfitPreviewResponse preview = service.preview(253683L, 1L);
 
-        assertThat(preview.summary().orderIncome()).isEqualByComparingTo("131826.00");
+        assertThat(preview.summary().orderIncome()).isEqualByComparingTo("131828.00");
         assertThat(preview.summary().regularCost()).isEqualByComparingTo("26776.36");
         assertThat(preview.summary().optionalProfit()).isEqualByComparingTo("38600.00");
         assertThat(preview.summary().shoppingProfit()).isEqualByComparingTo("2500.00");
         assertThat(preview.summary().guideFee()).isEqualByComparingTo("0.00");
-        assertThat(preview.summary().grossProfit()).isEqualByComparingTo("146149.64");
-        assertThat(preview.incomeRows()).hasSize(3);
+        assertThat(preview.summary().grossProfit()).isEqualByComparingTo("146151.64");
+        assertThat(preview.team().guestCount()).isEqualTo(42);
+        assertThat(preview.incomeRows()).hasSize(4);
         assertThat(preview.costRows()).hasSize(4);
         assertThat(preview.optionalRows()).hasSize(1);
         assertThat(preview.shoppingRows()).hasSize(1);

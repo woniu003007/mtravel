@@ -10,7 +10,8 @@ import org.apache.ibatis.annotations.Select;
 /**
  * 收客订单主表 Mapper。
  *
- * <p>除 BaseMapper 能力外，团队人数统计使用聚合 SQL，一次性按团队汇总已确认订单的有效游客数。</p>
+ * <p>除 BaseMapper 能力外，团队人数统计使用聚合 SQL，一次性按团队汇总已确认订单的有效游客数。
+ * 历史 merge_source 订单按老系统复测口径仍参与来源团队人数统计。</p>
  */
 @Mapper
 public interface SalesBookingOrderMapper extends BaseMapper<SalesBookingOrderEntity> {
@@ -30,7 +31,7 @@ public interface SalesBookingOrderMapper extends BaseMapper<SalesBookingOrderEnt
              AND o.id = g.order_id
              AND o.is_deleted = false
              AND o.status = 'confirmed'
-             AND COALESCE(o.order_role, 'normal') IN ('normal', 'merge_child')
+             AND COALESCE(o.order_role, 'normal') IN ('normal', 'merge_child', 'merge_source')
             WHERE g.tenant_id = #{tenantId}
               AND g.team_id = #{teamId}
               AND g.is_deleted = false
@@ -40,8 +41,7 @@ public interface SalesBookingOrderMapper extends BaseMapper<SalesBookingOrderEnt
     /**
      * 查询团队操作页可见订单列表。
      *
-     * <p>列表要显示拼团来源留痕订单，方便按旧系统追溯“拼团订单信息”；人数和收入统计仍由
-     * sumGuestCountByTeam 等统计查询过滤 merge_source，避免重复计入来源团。</p>
+     * <p>列表要显示拼团来源留痕订单，方便按旧系统追溯“拼团订单信息”。</p>
      */
     @Select("""
             SELECT *

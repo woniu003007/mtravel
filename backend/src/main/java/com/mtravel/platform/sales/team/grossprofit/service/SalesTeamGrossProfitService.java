@@ -445,7 +445,8 @@ public class SalesTeamGrossProfitService {
                 || Objects.equals(status, SalesBookingOrderStatus.CONFIRMED.value());
         String role = StringUtils.hasText(order.getOrderRole()) ? order.getOrderRole() : SalesBookingOrderRole.NORMAL.value();
         boolean activeRole = Objects.equals(role, SalesBookingOrderRole.NORMAL.value())
-                || Objects.equals(role, SalesBookingOrderRole.MERGE_CHILD.value());
+                || Objects.equals(role, SalesBookingOrderRole.MERGE_CHILD.value())
+                || Objects.equals(role, SalesBookingOrderRole.MERGE_SOURCE.value());
         return activeStatus && activeRole;
     }
 

@@ -22,6 +22,8 @@ import com.mtravel.platform.finance.shopping.entity.FinanceShoppingSettlementEnt
 import com.mtravel.platform.finance.shopping.mapper.FinanceShoppingSettlementMapper;
 import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderEntity;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderMapper;
+import com.mtravel.platform.sales.ordertransfer.entity.SalesOrderTransferLogEntity;
+import com.mtravel.platform.sales.ordertransfer.mapper.SalesOrderTransferLogMapper;
 import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
 import com.mtravel.platform.sales.team.mapper.SalesTeamMapper;
 import java.lang.reflect.Constructor;
@@ -59,6 +61,7 @@ class DispatchTeamArrangementServiceTest {
                 DispatchTeamArrangementSectionStatusMapper.class,
                 SalesTeamMapper.class,
                 SalesBookingOrderMapper.class,
+                SalesOrderTransferLogMapper.class,
                 DispatchTeamGuideMapper.class,
                 FinanceShoppingSettlementMapper.class
         );
@@ -266,6 +269,46 @@ class DispatchTeamArrangementServiceTest {
     }
 
     @Test
+    void saveShouldAllowTargetTeamCostAllocationToMergedSourceOrder() {
+        DispatchTeamArrangementMapper arrangementMapper = mock(DispatchTeamArrangementMapper.class);
+        DispatchTeamArrangementOrderAllocationMapper allocationMapper = mock(DispatchTeamArrangementOrderAllocationMapper.class);
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesOrderTransferLogMapper transferLogMapper = mock(SalesOrderTransferLogMapper.class);
+        DispatchTeamArrangementService service = service(
+                arrangementMapper,
+                mock(DispatchTeamArrangementPriceLineMapper.class),
+                allocationMapper,
+                mock(DispatchTeamArrangementFlowRecordMapper.class),
+                orderMapper,
+                mock(DispatchTeamArrangementSectionStatusMapper.class),
+                mock(DispatchTeamGuideMapper.class),
+                transferLogMapper,
+                null
+        );
+        SalesOrderTransferLogEntity relation = new SalesOrderTransferLogEntity();
+        relation.setSourceOrderId(101L);
+        relation.setSourceTeamId(11L);
+        relation.setTargetTeamId(21L);
+        relation.setChildOrderId(301L);
+        SalesBookingOrderEntity sourceOrder = order(101L, 2);
+        sourceOrder.setTeamId(11L);
+        when(orderMapper.selectList(any(Wrapper.class))).thenReturn(List.of(), List.of(sourceOrder));
+        when(transferLogMapper.selectList(any(Wrapper.class))).thenReturn(List.of(relation));
+        when(arrangementMapper.insert(any(DispatchTeamArrangementEntity.class))).thenAnswer(assignId(9601L));
+        ArgumentCaptor<DispatchTeamArrangementOrderAllocationEntity> allocationCaptor =
+                ArgumentCaptor.forClass(DispatchTeamArrangementOrderAllocationEntity.class);
+
+        service.save(21L, shoppingRequest(), 1L, "dispatcher");
+
+        verify(allocationMapper).insert(allocationCaptor.capture());
+        DispatchTeamArrangementOrderAllocationEntity allocation = allocationCaptor.getValue();
+        assertThat(allocation.getAllocationScope()).isEqualTo("order");
+        assertThat(allocation.getOrderId()).isEqualTo(101L);
+        assertThat(allocation.getCustomerName()).isEqualTo("客户101");
+        assertThat(allocation.getGuestCount()).isEqualTo(2);
+    }
+
+    @Test
     void deleteShouldRejectArrangementWithFlowRecords() {
         DispatchTeamArrangementMapper arrangementMapper = mock(DispatchTeamArrangementMapper.class);
         DispatchTeamArrangementFlowRecordMapper flowMapper = mock(DispatchTeamArrangementFlowRecordMapper.class);
@@ -375,14 +418,14 @@ class DispatchTeamArrangementServiceTest {
 
         TeamArrangementSummaryResponse summary = service.summary(21L, 1L);
 
-        assertThat(summary.orderReceivableAmount()).isEqualByComparingTo("1500.00");
+        assertThat(summary.orderReceivableAmount()).isEqualByComparingTo("2499.00");
         assertThat(summary.orderReceivedAmount()).isEqualByComparingTo("900.00");
-        assertThat(summary.orderBalanceAmount()).isEqualByComparingTo("600.00");
+        assertThat(summary.orderBalanceAmount()).isEqualByComparingTo("1599.00");
         assertThat(summary.regularCostAmount()).isEqualByComparingTo("900.00");
         assertThat(summary.optionalCompanyProfitAmount()).isEqualByComparingTo("320.00");
         assertThat(summary.shoppingCompanyProfitAmount()).isEqualByComparingTo("80.00");
         assertThat(summary.guideFeeAmount()).isEqualByComparingTo("0.00");
-        assertThat(summary.budgetProfitAmount()).isEqualByComparingTo("1000.00");
+        assertThat(summary.budgetProfitAmount()).isEqualByComparingTo("1999.00");
         assertThat(summary.costColumns())
                 .filteredOn(item -> "traffic".equals(item.key()))
                 .singleElement()
@@ -527,6 +570,30 @@ class DispatchTeamArrangementServiceTest {
             DispatchTeamGuideMapper guideMapper,
             FinanceShoppingSettlementMapper shoppingSettlementMapper
     ) {
+        return service(
+                arrangementMapper,
+                priceLineMapper,
+                allocationMapper,
+                flowMapper,
+                orderMapper,
+                sectionStatusMapper,
+                guideMapper,
+                mock(SalesOrderTransferLogMapper.class),
+                shoppingSettlementMapper
+        );
+    }
+
+    private DispatchTeamArrangementService service(
+            DispatchTeamArrangementMapper arrangementMapper,
+            DispatchTeamArrangementPriceLineMapper priceLineMapper,
+            DispatchTeamArrangementOrderAllocationMapper allocationMapper,
+            DispatchTeamArrangementFlowRecordMapper flowMapper,
+            SalesBookingOrderMapper orderMapper,
+            DispatchTeamArrangementSectionStatusMapper sectionStatusMapper,
+            DispatchTeamGuideMapper guideMapper,
+            SalesOrderTransferLogMapper transferLogMapper,
+            FinanceShoppingSettlementMapper shoppingSettlementMapper
+    ) {
         SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
         SalesTeamEntity team = new SalesTeamEntity();
         team.setId(21L);
@@ -550,6 +617,7 @@ class DispatchTeamArrangementServiceTest {
                 sectionStatusMapper,
                 teamMapper,
                 orderMapper,
+                transferLogMapper,
                 guideMapper,
                 shoppingSettlementMapper
         );

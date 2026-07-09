@@ -9,9 +9,11 @@ import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderGuestEnt
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderChargeLineMapper;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderGuestMapper;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderMapper;
+import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferMergeItemRequest;
 import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferMergeRequest;
 import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferMoveRequest;
 import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferRemarkRequest;
+import com.mtravel.platform.sales.ordertransfer.dto.SalesOrderTransferMergeResult;
 import com.mtravel.platform.sales.ordertransfer.entity.SalesOrderTransferLogEntity;
 import com.mtravel.platform.sales.ordertransfer.mapper.SalesOrderTransferLogMapper;
 import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
@@ -41,7 +43,152 @@ import static org.mockito.Mockito.when;
 class SalesOrderTransferServiceTest {
 
     @Test
-    void mergeOrdersShouldMergeMultipleSourceOrdersToOneTargetTeam() {
+    void mergeOrdersShouldCreateMatrixChildrenAndKeepSourceOrdersWithOldSystemAmountRules() {
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
+        SalesBookingOrderGuestMapper guestMapper = mock(SalesBookingOrderGuestMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesOrderTransferLogMapper logMapper = mock(SalesOrderTransferLogMapper.class);
+        SalesOrderTransferService service = new SalesOrderTransferService(
+                orderMapper,
+                chargeLineMapper,
+                guestMapper,
+                teamMapper,
+                mock(SalesTeamPriceMapper.class),
+                logMapper
+        );
+        SalesTeamEntity sourceTeam = team(1001L, "CS-SP-BK-260625A");
+        SalesTeamEntity targetTeam = team(1002L, "CS-SP-BK-260626A");
+        SalesTeamEntity targetTeam2 = team(1003L, "CS-SP-BK-260627A");
+        SalesBookingOrderEntity sourceOrder = order(2001L, 1001L, "SO-260625-001");
+        sourceOrder.setTravelDescription("宁波方特二日游");
+        SalesBookingOrderEntity sourceOrder2 = order(2002L, 1001L, "SO-260625-002");
+        sourceOrder2.setTravelDescription("宁波方特二日游");
+        sourceOrder2.setAdultCount(1);
+        sourceOrder2.setGuestCount(1);
+        sourceOrder2.setReceivableAmount(new BigDecimal("3000.00"));
+        sourceOrder2.setReceivedAmount(new BigDecimal("300.00"));
+        sourceOrder2.setBalanceAmount(new BigDecimal("2700.00"));
+        SalesBookingOrderGuestEntity guest1 = guest(sourceOrder, 501L, "李四", "adult");
+        SalesBookingOrderGuestEntity guest2 = guest(sourceOrder, 502L, "王五", "adult");
+        SalesBookingOrderGuestEntity guest3 = guest(sourceOrder2, 503L, "赵六", "adult");
+        when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(
+                sourceTeam,
+                targetTeam,
+                targetTeam2,
+                sourceTeam,
+                targetTeam,
+                targetTeam2
+        );
+        when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(sourceOrder, sourceOrder2);
+        when(guestMapper.selectList(any(Wrapper.class))).thenReturn(List.of(guest1, guest2), List.of(guest3));
+        when(logMapper.selectCompletedMergeBySourceOrders(1L, List.of(2001L, 2002L))).thenReturn(List.of());
+        when(orderMapper.sumGuestCountByTeam(1L, 1001L)).thenReturn(3);
+        when(orderMapper.sumGuestCountByTeam(1L, 1002L)).thenReturn(3);
+        when(orderMapper.sumGuestCountByTeam(1L, 1003L)).thenReturn(3);
+        AtomicLong childId = new AtomicLong(3000L);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            SalesBookingOrderEntity child = invocation.getArgument(0);
+            child.setId(childId.incrementAndGet());
+            return 1;
+        }).when(orderMapper).insert(any(SalesBookingOrderEntity.class));
+
+        SalesOrderTransferMergeResult result = service.mergeOrders(
+                1001L,
+                new SalesOrderTransferMergeRequest(
+                        List.of(2001L, 2002L),
+                        List.of(1002L, 1003L),
+                        true,
+                        "统一备注",
+                        List.of(
+                                new SalesOrderTransferMergeItemRequest(2001L, 1002L, "目标团备注", BigDecimal.ZERO, "成人"),
+                                new SalesOrderTransferMergeItemRequest(2002L, 1002L, null, BigDecimal.ZERO, "成人"),
+                                new SalesOrderTransferMergeItemRequest(2001L, 1003L, null, new BigDecimal("1000.00"), "成人"),
+                                new SalesOrderTransferMergeItemRequest(2002L, 1003L, null, new BigDecimal("500.00"), "儿童")
+                        ),
+                        List.of()
+                ),
+                1L,
+                "admin"
+        );
+
+        assertThat(result.createdCount()).isEqualTo(4);
+        assertThat(result.skippedCount()).isZero();
+        ArgumentCaptor<SalesBookingOrderEntity> childCaptor = ArgumentCaptor.forClass(SalesBookingOrderEntity.class);
+        verify(orderMapper, org.mockito.Mockito.times(4)).insert(childCaptor.capture());
+        List<SalesBookingOrderEntity> children = childCaptor.getAllValues();
+        assertThat(children).extracting(SalesBookingOrderEntity::getTeamId).containsExactly(1002L, 1002L, 1003L, 1003L);
+        assertThat(children).extracting(SalesBookingOrderEntity::getOrderNo)
+                .containsExactly(
+                        "SO-260625-001-PT-CS-SP-BK-260626A",
+                        "SO-260625-002-PT-CS-SP-BK-260626A",
+                        "SO-260625-001-PT-CS-SP-BK-260627A",
+                        "SO-260625-002-PT-CS-SP-BK-260627A"
+                );
+        assertThat(children).extracting(SalesBookingOrderEntity::getOriginalOrderInfo)
+                .containsExactly(
+                        "[四]2026-06-25 宁波方特二日游 杭州百缘旅行社",
+                        "[四]2026-06-25 宁波方特二日游 杭州百缘旅行社",
+                        "[四]2026-06-25 宁波方特二日游 杭州百缘旅行社",
+                        "[四]2026-06-25 宁波方特二日游 杭州百缘旅行社"
+                );
+        assertThat(children).extracting(SalesBookingOrderEntity::getOrderRole)
+                .containsExactly("merge_child", "merge_child", "merge_child", "merge_child");
+        assertThat(children).extracting(SalesBookingOrderEntity::getGuestCount).containsExactly(2, 1, 2, 1);
+        assertThat(children).extracting(SalesBookingOrderEntity::getAdultCount).containsExactly(2, 1, 2, 1);
+        assertThat(children).extracting(SalesBookingOrderEntity::getReceivableAmount)
+                .containsExactly(new BigDecimal("0.00"), new BigDecimal("0.00"), new BigDecimal("2000.00"), new BigDecimal("500.00"));
+        assertThat(children).extracting(SalesBookingOrderEntity::getReceivedAmount)
+                .containsExactly(new BigDecimal("0.00"), new BigDecimal("0.00"), new BigDecimal("0.00"), new BigDecimal("0.00"));
+        assertThat(children).extracting(SalesBookingOrderEntity::getBalanceAmount)
+                .containsExactly(new BigDecimal("0.00"), new BigDecimal("0.00"), new BigDecimal("2000.00"), new BigDecimal("500.00"));
+        verify(orderMapper, never()).update(any(SalesBookingOrderEntity.class), any(UpdateWrapper.class));
+        verify(chargeLineMapper, never()).selectList(any(Wrapper.class));
+
+        ArgumentCaptor<SalesBookingOrderChargeLineEntity> chargeCaptor = ArgumentCaptor.forClass(SalesBookingOrderChargeLineEntity.class);
+        verify(chargeLineMapper, org.mockito.Mockito.times(4)).insert(chargeCaptor.capture());
+        assertThat(chargeCaptor.getAllValues()).extracting(SalesBookingOrderChargeLineEntity::getOrderId)
+                .containsExactly(3001L, 3002L, 3003L, 3004L);
+        assertThat(chargeCaptor.getAllValues()).extracting(SalesBookingOrderChargeLineEntity::getTeamId)
+                .containsExactly(1002L, 1002L, 1003L, 1003L);
+        assertThat(chargeCaptor.getAllValues()).extracting(SalesBookingOrderChargeLineEntity::getLineType)
+                .containsExactly("adult", "adult", "adult", "child");
+        assertThat(chargeCaptor.getAllValues()).extracting(SalesBookingOrderChargeLineEntity::getUnitPrice)
+                .containsExactly(new BigDecimal("0.00"), new BigDecimal("0.00"), new BigDecimal("1000.00"), new BigDecimal("500.00"));
+        assertThat(chargeCaptor.getAllValues()).extracting(SalesBookingOrderChargeLineEntity::getQuantity)
+                .containsExactly(new BigDecimal("2.00"), new BigDecimal("1.00"), new BigDecimal("2.00"), new BigDecimal("1.00"));
+        assertThat(chargeCaptor.getAllValues()).extracting(SalesBookingOrderChargeLineEntity::getAmount)
+                .containsExactly(new BigDecimal("0.00"), new BigDecimal("0.00"), new BigDecimal("2000.00"), new BigDecimal("500.00"));
+
+        ArgumentCaptor<SalesBookingOrderGuestEntity> guestCaptor = ArgumentCaptor.forClass(SalesBookingOrderGuestEntity.class);
+        verify(guestMapper, org.mockito.Mockito.times(6)).insert(guestCaptor.capture());
+        assertThat(guestCaptor.getAllValues()).extracting(SalesBookingOrderGuestEntity::getOrderId)
+                .containsExactly(3001L, 3001L, 3002L, 3003L, 3003L, 3004L);
+        assertThat(guestCaptor.getAllValues()).extracting(SalesBookingOrderGuestEntity::getTeamId)
+                .containsExactly(1002L, 1002L, 1002L, 1003L, 1003L, 1003L);
+        assertThat(guestCaptor.getAllValues()).extracting(SalesBookingOrderGuestEntity::getGuestName)
+                .containsExactly("李四", "王五", "赵六", "李四", "王五", "赵六");
+
+        ArgumentCaptor<SalesOrderTransferLogEntity> logCaptor = ArgumentCaptor.forClass(SalesOrderTransferLogEntity.class);
+        verify(logMapper, org.mockito.Mockito.times(4)).insert(logCaptor.capture());
+        assertThat(logCaptor.getAllValues()).extracting(SalesOrderTransferLogEntity::getTransferType)
+                .containsExactly("merge", "merge", "merge", "merge");
+        assertThat(logCaptor.getAllValues()).extracting(SalesOrderTransferLogEntity::getSourceOrderId)
+                .containsExactly(2001L, 2002L, 2001L, 2002L);
+        assertThat(logCaptor.getAllValues()).extracting(SalesOrderTransferLogEntity::getTargetTeamId)
+                .containsExactly(1002L, 1002L, 1003L, 1003L);
+        assertThat(logCaptor.getAllValues()).extracting(SalesOrderTransferLogEntity::getChildOrderId)
+                .containsExactly(3001L, 3002L, 3003L, 3004L);
+        assertThat(logCaptor.getAllValues()).extracting(SalesOrderTransferLogEntity::getRemark)
+                .containsExactly("目标团备注", "统一备注", "统一备注", "统一备注");
+
+        ArgumentCaptor<SalesTeamEntity> teamCaptor = ArgumentCaptor.forClass(SalesTeamEntity.class);
+        verify(teamMapper, org.mockito.Mockito.times(3)).update(teamCaptor.capture(), any(UpdateWrapper.class));
+        assertThat(teamCaptor.getAllValues()).extracting(SalesTeamEntity::getUsedSeats).containsExactly(3, 3, 3);
+    }
+
+    @Test
+    void mergeOrdersShouldPriceAndCopyPeopleBySourceOccupiedSeats() {
         SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
         SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
         SalesBookingOrderGuestMapper guestMapper = mock(SalesBookingOrderGuestMapper.class);
@@ -58,110 +205,50 @@ class SalesOrderTransferServiceTest {
         SalesTeamEntity sourceTeam = team(1001L, "CS-SP-BK-260625A");
         SalesTeamEntity targetTeam = team(1002L, "CS-SP-BK-260626A");
         SalesBookingOrderEntity sourceOrder = order(2001L, 1001L, "SO-260625-001");
-        sourceOrder.setTravelDescription("宁波方特二日游");
-        SalesBookingOrderEntity sourceOrder2 = order(2002L, 1001L, "SO-260625-002");
-        sourceOrder2.setTravelDescription("宁波方特二日游");
-        sourceOrder2.setAdultCount(1);
-        sourceOrder2.setGuestCount(1);
-        sourceOrder2.setReceivableAmount(new BigDecimal("3000.00"));
-        sourceOrder2.setReceivedAmount(new BigDecimal("300.00"));
-        sourceOrder2.setBalanceAmount(new BigDecimal("2700.00"));
-        SalesBookingOrderGuestEntity guest1 = guest(sourceOrder, 501L, "李四", "adult");
-        SalesBookingOrderGuestEntity guest2 = guest(sourceOrder, 502L, "王五", "adult");
-        SalesBookingOrderGuestEntity guest3 = guest(sourceOrder2, 503L, "赵六", "adult");
-        when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(
-                sourceTeam,
-                targetTeam,
-                sourceTeam,
-                targetTeam
-        );
-        when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(sourceOrder, sourceOrder2);
-        when(guestMapper.selectList(any(Wrapper.class))).thenReturn(List.of(guest1, guest2), List.of(guest3));
-        when(chargeLineMapper.selectList(any(Wrapper.class))).thenReturn(List.of(chargeLine(sourceOrder)), List.of(chargeLine(sourceOrder2)));
-        when(orderMapper.update(any(SalesBookingOrderEntity.class), any(UpdateWrapper.class))).thenReturn(1);
-        when(orderMapper.sumGuestCountByTeam(1L, 1001L)).thenReturn(0);
-        when(orderMapper.sumGuestCountByTeam(1L, 1002L)).thenReturn(3);
-        AtomicLong childId = new AtomicLong(3000L);
+        sourceOrder.setGuestCount(1);
+        sourceOrder.setAdultCount(1);
+        sourceOrder.setChildCount(0);
+        SalesBookingOrderGuestEntity adult = guest(sourceOrder, 501L, "李四", "adult");
+        SalesBookingOrderGuestEntity child = guest(sourceOrder, 502L, "王五", "child");
+        when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(sourceTeam, targetTeam, sourceTeam, targetTeam);
+        when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(sourceOrder);
+        when(logMapper.selectCompletedMergeBySourceOrders(1L, List.of(2001L))).thenReturn(List.of());
+        when(guestMapper.selectList(any(Wrapper.class))).thenReturn(List.of(adult, child));
+        when(orderMapper.sumGuestCountByTeam(1L, 1001L)).thenReturn(2);
+        when(orderMapper.sumGuestCountByTeam(1L, 1002L)).thenReturn(2);
         org.mockito.Mockito.doAnswer(invocation -> {
-            SalesBookingOrderEntity child = invocation.getArgument(0);
-            child.setId(childId.incrementAndGet());
+            SalesBookingOrderEntity childOrder = invocation.getArgument(0);
+            childOrder.setId(3001L);
             return 1;
         }).when(orderMapper).insert(any(SalesBookingOrderEntity.class));
 
-        service.mergeOrders(
+        SalesOrderTransferMergeResult result = service.mergeOrders(
                 1001L,
                 new SalesOrderTransferMergeRequest(
-                        List.of(2001L, 2002L),
-                        1002L,
-                        true,
-                        "统一备注",
-                        List.of(new SalesOrderTransferRemarkRequest(2001L, 1002L, "目标团备注"))
+                        List.of(2001L),
+                        List.of(1002L),
+                        false,
+                        "",
+                        List.of(new SalesOrderTransferMergeItemRequest(2001L, 1002L, "按占位人数计价", new BigDecimal("1000.00"), "成人")),
+                        List.of()
                 ),
                 1L,
                 "admin"
         );
 
+        assertThat(result.createdCount()).isEqualTo(1);
         ArgumentCaptor<SalesBookingOrderEntity> childCaptor = ArgumentCaptor.forClass(SalesBookingOrderEntity.class);
-        verify(orderMapper, org.mockito.Mockito.times(2)).insert(childCaptor.capture());
-        List<SalesBookingOrderEntity> children = childCaptor.getAllValues();
-        assertThat(children).extracting(SalesBookingOrderEntity::getTeamId).containsExactly(1002L, 1002L);
-        assertThat(children).extracting(SalesBookingOrderEntity::getOrderNo)
-                .containsExactly("SO-260625-001-PT-CS-SP-BK-260626A", "SO-260625-002-PT-CS-SP-BK-260626A");
-        assertThat(children).extracting(SalesBookingOrderEntity::getOriginalOrderInfo)
-                .containsExactly(
-                        "[四]2026-06-25 宁波方特二日游 杭州百缘旅行社",
-                        "[四]2026-06-25 宁波方特二日游 杭州百缘旅行社"
-                );
-        assertThat(children).extracting(SalesBookingOrderEntity::getOrderRole)
-                .containsExactly("merge_child", "merge_child");
-        assertThat(children).extracting(SalesBookingOrderEntity::getGuestCount).containsExactly(2, 1);
-        assertThat(children).extracting(SalesBookingOrderEntity::getAdultCount).containsExactly(2, 1);
-        assertThat(children).extracting(SalesBookingOrderEntity::getReceivableAmount)
-                .containsExactly(new BigDecimal("6000.00"), new BigDecimal("3000.00"));
-        assertThat(children).extracting(SalesBookingOrderEntity::getReceivedAmount)
-                .containsExactly(new BigDecimal("0.00"), new BigDecimal("0.00"));
-        assertThat(children).extracting(SalesBookingOrderEntity::getBalanceAmount)
-                .containsExactly(new BigDecimal("6000.00"), new BigDecimal("3000.00"));
-
-        ArgumentCaptor<SalesBookingOrderEntity> orderUpdateCaptor = ArgumentCaptor.forClass(SalesBookingOrderEntity.class);
-        verify(orderMapper, org.mockito.Mockito.times(2)).update(orderUpdateCaptor.capture(), any(UpdateWrapper.class));
-        assertThat(orderUpdateCaptor.getAllValues()).extracting(SalesBookingOrderEntity::getOrderRole)
-                .containsExactly("merge_source", "merge_source");
+        verify(orderMapper).insert(childCaptor.capture());
+        assertThat(childCaptor.getValue().getGuestCount()).isEqualTo(1);
+        assertThat(childCaptor.getValue().getAdultCount()).isEqualTo(1);
+        assertThat(childCaptor.getValue().getChildCount()).isZero();
+        assertThat(childCaptor.getValue().getReceivableAmount()).isEqualByComparingTo("1000.00");
+        assertThat(childCaptor.getValue().getBalanceAmount()).isEqualByComparingTo("1000.00");
 
         ArgumentCaptor<SalesBookingOrderChargeLineEntity> chargeCaptor = ArgumentCaptor.forClass(SalesBookingOrderChargeLineEntity.class);
-        verify(chargeLineMapper, org.mockito.Mockito.times(2)).insert(chargeCaptor.capture());
-        assertThat(chargeCaptor.getAllValues()).extracting(SalesBookingOrderChargeLineEntity::getOrderId)
-                .containsExactly(3001L, 3002L);
-        assertThat(chargeCaptor.getAllValues()).extracting(SalesBookingOrderChargeLineEntity::getTeamId)
-                .containsExactly(1002L, 1002L);
-        assertThat(chargeCaptor.getAllValues()).extracting(SalesBookingOrderChargeLineEntity::getAmount)
-                .containsExactly(new BigDecimal("6000.00"), new BigDecimal("3000.00"));
-
-        ArgumentCaptor<SalesBookingOrderGuestEntity> guestCaptor = ArgumentCaptor.forClass(SalesBookingOrderGuestEntity.class);
-        verify(guestMapper, org.mockito.Mockito.times(3)).insert(guestCaptor.capture());
-        assertThat(guestCaptor.getAllValues()).extracting(SalesBookingOrderGuestEntity::getOrderId)
-                .containsExactly(3001L, 3001L, 3002L);
-        assertThat(guestCaptor.getAllValues()).extracting(SalesBookingOrderGuestEntity::getTeamId)
-                .containsExactly(1002L, 1002L, 1002L);
-        assertThat(guestCaptor.getAllValues()).extracting(SalesBookingOrderGuestEntity::getGuestName)
-                .containsExactly("李四", "王五", "赵六");
-
-        ArgumentCaptor<SalesOrderTransferLogEntity> logCaptor = ArgumentCaptor.forClass(SalesOrderTransferLogEntity.class);
-        verify(logMapper, org.mockito.Mockito.times(2)).insert(logCaptor.capture());
-        assertThat(logCaptor.getAllValues()).extracting(SalesOrderTransferLogEntity::getTransferType)
-                .containsExactly("merge", "merge");
-        assertThat(logCaptor.getAllValues()).extracting(SalesOrderTransferLogEntity::getSourceOrderId)
-                .containsExactly(2001L, 2002L);
-        assertThat(logCaptor.getAllValues()).extracting(SalesOrderTransferLogEntity::getTargetTeamId)
-                .containsExactly(1002L, 1002L);
-        assertThat(logCaptor.getAllValues()).extracting(SalesOrderTransferLogEntity::getChildOrderId)
-                .containsExactly(3001L, 3002L);
-        assertThat(logCaptor.getAllValues()).extracting(SalesOrderTransferLogEntity::getRemark)
-                .containsExactly("目标团备注", "统一备注");
-
-        ArgumentCaptor<SalesTeamEntity> teamCaptor = ArgumentCaptor.forClass(SalesTeamEntity.class);
-        verify(teamMapper, org.mockito.Mockito.times(2)).update(teamCaptor.capture(), any(UpdateWrapper.class));
-        assertThat(teamCaptor.getAllValues()).extracting(SalesTeamEntity::getUsedSeats).containsExactly(0, 3);
+        verify(chargeLineMapper).insert(chargeCaptor.capture());
+        assertThat(chargeCaptor.getValue().getQuantity()).isEqualByComparingTo("1.00");
+        assertThat(chargeCaptor.getValue().getAmount()).isEqualByComparingTo("1000.00");
     }
 
     @Test
@@ -179,9 +266,10 @@ class SalesOrderTransferServiceTest {
                 1001L,
                 new SalesOrderTransferMergeRequest(
                         List.of(2001L),
-                        1001L,
+                        List.of(1001L),
                         false,
                         "",
+                        List.of(),
                         List.of()
                 ),
                 1L,
@@ -212,9 +300,10 @@ class SalesOrderTransferServiceTest {
                 1001L,
                 new SalesOrderTransferMergeRequest(
                         List.of(2001L),
-                        1002L,
+                        List.of(1002L),
                         false,
                         "",
+                        List.of(),
                         List.of()
                 ),
                 1L,
@@ -228,40 +317,161 @@ class SalesOrderTransferServiceTest {
     }
 
     @Test
-    void mergeOrdersShouldRejectAlreadyMergedSourceOrder() {
+    void mergeOrdersShouldAllowHistoricalMergeSourceOrderToMergeToAnotherTargetTeam() {
         SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
+        SalesBookingOrderGuestMapper guestMapper = mock(SalesBookingOrderGuestMapper.class);
         SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesOrderTransferLogMapper logMapper = mock(SalesOrderTransferLogMapper.class);
         SalesOrderTransferService service = new SalesOrderTransferService(
                 orderMapper,
-                mock(SalesBookingOrderChargeLineMapper.class),
-                mock(SalesBookingOrderGuestMapper.class),
+                chargeLineMapper,
+                guestMapper,
                 teamMapper,
                 mock(SalesTeamPriceMapper.class),
-                mock(SalesOrderTransferLogMapper.class)
+                logMapper
         );
         SalesTeamEntity sourceTeam = team(1001L, "CS-SP-BK-260625A");
         SalesTeamEntity targetTeam = team(1002L, "CS-SP-BK-260626A");
         SalesBookingOrderEntity sourceOrder = order(2001L, 1001L, "SO-260625-001");
         sourceOrder.setOrderRole("merge_source");
-        when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(sourceTeam, targetTeam);
+        when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(sourceTeam, targetTeam, sourceTeam, targetTeam);
         when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(sourceOrder);
+        when(guestMapper.selectList(any(Wrapper.class))).thenReturn(List.of(guest(sourceOrder)));
+        when(logMapper.selectCompletedMergeBySourceOrders(1L, List.of(2001L))).thenReturn(List.of());
+        when(orderMapper.sumGuestCountByTeam(1L, 1001L)).thenReturn(2);
+        when(orderMapper.sumGuestCountByTeam(1L, 1002L)).thenReturn(2);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            SalesBookingOrderEntity child = invocation.getArgument(0);
+            child.setId(3001L);
+            return 1;
+        }).when(orderMapper).insert(any(SalesBookingOrderEntity.class));
 
-        assertThatThrownBy(() -> service.mergeOrders(
+        SalesOrderTransferMergeResult result = service.mergeOrders(
                 1001L,
                 new SalesOrderTransferMergeRequest(
                         List.of(2001L),
-                        1002L,
+                        List.of(1002L),
                         false,
                         "",
+                        List.of(new SalesOrderTransferMergeItemRequest(2001L, 1002L, "", BigDecimal.ZERO, "成人")),
                         List.of()
                 ),
                 1L,
                 "admin"
-        ))
-                .isInstanceOf(BizException.class)
-                .hasMessage("该订单已执行过拼团，不能重复拼团");
+        );
 
-        verify(orderMapper, never()).insert(any(SalesBookingOrderEntity.class));
+        assertThat(result.createdCount()).isEqualTo(1);
+        verify(orderMapper).insert(any(SalesBookingOrderEntity.class));
+        verify(orderMapper, never()).update(any(SalesBookingOrderEntity.class), any(UpdateWrapper.class));
+    }
+
+    @Test
+    void mergeOrdersShouldSkipDuplicateSourceTargetPairAndContinueOtherTargets() {
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
+        SalesBookingOrderGuestMapper guestMapper = mock(SalesBookingOrderGuestMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesOrderTransferLogMapper logMapper = mock(SalesOrderTransferLogMapper.class);
+        SalesOrderTransferService service = new SalesOrderTransferService(
+                orderMapper,
+                chargeLineMapper,
+                guestMapper,
+                teamMapper,
+                mock(SalesTeamPriceMapper.class),
+                logMapper
+        );
+        SalesTeamEntity sourceTeam = team(1001L, "CS-SP-BK-260625A");
+        SalesTeamEntity duplicatedTarget = team(1002L, "CS-SP-BK-260626A");
+        SalesTeamEntity newTarget = team(1003L, "CS-SP-BK-260627A");
+        SalesBookingOrderEntity sourceOrder = order(2001L, 1001L, "SO-260625-001");
+        SalesOrderTransferLogEntity existing = new SalesOrderTransferLogEntity();
+        existing.setSourceOrderId(2001L);
+        existing.setTargetTeamId(1002L);
+        existing.setChildOrderId(3000L);
+        when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(sourceTeam, duplicatedTarget, newTarget, sourceTeam, newTarget);
+        when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(sourceOrder);
+        when(logMapper.selectCompletedMergeBySourceOrders(1L, List.of(2001L))).thenReturn(List.of(existing));
+        when(guestMapper.selectList(any(Wrapper.class))).thenReturn(List.of(guest(sourceOrder)));
+        when(orderMapper.sumGuestCountByTeam(1L, 1001L)).thenReturn(2);
+        when(orderMapper.sumGuestCountByTeam(1L, 1003L)).thenReturn(2);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            SalesBookingOrderEntity child = invocation.getArgument(0);
+            child.setId(3001L);
+            return 1;
+        }).when(orderMapper).insert(any(SalesBookingOrderEntity.class));
+
+        SalesOrderTransferMergeResult result = service.mergeOrders(
+                1001L,
+                new SalesOrderTransferMergeRequest(
+                        List.of(2001L),
+                        List.of(1002L, 1003L),
+                        false,
+                        "",
+                        List.of(
+                                new SalesOrderTransferMergeItemRequest(2001L, 1002L, "重复", BigDecimal.ZERO, "成人"),
+                                new SalesOrderTransferMergeItemRequest(2001L, 1003L, "新拼", BigDecimal.ZERO, "成人")
+                        ),
+                        List.of()
+                ),
+                1L,
+                "admin"
+        );
+
+        assertThat(result.createdCount()).isEqualTo(1);
+        assertThat(result.skippedCount()).isEqualTo(1);
+        verify(orderMapper).insert(any(SalesBookingOrderEntity.class));
+        ArgumentCaptor<SalesOrderTransferLogEntity> logCaptor = ArgumentCaptor.forClass(SalesOrderTransferLogEntity.class);
+        verify(logMapper).insert(logCaptor.capture());
+        assertThat(logCaptor.getValue().getTargetTeamId()).isEqualTo(1003L);
+    }
+
+    @Test
+    void mergeOrdersShouldSupportGlobalOrderManageEntryWithoutCurrentTeamId() {
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
+        SalesBookingOrderGuestMapper guestMapper = mock(SalesBookingOrderGuestMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesOrderTransferLogMapper logMapper = mock(SalesOrderTransferLogMapper.class);
+        SalesOrderTransferService service = new SalesOrderTransferService(
+                orderMapper,
+                chargeLineMapper,
+                guestMapper,
+                teamMapper,
+                mock(SalesTeamPriceMapper.class),
+                logMapper
+        );
+        SalesTeamEntity sourceTeam = team(1001L, "CS-SP-BK-260625A");
+        SalesTeamEntity targetTeam = team(1002L, "CS-SP-BK-260626A");
+        SalesBookingOrderEntity sourceOrder = order(2001L, 1001L, "SO-260625-001");
+        when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(targetTeam, sourceTeam, sourceTeam, targetTeam);
+        when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(sourceOrder);
+        when(logMapper.selectCompletedMergeBySourceOrders(1L, List.of(2001L))).thenReturn(List.of());
+        when(guestMapper.selectList(any(Wrapper.class))).thenReturn(List.of(guest(sourceOrder)));
+        when(orderMapper.sumGuestCountByTeam(1L, 1001L)).thenReturn(2);
+        when(orderMapper.sumGuestCountByTeam(1L, 1002L)).thenReturn(2);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            SalesBookingOrderEntity child = invocation.getArgument(0);
+            child.setId(3001L);
+            return 1;
+        }).when(orderMapper).insert(any(SalesBookingOrderEntity.class));
+
+        SalesOrderTransferMergeResult result = service.mergeOrders(
+                null,
+                new SalesOrderTransferMergeRequest(
+                        List.of(2001L),
+                        List.of(1002L),
+                        false,
+                        "",
+                        List.of(new SalesOrderTransferMergeItemRequest(2001L, 1002L, "全局入口", BigDecimal.ZERO, "成人")),
+                        List.of()
+                ),
+                1L,
+                "admin"
+        );
+
+        assertThat(result.createdCount()).isEqualTo(1);
+        verify(orderMapper).insert(any(SalesBookingOrderEntity.class));
     }
 
     @Test
@@ -287,9 +497,10 @@ class SalesOrderTransferServiceTest {
                 1001L,
                 new SalesOrderTransferMergeRequest(
                         List.of(2001L),
-                        1002L,
+                        List.of(1002L),
                         false,
                         "",
+                        List.of(),
                         List.of()
                 ),
                 1L,
@@ -325,9 +536,10 @@ class SalesOrderTransferServiceTest {
                 1001L,
                 new SalesOrderTransferMergeRequest(
                         List.of(2001L),
-                        1002L,
+                        List.of(1002L),
                         false,
                         "",
+                        List.of(),
                         List.of()
                 ),
                 1L,

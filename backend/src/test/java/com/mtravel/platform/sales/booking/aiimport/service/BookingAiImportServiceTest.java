@@ -110,6 +110,37 @@ class BookingAiImportServiceTest {
     }
 
     @Test
+    void recognizeShouldExtractWechatGuestsWithGenderPhoneAndIdCard() {
+        BookingAiImportService service = new BookingAiImportService(
+                new LocalBookingImportParser(new IdCardValidator()),
+                new BailianAiModelClient(null, "qwen-plus", "qwen-vl-ocr-latest")
+        );
+        String text = """
+                张伟 男 13816280011 310101199001015031
+                李娜 女 13816280012 310101199203085024
+                王强 男 13816280013 310104198811126515
+                赵敏 女 13816280014 310105199507216026
+                周杰 男 13905180021 320102198906185017
+                孙悦 女 13905180022 320104199408095028
+                吴磊 男 13757100031 330102199112236519
+                """;
+
+        var response = service.recognize(new BookingAiImportRequest(text, null, null), 1L, "admin");
+
+        assertThat(response.guests()).hasSize(7);
+        assertThat(response.guests()).extracting("name")
+                .containsExactly("张伟", "李娜", "王强", "赵敏", "周杰", "孙悦", "吴磊");
+        assertThat(response.guests()).extracting("phone")
+                .containsExactly("13816280011", "13816280012", "13816280013", "13816280014",
+                        "13905180021", "13905180022", "13757100031");
+        assertThat(response.guests()).extracting("certificateNo")
+                .containsExactly("310101199001015031", "310101199203085024", "310104198811126515",
+                        "310105199507216026", "320102198906185017", "320104199408095028", "330102199112236519");
+        assertThat(response.guestSummary().guestCount()).isEqualTo(7);
+        assertThat(response.guestSummary().suspectedMissingCount()).isZero();
+    }
+
+    @Test
     void recognizeShouldExtractBracketedGuestsFromDocConfirmationText() {
         BookingAiImportService service = new BookingAiImportService(
                 new LocalBookingImportParser(new IdCardValidator()),

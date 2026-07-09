@@ -38,6 +38,7 @@ import {
   recognizeBookingAiImport,
 } from '#/api/sales/booking-ai-import';
 import BusinessSearchForm from '#/components/business/BusinessSearchForm.vue';
+import MergeOrderModal from '../components/MergeOrderModal.vue';
 
 type DatePickerValue = Dayjs | string | undefined;
 type DateRangeValue = [string, string] | undefined;
@@ -46,6 +47,7 @@ type BooleanFilterValue = 'false' | 'true' | undefined;
 const router = useRouter();
 const tableLoading = ref(false);
 const advancedSearchOpen = ref(false);
+const mergeDialogOpen = ref(false);
 const selectedOrderIds = ref<number[]>([]);
 const orderRows = ref<SalesBookingApi.OrderManageRow[]>([]);
 const total = ref(0);
@@ -121,11 +123,16 @@ const departureDateRange = computed<DateRangeValue>({
 });
 
 const rowSelection = computed(() => ({
+  getCheckboxProps: (record: SalesBookingApi.OrderManageRow) => ({
+    disabled: !canMergeOrder(record),
+    title: canMergeOrder(record) ? '' : transferDisabledReason(record),
+  }),
   selectedRowKeys: selectedOrderIds.value,
   onChange: (keys: Array<number | string>) => {
     selectedOrderIds.value = keys.map((key) => Number(key));
   },
 }));
+const selectedMergeOrders = computed(() => orderRows.value.filter((item) => selectedOrderIds.value.includes(item.id)));
 
 const aiImportOpen = ref(false);
 const aiImportLoading = ref(false);
@@ -262,7 +269,39 @@ function openMergeGroup() {
     message.warning('请先选择订单');
     return;
   }
-  message.info('全局订单管理拼团操作待接入，请进入团队操作页执行拼团');
+  const invalidOrder = selectedMergeOrders.value.find((item) => !canMergeOrder(item));
+  if (invalidOrder) {
+    message.warning(transferDisabledReason(invalidOrder));
+    selectedOrderIds.value = selectedOrderIds.value.filter((id) => {
+      const order = orderRows.value.find((item) => item.id === id);
+      return order ? canMergeOrder(order) : false;
+    });
+    return;
+  }
+  mergeDialogOpen.value = true;
+}
+
+async function handleMergeSuccess() {
+  selectedOrderIds.value = [];
+  await loadOrderPage();
+}
+
+function canMergeOrder(record: SalesBookingApi.OrderManageRow) {
+  return !isCancelledOrder(record) && !isMergeChildOrder(record);
+}
+
+function isCancelledOrder(record: SalesBookingApi.OrderManageRow) {
+  return record.statusValue === 'cancelled' || record.status === '已取消' || record.status === 'cancelled';
+}
+
+function isMergeChildOrder(record: SalesBookingApi.OrderManageRow) {
+  return record.orderRole === 'merge_child';
+}
+
+function transferDisabledReason(record: SalesBookingApi.OrderManageRow) {
+  if (isCancelledOrder(record)) return '已取消订单不能拼团';
+  if (isMergeChildOrder(record)) return '拼入订单不能再次拼团';
+  return '';
 }
 
 function openOrderFile(record: SalesBookingApi.OrderManageRow) {
@@ -580,6 +619,12 @@ function sampleImportText() {
         </template>
       </Table>
     </Card>
+
+    <MergeOrderModal
+      v-model:open="mergeDialogOpen"
+      :orders="selectedMergeOrders"
+      @success="handleMergeSuccess"
+    />
 
     <Drawer
       v-model:open="aiImportOpen"

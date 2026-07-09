@@ -23,6 +23,10 @@ public class SalesTeamEntity extends TenantSoftDeleteEntity {
     @TableField("team_no")
     private String teamNo;
 
+    /** 团队展示名称，直接建团和团队列表以该字段为准。 */
+    @TableField("team_name")
+    private String teamName;
+
     /** 团队类型，团期管理默认 sanpin。 */
     @TableField("team_type")
     private String teamType;
@@ -109,6 +113,14 @@ public class SalesTeamEntity extends TenantSoftDeleteEntity {
 
     public void setTeamNo(String teamNo) {
         this.teamNo = teamNo;
+    }
+
+    public String getTeamName() {
+        return teamName;
+    }
+
+    public void setTeamName(String teamName) {
+        this.teamName = teamName;
     }
 
     public String getTeamType() {

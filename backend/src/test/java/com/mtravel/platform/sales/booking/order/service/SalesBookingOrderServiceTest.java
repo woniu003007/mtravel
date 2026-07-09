@@ -100,6 +100,9 @@ class SalesBookingOrderServiceTest {
         assertThat(savedOrder.getSourceDistrict()).isEqualTo("余杭区");
         assertThat(savedOrder.getHotelInfo()).contains("双床");
         assertThat(savedOrder.getStatus()).isEqualTo("confirmed");
+        assertThat(savedOrder.getGuestCount()).isEqualTo(3);
+        assertThat(savedOrder.getAdultCount()).isEqualTo(1);
+        assertThat(savedOrder.getChildCount()).isEqualTo(1);
 
         ArgumentCaptor<SalesBookingOrderChargeLineEntity> chargeCaptor = ArgumentCaptor.forClass(SalesBookingOrderChargeLineEntity.class);
         verify(chargeLineMapper, org.mockito.Mockito.times(2)).insert(chargeCaptor.capture());
@@ -107,6 +110,8 @@ class SalesBookingOrderServiceTest {
                 .containsExactly("base_price", "base_price");
         assertThat(chargeCaptor.getAllValues()).extracting(SalesBookingOrderChargeLineEntity::getLineType)
                 .containsExactly("adult", "surcharge");
+        assertThat(chargeCaptor.getAllValues()).extracting(SalesBookingOrderChargeLineEntity::getOccupySeat)
+                .containsExactly(true, false);
         assertThat(chargeCaptor.getAllValues()).extracting(SalesBookingOrderChargeLineEntity::getAmount)
                 .containsExactly(new BigDecimal("9000.00"), new BigDecimal("540.00"));
 
@@ -456,6 +461,31 @@ class SalesBookingOrderServiceTest {
     }
 
     @Test
+    void operationRowsShouldShowOccupySeatTotalAndRealGuestTypeCounts() {
+        SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
+        SalesBookingOrderService service = new SalesBookingOrderService(
+                mock(SalesBookingOrderMapper.class),
+                chargeLineMapper,
+                mock(SalesBookingOrderGuestMapper.class),
+                mock(SalesTeamMapper.class)
+        );
+        SalesBookingOrderEntity order = existingOrder(2001L);
+        order.setGuestCount(3);
+        order.setAdultCount(1);
+        order.setChildCount(2);
+        order.setChildNoBedCount(0);
+        order.setSeniorCount(0);
+        when(chargeLineMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                chargeLine(order, "adult", "成人", "980", "3", "2940", 1)
+        ));
+
+        var rows = service.toOperationRows(List.of(order));
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).guestCountText()).isEqualTo("3人[1/2/0]");
+    }
+
+    @Test
     void operationRowsShouldShowMergeTargetInfoForSourceOrder() {
         SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
         SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
@@ -495,6 +525,46 @@ class SalesBookingOrderServiceTest {
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0).orderRole()).isEqualTo("merge_source");
         assertThat(rows.get(0).orderRoleLabel()).isEqualTo("已拼出");
+        assertThat(rows.get(0).mergeOrderInfos()).hasSize(1);
+        assertThat(rows.get(0).mergeOrderInfos().get(0).orderId()).isEqualTo(3001L);
+        assertThat(rows.get(0).mergeOrderInfos().get(0).teamId()).isEqualTo(1002L);
+        assertThat(rows.get(0).mergeOrderInfos().get(0).summary()).contains("CS-SP-BK-260626A");
+    }
+
+    @Test
+    void operationRowsShouldShowMergeTargetInfoForNormalSourceOrderAfterOldSystemAlignedMerge() {
+        SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesOrderTransferLogMapper transferLogMapper = mock(SalesOrderTransferLogMapper.class);
+        SalesBookingOrderService service = new SalesBookingOrderService(
+                mock(SalesBookingOrderMapper.class),
+                chargeLineMapper,
+                mock(SalesBookingOrderGuestMapper.class),
+                teamMapper,
+                new com.mtravel.platform.sales.booking.aiimport.service.IdCardValidator(),
+                null,
+                null,
+                transferLogMapper
+        );
+        SalesBookingOrderEntity sourceOrder = existingOrder(2001L);
+        sourceOrder.setOrderRole("normal");
+        sourceOrder.setOrderNo("SO-260625-0001");
+        SalesOrderTransferLogEntity log = new SalesOrderTransferLogEntity();
+        log.setTenantId(1L);
+        log.setSourceOrderId(2001L);
+        log.setSourceTeamId(1001L);
+        log.setTargetTeamId(1002L);
+        log.setChildOrderId(3001L);
+        SalesTeamEntity targetTeam = team(1002L, 30, 3, 27);
+        targetTeam.setTeamNo("CS-SP-BK-260626A");
+        when(chargeLineMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(transferLogMapper.selectCompletedMergeBySourceOrders(1L, List.of(2001L))).thenReturn(List.of(log));
+        when(teamMapper.selectList(any(Wrapper.class))).thenReturn(List.of(targetTeam));
+
+        var rows = service.toOperationRows(List.of(sourceOrder));
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).orderRole()).isEqualTo("normal");
         assertThat(rows.get(0).mergeOrderInfos()).hasSize(1);
         assertThat(rows.get(0).mergeOrderInfos().get(0).orderId()).isEqualTo(3001L);
         assertThat(rows.get(0).mergeOrderInfos().get(0).teamId()).isEqualTo(1002L);
@@ -786,7 +856,7 @@ class SalesBookingOrderServiceTest {
                 List.of(normalOrder, mergeChildOrder, mergeSourceOrder, cancelledOrder)
         );
 
-        assertThat(summary).isEqualTo("张三[Tel:13800138000]、李四");
+        assertThat(summary).isEqualTo("张三[Tel:13800138000]、李四、来源领队[Tel:13600136000]");
     }
 
     @Test
@@ -868,6 +938,7 @@ class SalesBookingOrderServiceTest {
         line.setItemName(itemName);
         line.setUnitPrice(new BigDecimal(unitPrice));
         line.setQuantity(new BigDecimal(quantity));
+        line.setOccupySeat("adult".equals(lineType) || "child".equals(lineType) || "senior".equals(lineType) || "escort".equals(lineType));
         line.setAmount(new BigDecimal(amount));
         line.setStatus("effective");
         line.setSortOrder(sortOrder);
@@ -925,6 +996,7 @@ class SalesBookingOrderServiceTest {
                         "成人",
                         new BigDecimal("3000.00"),
                         new BigDecimal("3"),
+                        true,
                         "成人价"
                 ), new SalesBookingOrderPriceLineRequest(
                         null,
@@ -932,6 +1004,7 @@ class SalesBookingOrderServiceTest {
                         "附加费",
                         new BigDecimal("180.00"),
                         new BigDecimal("3"),
+                        false,
                         "按占位游客数量自动计入"
                 )),
                 List.of(

@@ -11,13 +11,11 @@ import {
   DatePicker,
   Empty,
   Form,
-  Input,
   InputNumber,
   Radio,
   Select,
   Modal,
   Spin,
-  Tabs,
   Table,
   Tag,
   Textarea,
@@ -37,12 +35,12 @@ import { getEnterpriseEmployeeAll } from '#/api/enterprise/employee';
 import {
   getSalesTeamOperationDetail,
   getSalesTeamPage,
-  mergeSalesTeamOrders,
   moveSalesTeamOrders,
   saveSalesTeam,
 } from '#/api/sales/team';
 
 import FormalTeamPageHeader from '../components/FormalTeamPageHeader.vue';
+import MergeOrderModal from '../components/MergeOrderModal.vue';
 import ShoppingReconciliationModal from '../components/ShoppingReconciliationModal.vue';
 
 import '../team-arrangement-layout.css';
@@ -55,7 +53,6 @@ type TeamListItem = SalesTeamApi.ListItem;
 type DictItem = ProductDictionaryNamespace.Item;
 type ProfileEditorType = 'business_type' | 'department' | 'escort' | 'internal_note' | 'operator' | 'team_type';
 type SelectOption = { id?: number; label: string; value: string };
-type DateRangeValue = [string, string] | undefined;
 
 const DEFAULT_INTERNAL_REMARK_TEMPLATE = [
   '>导游要求：',
@@ -80,11 +77,6 @@ const shoppingReconciliationOpen = ref(false);
 const shoppingReconciliationTeamId = ref<number>();
 const detail = ref<OperationDetail>();
 const selectedOrderKeys = ref<number[]>([]);
-const mergeActiveTab = ref('team');
-const mergeTargetTeams = ref<TeamListItem[]>([]);
-const mergeTargetTeamTotal = ref(0);
-const mergeTargetTeamPage = ref(1);
-const mergeTargetTeamPageSize = ref(10);
 const businessTypeOptions = ref<SelectOption[]>([]);
 const departmentOptions = ref<SelectOption[]>([]);
 const employeeOptions = ref<SelectOption[]>([]);
@@ -99,17 +91,6 @@ const profileForm = reactive({
   perCapitaPitAmount: 0,
   perCapitaShoppingAmount: 0,
   teamType: 'sanpin' as SalesTeamApi.TeamType,
-});
-const mergeForm = reactive({
-  remark: '',
-  tagFlag: false,
-  targetTeamId: undefined as number | undefined,
-});
-const mergeTeamSearchForm = reactive({
-  customerKeyword: '',
-  dateRange: undefined as DateRangeValue,
-  keyword: '',
-  travelDays: undefined as number | undefined,
 });
 const moveForm = reactive({
   allNum: 30,
@@ -174,18 +155,6 @@ const orderColumns: TableColumnsType<OrderRow> = [
   { align: 'center', dataIndex: 'status', key: 'status', title: '状态', width: 88 },
   { align: 'center', fixed: 'right', key: 'operation', title: '操作', width: 92 },
 ];
-const mergeTeamColumns: TableColumnsType<TeamListItem> = [
-  { align: 'center', dataIndex: 'teamType', key: 'teamType', title: '类型', width: 76 },
-  { dataIndex: 'teamNo', key: 'teamNo', title: '团号', width: 170 },
-  { dataIndex: 'productName', key: 'productName', title: '团队名称', width: 430 },
-  { align: 'center', dataIndex: 'travelDays', key: 'travelDays', title: '天数', width: 72 },
-  { align: 'center', dataIndex: 'departureDate', key: 'departureDate', title: '开始', width: 96 },
-  { align: 'center', dataIndex: 'endDate', key: 'endDate', title: '结束', width: 96 },
-  { align: 'center', dataIndex: 'departurePlace', key: 'departurePlace', title: '出发地', width: 96 },
-  { align: 'center', key: 'seats', title: '预控/实收/余位', width: 138 },
-  { align: 'center', dataIndex: 'progress', key: 'progress', title: '进度', width: 82 },
-];
-
 const teamId = computed(() => Number(route.params.id || 0));
 const team = computed(() => detail.value?.team);
 const product = computed(() => detail.value?.product);
@@ -226,23 +195,6 @@ const activeProfileOptions = computed(() => {
   return [];
 });
 const selectedMergeOrders = computed(() => orders.value.filter((item) => selectedOrderKeys.value.includes(item.id)));
-const selectedMergeTargetTeam = computed(() => (
-  mergeTargetTeams.value.find((item) => item.id === mergeForm.targetTeamId)
-));
-const mergeTeamPagination = computed(() => ({
-  current: mergeTargetTeamPage.value,
-  pageSize: mergeTargetTeamPageSize.value,
-  showSizeChanger: true,
-  showTotal: (total: number) => `共${total}条记录`,
-  total: mergeTargetTeamTotal.value,
-}));
-const mergeTeamRowSelection = computed(() => ({
-  onChange: (keys: (number | string)[]) => {
-    mergeForm.targetTeamId = keys.length > 0 ? Number(keys[0]) : undefined;
-  },
-  selectedRowKeys: mergeForm.targetTeamId ? [mergeForm.targetTeamId] : [],
-  type: 'radio' as const,
-}));
 const profileBadges = computed(() => [
   { color: 'blue', editorType: 'team_type' as const, label: '团队类型', value: team.value?.teamTypeLabel || '--' },
   { color: 'orange', editorType: 'business_type' as const, label: '业务类型', value: team.value?.businessType || product.value?.businessType || '--' },
@@ -328,34 +280,6 @@ function formatDurationSeconds(value?: number) {
   return `${minutes}分钟`;
 }
 
-function teamTypeLabel(value?: string) {
-  return teamTypeOptions.find((item) => item.value === value)?.label || emptyText(value);
-}
-
-function progressLabel(value?: string) {
-  const labels: Record<string, string> = {
-    cancelled: '已取消',
-    closed: '已关团',
-    departed: '已出团',
-    done: '已完成',
-    not_departed: '未出团',
-    receiving: '收客',
-    stopped: '停收',
-  };
-  return value ? labels[value] || value : '--';
-}
-
-function seatSummary(record: TeamListItem) {
-  const total = record.totalSeats ?? 0;
-  const used = record.usedSeats ?? 0;
-  const remaining = record.remainingSeats ?? Math.max(0, total - used);
-  return `${total}/${used}/${remaining}`;
-}
-
-function asTeamListItem(record: Record<string, any>): TeamListItem {
-  return record as TeamListItem;
-}
-
 function asOrderRow(record: Record<string, any>): OrderRow {
   return record as OrderRow;
 }
@@ -422,12 +346,11 @@ function isMergeChildOrder(record: OrderRow) {
 }
 
 function canTransferOrder(record: OrderRow) {
-  return !isCancelledOrder(record) && !isMergeSourceOrder(record) && !isMergeChildOrder(record);
+  return !isCancelledOrder(record) && !isMergeChildOrder(record);
 }
 
 function transferDisabledReason(record: OrderRow) {
   if (isCancelledOrder(record)) return '已取消订单不能拼团或转团';
-  if (isMergeSourceOrder(record)) return '已拼出订单不能再次拼团或转团';
   if (isMergeChildOrder(record)) return '拼入订单不能再次拼团或转团';
   return '';
 }
@@ -559,63 +482,14 @@ async function loadTargetTeams(keyword = '') {
   }
 }
 
-async function loadMergeTargetTeams() {
-  targetTeamLoading.value = true;
-  try {
-    const [startDate, endDate] = mergeTeamSearchForm.dateRange || [];
-    const result = await getSalesTeamPage({
-      customerKeyword: mergeTeamSearchForm.customerKeyword || undefined,
-      endDate: endDate || undefined,
-      keyword: mergeTeamSearchForm.keyword || undefined,
-      page: mergeTargetTeamPage.value,
-      pageSize: mergeTargetTeamPageSize.value,
-      startDate: startDate || undefined,
-      // 拼团目标团队只显示散拼，和老系统 MergeGroup.aspx 目标团列表保持一致。
-      teamType: 'sanpin',
-      teamStatus: 'not_departed',
-      travelDays: mergeTeamSearchForm.travelDays,
-    });
-    const currentTeamId = team.value?.id;
-    mergeTargetTeams.value = result.items.filter((item: TeamListItem) => item.id !== currentTeamId);
-    mergeTargetTeamTotal.value = result.total;
-  } finally {
-    targetTeamLoading.value = false;
-  }
-}
-
-async function searchMergeTargetTeams() {
-  mergeTargetTeamPage.value = 1;
-  await loadMergeTargetTeams();
-}
-
-async function resetMergeTargetTeamSearch() {
-  mergeTeamSearchForm.customerKeyword = '';
-  mergeTeamSearchForm.dateRange = undefined;
-  mergeTeamSearchForm.keyword = '';
-  mergeTeamSearchForm.travelDays = undefined;
-  mergeTargetTeamPage.value = 1;
-  await loadMergeTargetTeams();
-}
-
-async function handleMergeTeamTableChange(pagination: { current?: number; pageSize?: number }) {
-  mergeTargetTeamPage.value = pagination.current || 1;
-  mergeTargetTeamPageSize.value = pagination.pageSize || 10;
-  await loadMergeTargetTeams();
-}
-
-function selectMergeTargetTeam(record: TeamListItem) {
-  mergeForm.targetTeamId = record.id;
-}
-
 async function openMergeDialog() {
   if (!validateSelectedTransferOrders()) return;
-  mergeForm.targetTeamId = undefined;
-  mergeForm.remark = '';
-  mergeForm.tagFlag = false;
-  mergeActiveTab.value = 'team';
-  mergeTargetTeamPage.value = 1;
   mergeDialogOpen.value = true;
-  await loadMergeTargetTeams();
+}
+
+async function handleMergeSuccess() {
+  selectedOrderKeys.value = [];
+  await loadDetail();
 }
 
 async function openMoveDialog() {
@@ -629,32 +503,6 @@ async function openMoveDialog() {
   moveForm.remark = '';
   moveDialogOpen.value = true;
   await loadTargetTeams();
-}
-
-async function submitMerge() {
-  if (!validateSelectedTransferOrders()) return;
-  if (!mergeForm.targetTeamId) {
-    message.warning('请选择目标团队');
-    return;
-  }
-  if (!team.value?.id) return;
-  transferSubmitting.value = true;
-  try {
-    await mergeSalesTeamOrders(team.value.id, {
-      orderIds: selectedOrderKeys.value,
-      remark: mergeForm.remark || undefined,
-      tagFlag: mergeForm.tagFlag,
-      targetTeamId: mergeForm.targetTeamId,
-    });
-    message.success('拼团完成');
-    mergeDialogOpen.value = false;
-    selectedOrderKeys.value = [];
-    await loadDetail();
-  } catch {
-    // requestClient 已统一弹出后端错误信息，这里阻止 Modal 事件继续产生未处理异常。
-  } finally {
-    transferSubmitting.value = false;
-  }
 }
 
 async function submitMove() {
@@ -900,7 +748,7 @@ onMounted(loadDetail);
           :actions="formalHeaderActions"
           :badges="formalHeaderBadges"
           :metrics="metricItems"
-          :note="content?.internalRemark || '无'"
+          :note="content?.internalRemark || DEFAULT_INTERNAL_REMARK_TEMPLATE"
           :note-metrics="formalHeaderNoteMetrics"
           :stages="formalHeaderStages"
           :title="product?.productName || '未命名团队'"
@@ -1084,153 +932,13 @@ onMounted(loadDetail);
         </section>
       </Card>
     </Spin>
-    <Modal
+    <MergeOrderModal
       v-model:open="mergeDialogOpen"
-      title="拼团操作"
-      width="1120px"
-      destroy-on-close
-      :confirm-loading="transferSubmitting"
-      @ok="submitMerge"
-    >
-      <Tabs v-model:activeKey="mergeActiveTab" class="merge-operation-tabs">
-        <Tabs.TabPane key="team" tab="选择团期">
-          <Form layout="inline" class="merge-team-search-form">
-            <Form.Item>
-              <Input
-                v-model:value="mergeTeamSearchForm.keyword"
-                placeholder="团号/团队名称"
-                allow-clear
-                @press-enter="searchMergeTargetTeams"
-              />
-            </Form.Item>
-            <Form.Item>
-              <Input
-                v-model:value="mergeTeamSearchForm.customerKeyword"
-                placeholder="客户单位"
-                allow-clear
-                @press-enter="searchMergeTargetTeams"
-              />
-            </Form.Item>
-            <Form.Item>
-              <DatePicker.RangePicker
-                v-model:value="mergeTeamSearchForm.dateRange"
-                value-format="YYYY-MM-DD"
-                :placeholder="['出团日期始', '出团日期止']"
-              />
-            </Form.Item>
-            <Form.Item>
-              <InputNumber
-                v-model:value="mergeTeamSearchForm.travelDays"
-                :min="1"
-                :precision="0"
-                placeholder="天数"
-                class="merge-team-days-input"
-              />
-            </Form.Item>
-            <Form.Item>
-              <Button @click="resetMergeTargetTeamSearch">重置</Button>
-            </Form.Item>
-            <Form.Item>
-              <Button type="primary" :loading="targetTeamLoading" @click="searchMergeTargetTeams">
-                <IconifyIcon icon="lucide:search" />
-                <span>搜索</span>
-              </Button>
-            </Form.Item>
-          </Form>
-          <Table
-            :columns="mergeTeamColumns"
-            :data-source="mergeTargetTeams"
-            :loading="targetTeamLoading"
-            :pagination="mergeTeamPagination"
-            :row-selection="mergeTeamRowSelection"
-            :scroll="{ x: 1180, y: 420 }"
-            row-key="id"
-            size="small"
-            class="merge-team-table"
-            @change="handleMergeTeamTableChange"
-            @row="(record: TeamListItem) => ({ onClick: () => selectMergeTargetTeam(record) })"
-          >
-            <template #emptyText>
-              <Empty description="暂无可拼入团队" />
-            </template>
-            <template #bodyCell="{ column, record, text }">
-              <template v-if="column.key === 'teamType'">
-                <Tag color="blue">{{ teamTypeLabel(asTeamListItem(record).teamType) }}</Tag>
-              </template>
-              <template v-else-if="column.key === 'teamNo'">
-                <span class="merge-team-no">{{ emptyText(asTeamListItem(record).teamNo) }}</span>
-              </template>
-              <template v-else-if="column.key === 'productName'">
-                <div class="merge-team-name" :title="emptyText(asTeamListItem(record).productName || asTeamListItem(record).remark)">
-                  {{ emptyText(asTeamListItem(record).productName || asTeamListItem(record).remark) }}
-                </div>
-              </template>
-              <template v-else-if="column.key === 'travelDays'">
-                {{ asTeamListItem(record).travelDays ? `${asTeamListItem(record).travelDays}天` : '--' }}
-              </template>
-              <template v-else-if="column.key === 'departureDate'">
-                {{ formatDate(asTeamListItem(record).departureDate) }}
-              </template>
-              <template v-else-if="column.key === 'endDate'">
-                {{ formatDate(asTeamListItem(record).endDate) }}
-              </template>
-              <template v-else-if="column.key === 'seats'">
-                <span class="merge-team-seats">{{ seatSummary(asTeamListItem(record)) }}</span>
-              </template>
-              <template v-else-if="column.key === 'progress'">
-                {{ progressLabel(asTeamListItem(record).progress) }}
-              </template>
-              <template v-else>
-                {{ emptyText(text) }}
-              </template>
-            </template>
-          </Table>
-        </Tabs.TabPane>
-        <Tabs.TabPane key="operation" tab="拼团操作">
-          <Form layout="vertical" class="transfer-form">
-            <Form.Item label="已选目标团">
-              <div class="merge-selected-target">
-                <template v-if="selectedMergeTargetTeam">
-                  <strong>{{ selectedMergeTargetTeam.teamNo }}</strong>
-                  <span>{{ selectedMergeTargetTeam.productName || selectedMergeTargetTeam.remark || '--' }}</span>
-                </template>
-                <Empty v-else description="请先在选择团期中选择目标团" />
-              </div>
-            </Form.Item>
-            <Form.Item label="已选订单">
-              <div class="merge-selected-orders">
-                <div
-                  v-for="order in selectedMergeOrders"
-                  :key="order.id"
-                  class="merge-selected-order-row"
-                >
-                  <span>{{ order.orderNo || `订单 ${order.id}` }}</span>
-                  <span>{{ order.orderInfo || order.guestName || '--' }}</span>
-                  <span>{{ order.guestCountText || `${order.guestCount ?? 0}人` }}</span>
-                  <span>{{ order.receivableAmount || '--' }}</span>
-                </div>
-                <Empty v-if="selectedMergeOrders.length === 0" description="未选择订单" />
-              </div>
-            </Form.Item>
-            <Form.Item label="标记">
-              <Radio.Group v-model:value="mergeForm.tagFlag">
-                <Radio :value="false">不标记</Radio>
-                <Radio :value="true">标记</Radio>
-              </Radio.Group>
-            </Form.Item>
-            <Form.Item label="备注">
-              <Textarea
-                v-model:value="mergeForm.remark"
-                :rows="3"
-                :maxlength="1000"
-                show-count
-                placeholder="填写拼团备注"
-              />
-            </Form.Item>
-          </Form>
-        </Tabs.TabPane>
-      </Tabs>
-    </Modal>
+      :exclude-team-id="team?.id"
+      :orders="selectedMergeOrders"
+      :source-team-id="team?.id"
+      @success="handleMergeSuccess"
+    />
     <Modal
       v-model:open="moveDialogOpen"
       title="将选择的订单转到其它团队"

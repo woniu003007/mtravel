@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS sales_teams (
   tenant_id bigint NOT NULL REFERENCES tenants(id),
   product_id bigint NOT NULL,
   team_no varchar(80) NOT NULL,
+  team_name varchar(200),
   team_type varchar(20) NOT NULL DEFAULT 'sanpin',
   departure_date date NOT NULL,
   operator_employee_id bigint,
@@ -90,6 +91,76 @@ CREATE INDEX IF NOT EXISTS idx_sales_teams_tenant_deleted_department
 
 CREATE INDEX IF NOT EXISTS idx_sales_teams_tenant_deleted_business
   ON sales_teams (tenant_id, is_deleted, business_type, departure_date);
+
+CREATE INDEX IF NOT EXISTS idx_sales_teams_tenant_deleted_team_name
+  ON sales_teams (tenant_id, is_deleted, team_name);
+
+CREATE TABLE IF NOT EXISTS sales_team_list_summaries (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  team_id bigint NOT NULL,
+  team_no varchar(80) NOT NULL,
+  team_name varchar(200),
+  team_type varchar(20),
+  status varchar(20),
+  departure_date date,
+  end_date date,
+  departure_place varchar(300),
+  travel_days integer,
+  business_type varchar(120),
+  department_name varchar(160),
+  operator_employee_name varchar(100),
+  customer_summary text,
+  salesperson_summary text,
+  guide_summary text,
+  order_status_summary text,
+  total_seats integer NOT NULL DEFAULT 0,
+  used_seats integer NOT NULL DEFAULT 0,
+  remaining_seats integer NOT NULL DEFAULT 0,
+  guide_plan varchar(20) NOT NULL DEFAULT 'none',
+  traffic_plan varchar(20) NOT NULL DEFAULT 'none',
+  hotel_plan varchar(20) NOT NULL DEFAULT 'none',
+  vehicle_plan varchar(20) NOT NULL DEFAULT 'none',
+  scenic_plan varchar(20) NOT NULL DEFAULT 'none',
+  meal_plan varchar(20) NOT NULL DEFAULT 'none',
+  other_plan varchar(20) NOT NULL DEFAULT 'none',
+  optional_plan varchar(20) NOT NULL DEFAULT 'none',
+  shopping_plan varchar(20) NOT NULL DEFAULT 'none',
+  ground_agent_plan varchar(20) NOT NULL DEFAULT 'none',
+  created_by varchar(80),
+  remark text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  is_deleted boolean NOT NULL DEFAULT false,
+  deleted_at timestamptz,
+  deleted_by varchar(64),
+  CONSTRAINT fk_sales_team_list_summaries_team
+    FOREIGN KEY (tenant_id, team_id) REFERENCES sales_teams (tenant_id, id),
+  CONSTRAINT uk_sales_team_list_summaries_tenant_team UNIQUE (tenant_id, team_id)
+);
+
+DROP TRIGGER IF EXISTS trg_sales_team_list_summaries_updated_at ON sales_team_list_summaries;
+CREATE TRIGGER trg_sales_team_list_summaries_updated_at
+BEFORE UPDATE ON sales_team_list_summaries
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_sales_team_summary_main
+  ON sales_team_list_summaries (tenant_id, is_deleted, created_at DESC, team_no);
+
+CREATE INDEX IF NOT EXISTS idx_sales_team_summary_departure_date
+  ON sales_team_list_summaries (tenant_id, is_deleted, departure_date DESC, team_no);
+
+CREATE INDEX IF NOT EXISTS idx_sales_team_summary_type_date
+  ON sales_team_list_summaries (tenant_id, is_deleted, team_type, departure_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_sales_team_summary_status_date
+  ON sales_team_list_summaries (tenant_id, is_deleted, status, departure_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_sales_team_summary_business_date
+  ON sales_team_list_summaries (tenant_id, is_deleted, business_type, departure_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_sales_team_summary_department_date
+  ON sales_team_list_summaries (tenant_id, is_deleted, department_name, departure_date DESC);
 
 CREATE TABLE IF NOT EXISTS sales_team_prices (
   id BIGSERIAL PRIMARY KEY,
@@ -186,6 +257,7 @@ COMMENT ON COLUMN sales_teams.id IS '销售团队主键 ID。';
 COMMENT ON COLUMN sales_teams.tenant_id IS '租户 ID，用于隔离不同地接公司的团队数据。';
 COMMENT ON COLUMN sales_teams.product_id IS '所属销售产品模板 ID。';
 COMMENT ON COLUMN sales_teams.team_no IS '团队编号，按产品、团队类型和发团日期生成。';
+COMMENT ON COLUMN sales_teams.team_name IS '团队展示名称。直接新增团队时保存用户填写名称，列表和拼团选择均以该字段为准。';
 COMMENT ON COLUMN sales_teams.team_type IS '团队类型：散拼、整团、散团或单项。团期管理默认生成散拼团队。';
 COMMENT ON COLUMN sales_teams.business_type IS '团队业务类型快照。默认从产品带入，正式团队可单独调整。';
 COMMENT ON COLUMN sales_teams.departure_date IS '发团日期。';
@@ -211,6 +283,16 @@ COMMENT ON COLUMN sales_teams.updated_at IS '更新时间。';
 COMMENT ON COLUMN sales_teams.is_deleted IS '是否已软删除。';
 COMMENT ON COLUMN sales_teams.deleted_at IS '删除时间。';
 COMMENT ON COLUMN sales_teams.deleted_by IS '删除人账号或名称。';
+
+COMMENT ON TABLE sales_team_list_summaries IS '销售团队列表查询汇总表，提前冗余团队、产品、订单、导游和安排状态摘要，供团队管理列表单表分页搜索。';
+COMMENT ON COLUMN sales_team_list_summaries.team_id IS '所属销售团队 ID。';
+COMMENT ON COLUMN sales_team_list_summaries.team_no IS '团队编号。';
+COMMENT ON COLUMN sales_team_list_summaries.team_name IS '团队展示名称。';
+COMMENT ON COLUMN sales_team_list_summaries.customer_summary IS '客户单位摘要，用于列表展示和客户关键词查询。';
+COMMENT ON COLUMN sales_team_list_summaries.salesperson_summary IS '业务员摘要。';
+COMMENT ON COLUMN sales_team_list_summaries.guide_summary IS '导游姓名和手机号摘要。';
+COMMENT ON COLUMN sales_team_list_summaries.order_status_summary IS '订单状态摘要，用于订单状态筛选。';
+COMMENT ON COLUMN sales_team_list_summaries.guide_plan IS '导游安排状态：none、pending、confirmed。';
 
 COMMENT ON TABLE sales_team_prices IS '销售团队客户类型价格表，保存同一团队下不同客户类型的成人、儿童、老人和附加费价格。';
 COMMENT ON COLUMN sales_team_prices.id IS '团队价格主键 ID。';
