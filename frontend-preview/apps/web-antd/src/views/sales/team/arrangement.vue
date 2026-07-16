@@ -1838,7 +1838,6 @@ async function submitGuideEditDraft() {
   }
   const fields = [
     ['guideFee', guideEditDraft.guideFee],
-    ['imprestAmount', guideEditDraft.imprestAmount],
     ['operationFee', guideEditDraft.operationFee],
     ['startAt', startAt],
     ['endAt', endAt],
@@ -1958,7 +1957,7 @@ async function submitGuideDraft() {
         guideId: selectedGuideId,
         guideMemo: guideDraft.guideMemo?.trim(),
       });
-      message.success('导游安排已保存');
+      message.success('导游安排已保存，可点击“备用金测算”继续');
     }
     guideModalOpen.value = false;
     await loadTeamGuides();
@@ -1966,6 +1965,21 @@ async function submitGuideDraft() {
   } finally {
     guideSaving.value = false;
   }
+}
+
+function guideImprestEntryTooltip() {
+  if (!teamGuides.value.length) return '请先添加导游后再测算备用金';
+  if (teamGuides.value.length > 1) return '本团有多位导游，请在对应导游行测算备用金';
+  return '根据团队现付成本和自费抵扣测算备用金';
+}
+
+async function openGuideImprestEntry() {
+  if (!teamGuides.value.length) return;
+  if (teamGuides.value.length > 1) {
+    message.info('本团有多位导游，请在对应导游行点击“备用金测算”');
+    return;
+  }
+  await openGuideImprestCalculator(teamGuides.value[0]!);
 }
 
 async function saveGuideField(row: TeamGuideRow, field: string, value?: number | string | boolean) {
@@ -2655,6 +2669,17 @@ onMounted(async () => {
               </div>
             </div>
             <div class="arrangement-section-actions">
+              <Tooltip :title="guideImprestEntryTooltip()">
+                <span>
+                  <Button
+                    size="small"
+                    :disabled="!teamGuides.length"
+                    @click="openGuideImprestEntry"
+                  >
+                    备用金测算
+                  </Button>
+                </span>
+              </Tooltip>
               <Button size="small" type="primary" @click="openGuideModal">
                 添加导游
               </Button>
@@ -2711,7 +2736,7 @@ onMounted(async () => {
                         :loading="guideImprestLoading && guideImprestCurrentRecord?.id === record.id"
                         @click="openGuideImprestCalculator(record)"
                       >
-                        计算
+                        备用金测算
                       </Button>
                       <Button size="small" type="link" @click="openGuideImprestRecords(record)">
                         审批记录
@@ -3313,7 +3338,12 @@ onMounted(async () => {
               <InputNumber v-model:value="guideEditDraft.guideFee" class="w-full" :min="0" addon-before="¥" />
             </Form.Item>
             <Form.Item label="计划备用金">
-              <InputNumber v-model:value="guideEditDraft.imprestAmount" class="w-full" :min="0" addon-before="¥" />
+              <Input
+                :value="formatMoney(guideEditDraft.imprestAmount)"
+                disabled
+                class="w-full"
+                title="计划备用金由备用金测算结果写入"
+              />
             </Form.Item>
             <Form.Item label="操作费">
               <InputNumber v-model:value="guideEditDraft.operationFee" class="w-full" :min="0" addon-before="¥" />
@@ -3471,7 +3501,11 @@ onMounted(async () => {
               <InputNumber v-model:value="guideDraft.guideFee" class="w-full" :min="0" addon-before="¥" />
             </Form.Item>
             <Form.Item label="备用金">
-              <InputNumber v-model:value="guideDraft.imprestAmount" class="w-full" :min="0" addon-before="¥" />
+              <Input
+                value="保存导游后进行备用金测算"
+                disabled
+                class="w-full"
+              />
             </Form.Item>
             <Form.Item label="操作费">
               <InputNumber v-model:value="guideDraft.operationFee" class="w-full" :min="0" addon-before="¥" />

@@ -699,6 +699,7 @@ function targetSeatSummary(record: Partial<TeamListItem>) {
 }
 
 .merge-target-group {
+  flex-shrink: 0;
   overflow: hidden;
   background: #fff;
   border: 1px solid #dbe5f2;

@@ -366,6 +366,7 @@ describe('sales team operation layout', () => {
     expect(mergeModalSource).toContain('出发地');
     expect(mergeModalSource).toContain('merge-operation-panel');
     expect(mergeModalSource).toContain('overflow-x: hidden');
+    expect(mergeModalSource).toContain('flex-shrink: 0;');
     expect(mergeModalSource).toContain('拼团备注');
     expect(mergeModalSource).toContain('人数摘要');
     expect(mergeModalSource).toContain('拼团单价');
@@ -526,6 +527,13 @@ describe('sales team operation layout', () => {
     expect(arrangementSource).toContain('guide-time-range');
     expect(arrangementSource).toContain('guide-money-stack');
     expect(arrangementSource).toContain('guide-imprest-inline-actions');
+    expect(arrangementSource).toContain('请先添加导游后再测算备用金');
+    expect(arrangementSource).toContain(':disabled="!teamGuides.length"');
+    expect(arrangementSource).toContain('openGuideImprestEntry');
+    expect(arrangementSource).toContain('备用金测算');
+    expect(arrangementSource).toContain('保存导游后进行备用金测算');
+    expect(arrangementSource).not.toContain('v-model:value="guideDraft.imprestAmount"');
+    expect(arrangementSource).not.toContain('v-model:value="guideEditDraft.imprestAmount"');
     expect(arrangementSource).toContain('guide-remark-summary');
     expect(arrangementSource).toContain('guide-row-actions');
     expect(arrangementSource).toContain('openGuideEditModal(record)');
