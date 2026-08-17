@@ -83,6 +83,8 @@ describe('visible business menu routes', () => {
     expect(allBusinessRoutes).not.toContain("title: '数据统计'");
     expect(allBusinessRoutes).not.toContain("title: '合同模板管理'");
     expect(allBusinessRoutes).not.toContain("title: '接送站管理'");
+    expect(allBusinessRoutes).not.toContain("title: '客户授信规则'");
+    expect(allBusinessRoutes).not.toContain("title: '普通资源报价规则'");
   });
 
   it('does not link dashboard shortcuts to undeveloped pages', () => {
