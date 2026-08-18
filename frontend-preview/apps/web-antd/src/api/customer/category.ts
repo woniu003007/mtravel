@@ -1,10 +1,21 @@
 import { requestClient } from '#/api/request';
 
 export namespace CustomerCategoryApi {
+  export interface ApprovalMember {
+    employeeName?: string;
+    stepOrder?: number;
+    systemUserId: number;
+    username?: string;
+  }
+
   export interface CustomerCategory {
     id: number;
     categoryName: string;
     defaultCreditLimit: number;
+    creditTermDays: number;
+    allowOverLimit: boolean;
+    approvers: ApprovalMember[];
+    ccUsers: ApprovalMember[];
     sortOrder: number;
     status: 'active' | 'disabled';
     createdBy?: string;
@@ -26,7 +37,11 @@ export namespace CustomerCategoryApi {
   }
 
   export interface SaveParams {
+    allowOverLimit?: boolean;
+    approvers?: Pick<ApprovalMember, 'systemUserId'>[];
     categoryName: string;
+    ccUsers?: Pick<ApprovalMember, 'systemUserId'>[];
+    creditTermDays?: number;
     defaultCreditLimit?: number;
     remark?: string;
     sortOrder?: number;
@@ -34,7 +49,9 @@ export namespace CustomerCategoryApi {
   }
 }
 
-export function getCustomerCategoryPage(params: CustomerCategoryApi.QueryParams) {
+export function getCustomerCategoryPage(
+  params: CustomerCategoryApi.QueryParams,
+) {
   return requestClient.get<
     CustomerCategoryApi.PageResult<CustomerCategoryApi.CustomerCategory>
   >('/customer/category/page', { params });

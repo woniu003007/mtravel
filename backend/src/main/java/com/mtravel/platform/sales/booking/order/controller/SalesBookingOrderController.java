@@ -9,6 +9,7 @@ import com.mtravel.platform.sales.booking.order.dto.SalesBookingGuestImportPrevi
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderManageRowResponse;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderResponse;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderSaveRequest;
+import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderSaveResponse;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderTaggingRequest;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingTeamDraftResponse;
 import com.mtravel.platform.sales.booking.order.service.SalesBookingOrderService;
@@ -78,8 +79,7 @@ public class SalesBookingOrderController extends ControllerSupport {
     @OperationLog(module = "销售管理", type = "查询")
     @GetMapping("/team/{teamId}")
     public ApiResponse<SalesBookingTeamDraftResponse> teamDraft(@PathVariable Long teamId) {
-        SalesTeamOperationResponse detail = teamService.operationDetail(teamId, currentTenantId());
-        return ApiResponse.ok(new SalesBookingTeamDraftResponse(detail.team(), detail.product(), detail.content()));
+        return ApiResponse.ok(teamService.bookingTeamDraft(teamId, currentTenantId()));
     }
 
     /**
@@ -178,11 +178,11 @@ public class SalesBookingOrderController extends ControllerSupport {
      *
      * @param request 保存请求
      * @param authentication 当前认证信息
-     * @return 保存后的订单详情
+     * @return 保存后的订单主表摘要
      */
     @OperationLog(module = "销售管理", type = "保存")
     @PostMapping("/save")
-    public ApiResponse<SalesBookingOrderResponse> save(
+    public ApiResponse<SalesBookingOrderSaveResponse> save(
             @Valid @RequestBody SalesBookingOrderSaveRequest request,
             Authentication authentication
     ) {

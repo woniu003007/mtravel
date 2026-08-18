@@ -33,6 +33,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
+    private static final String AGENT_API_PREFIX = "/agent/v1/";
+
     private final JwtService jwtService;
     private final TokenBlacklistService tokenBlacklistService;
     private final SecurityProperties securityProperties;
@@ -57,6 +59,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         this.operationLogService = operationLogService;
         this.authSessionService = authSessionService;
         this.authConfigService = authConfigService;
+    }
+
+    /**
+     * Agent 服务接口使用独立服务令牌认证，不能交给后台用户 JWT 过滤器解析。
+     * 该分支只匹配新增 Agent 路径，不改变任何现有后台接口的认证行为。
+     */
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        return path != null && (path.equals("/agent/v1") || path.startsWith(AGENT_API_PREFIX));
     }
 
     @Override

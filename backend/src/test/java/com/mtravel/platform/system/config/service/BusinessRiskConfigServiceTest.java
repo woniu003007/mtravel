@@ -15,7 +15,7 @@ import static org.mockito.Mockito.when;
 /**
  * 业务风控配置测试。
  *
- * <p>总经理审批开关直接决定收客订单是否被合同到期、授信超限阻断，默认值和持久化必须明确。</p>
+ * <p>客户授信审批开关直接决定收客订单是否被合同到期、授信超限阻断，默认值和持久化必须明确。</p>
  */
 class BusinessRiskConfigServiceTest {
 

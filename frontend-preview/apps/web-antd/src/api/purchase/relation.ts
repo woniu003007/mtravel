@@ -10,6 +10,7 @@ export namespace PurchaseRelationApi {
     | 'scenic'
     | 'shopping'
     | 'ticket'
+    | 'traffic'
     | 'vehicle';
 
   export type Status = 'active' | 'disabled' | 'expired';
@@ -50,6 +51,7 @@ export namespace PurchaseRelationApi {
     resourceId: number;
     supplierId: number;
     groupQuantity?: number;
+    isDefault?: boolean;
     status?: Status;
     remark?: string;
   }

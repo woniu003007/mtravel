@@ -2,6 +2,7 @@ package com.mtravel.platform.sales.booking.aiimport.service;
 
 import com.mtravel.platform.common.BizException;
 import com.mtravel.platform.system.config.service.AiConfigService;
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -14,6 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -45,9 +47,8 @@ class BailianAiModelClientWiringTest {
     void recognizeImageOrDocumentShouldCallBailianVisionApiWithDataUrl() {
         RestTemplate restTemplate = new RestTemplate();
         MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
-        RestTemplateBuilder builder = mock(RestTemplateBuilder.class);
+        RestTemplateBuilder builder = mockBuilder(restTemplate);
         AiConfigService aiConfigService = mock(AiConfigService.class);
-        when(builder.build()).thenReturn(restTemplate);
         when(aiConfigService.rawValue(anyLong(), eq(AiConfigService.BAILIAN_API_KEY))).thenReturn("sk-test");
         when(aiConfigService.rawValue(anyLong(), eq(AiConfigService.BAILIAN_VISION_MODEL))).thenReturn("qwen-vl-ocr-latest");
         BailianAiModelClient client = new BailianAiModelClient("", "qwen-plus", "", aiConfigService, builder);
@@ -76,10 +77,37 @@ class BailianAiModelClientWiringTest {
     }
 
     @Test
-    void recognizeImageOrDocumentShouldRejectMissingApiKeyWithClearMessage() {
-        RestTemplateBuilder builder = mock(RestTemplateBuilder.class);
+    void recognizeShouldRequestExplicitResourceTimeInTheStructuredSchema() {
+        RestTemplate restTemplate = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
+        RestTemplateBuilder builder = mockBuilder(restTemplate);
         AiConfigService aiConfigService = mock(AiConfigService.class);
-        when(builder.build()).thenReturn(new RestTemplate());
+        when(aiConfigService.rawValue(anyLong(), eq(AiConfigService.BAILIAN_API_KEY))).thenReturn("sk-test");
+        when(aiConfigService.rawValue(anyLong(), eq(AiConfigService.BAILIAN_TEXT_MODEL))).thenReturn("qwen-plus");
+        BailianAiModelClient client = new BailianAiModelClient("", "qwen-plus", "", aiConfigService, builder);
+
+        server.expect(requestTo("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(content().string(containsString("\\\"time\\\":\\\"HH:mm|null\\\"")))
+                .andExpect(content().string(containsString("不能根据行程顺序猜测")))
+                .andExpect(content().string(containsString("同一天最多返回一家")))
+                .andExpect(content().string(containsString("绝不能放入 resources")))
+                .andExpect(content().string(containsString("属于 scenic 游览项目")))
+                .andExpect(content().string(containsString("\\\"productDescription\\\"")))
+                .andExpect(content().string(containsString("温馨提醒")))
+                .andExpect(content().string(containsString("特别说明")))
+                .andRespond(withSuccess("""
+                        {"choices":[{"message":{"content":"{\\"resources\\":[]}"}}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        assertThat(client.recognize(1L, "D1 杭州行程")).contains("{\"resources\":[]}");
+        server.verify();
+    }
+
+    @Test
+    void recognizeImageOrDocumentShouldRejectMissingApiKeyWithClearMessage() {
+        RestTemplateBuilder builder = mockBuilder(new RestTemplate());
+        AiConfigService aiConfigService = mock(AiConfigService.class);
         when(aiConfigService.rawValue(anyLong(), eq(AiConfigService.BAILIAN_API_KEY))).thenReturn("");
         BailianAiModelClient client = new BailianAiModelClient("", "qwen-plus", "", aiConfigService, builder);
 
@@ -92,9 +120,8 @@ class BailianAiModelClientWiringTest {
     void recognizeImageOrDocumentShouldReportEmptyBailianContentWithClearMessage() {
         RestTemplate restTemplate = new RestTemplate();
         MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
-        RestTemplateBuilder builder = mock(RestTemplateBuilder.class);
+        RestTemplateBuilder builder = mockBuilder(restTemplate);
         AiConfigService aiConfigService = mock(AiConfigService.class);
-        when(builder.build()).thenReturn(restTemplate);
         when(aiConfigService.rawValue(anyLong(), eq(AiConfigService.BAILIAN_API_KEY))).thenReturn("sk-test");
         when(aiConfigService.rawValue(anyLong(), eq(AiConfigService.BAILIAN_VISION_MODEL))).thenReturn("qwen-vl-ocr-latest");
         BailianAiModelClient client = new BailianAiModelClient("", "qwen-plus", "", aiConfigService, builder);
@@ -111,9 +138,8 @@ class BailianAiModelClientWiringTest {
     void recognizeImageOrDocumentShouldReportBailianRequestFailureWithClearMessage() {
         RestTemplate restTemplate = new RestTemplate();
         MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
-        RestTemplateBuilder builder = mock(RestTemplateBuilder.class);
+        RestTemplateBuilder builder = mockBuilder(restTemplate);
         AiConfigService aiConfigService = mock(AiConfigService.class);
-        when(builder.build()).thenReturn(restTemplate);
         when(aiConfigService.rawValue(anyLong(), eq(AiConfigService.BAILIAN_API_KEY))).thenReturn("sk-test");
         when(aiConfigService.rawValue(anyLong(), eq(AiConfigService.BAILIAN_VISION_MODEL))).thenReturn("qwen-vl-ocr-latest");
         BailianAiModelClient client = new BailianAiModelClient("", "qwen-plus", "", aiConfigService, builder);
@@ -124,5 +150,14 @@ class BailianAiModelClientWiringTest {
                 .isInstanceOf(BizException.class)
                 .hasMessage("百炼视觉/OCR识别调用失败，请检查API Key、模型名称或稍后重试");
         server.verify();
+    }
+
+    /** Mock RestTemplateBuilder 的每一步链式配置，确保测试覆盖实际客户端构造路径。 */
+    private RestTemplateBuilder mockBuilder(RestTemplate restTemplate) {
+        RestTemplateBuilder builder = mock(RestTemplateBuilder.class);
+        when(builder.setConnectTimeout(any(Duration.class))).thenReturn(builder);
+        when(builder.setReadTimeout(any(Duration.class))).thenReturn(builder);
+        when(builder.build()).thenReturn(restTemplate);
+        return builder;
     }
 }

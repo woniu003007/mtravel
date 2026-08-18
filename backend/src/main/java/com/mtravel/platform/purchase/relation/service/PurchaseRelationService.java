@@ -85,6 +85,9 @@ public class PurchaseRelationService extends BusinessCrudService<PurchaseRelatio
         supplierLookup.assertSupplierIfPresent(tenantId, request.supplierId());
         PurchaseResourceEntity resource = resource(tenantId, request.resourceId());
         assertUnique(tenantId, request.resourceId(), request.supplierId(), number(request.groupQuantity()), null);
+        if (Boolean.TRUE.equals(request.isDefault())) {
+            clearOtherDefaultRelations(tenantId, request.resourceId(), null);
+        }
 
         PurchaseRelationEntity entity = new PurchaseRelationEntity();
         entity.setTenantId(tenantId);
@@ -100,6 +103,9 @@ public class PurchaseRelationService extends BusinessCrudService<PurchaseRelatio
         supplierLookup.assertSupplierIfPresent(tenantId, request.supplierId());
         PurchaseResourceEntity resource = resource(tenantId, request.resourceId());
         assertUnique(tenantId, request.resourceId(), request.supplierId(), number(request.groupQuantity()), id);
+        if (Boolean.TRUE.equals(request.isDefault())) {
+            clearOtherDefaultRelations(tenantId, request.resourceId(), id);
+        }
 
         PurchaseRelationEntity entity = new PurchaseRelationEntity();
         applyFields(entity, request, resource);
@@ -121,8 +127,24 @@ public class PurchaseRelationService extends BusinessCrudService<PurchaseRelatio
         entity.setResourceName(resource.getResourceName());
         entity.setSupplierId(request.supplierId());
         entity.setGroupQuantity(number(request.groupQuantity()));
+        entity.setIsDefault(Boolean.TRUE.equals(request.isDefault()));
         entity.setStatus(StringUtils.hasText(request.status()) ? request.status() : "active");
         entity.setRemark(clean(request.remark()));
+    }
+
+    private void clearOtherDefaultRelations(Long tenantId, Long resourceId, Long excludeRelationId) {
+        PurchaseRelationEntity entity = new PurchaseRelationEntity();
+        entity.setIsDefault(Boolean.FALSE);
+        com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<PurchaseRelationEntity> wrapper =
+                new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<PurchaseRelationEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq("resource_id", resourceId)
+                .eq("is_default", true);
+        if (excludeRelationId != null) {
+            wrapper.ne("id", excludeRelationId);
+        }
+        mapper.update(entity, wrapper);
     }
 
     /** 查询同租户未删除资源，采购关系只能绑定真实资源主档。 */

@@ -9,6 +9,7 @@ import {
   ensureSelectOption,
   resolveArrangementResourceName,
   resolveSupplierOptionsForResource,
+  shouldFilterSupplierByResource,
   type SelectOptionWithId,
 } from './arrangement-editor-model';
 
@@ -51,6 +52,13 @@ describe('arrangement editor model helpers', () => {
     );
 
     expect(options).toHaveLength(1);
+  });
+
+  it('filters hotel suppliers through resource relations like scenic and meal resources', () => {
+    expect(shouldFilterSupplierByResource('hotel')).toBe(true);
+    expect(shouldFilterSupplierByResource('scenic')).toBe(true);
+    expect(shouldFilterSupplierByResource('meal')).toBe(true);
+    expect(shouldFilterSupplierByResource('vehicle')).toBe(false);
   });
 
   it('does not force team editor submit button text to add mode when editing', () => {

@@ -1,6 +1,9 @@
 import type { RouteRecordRaw } from 'vue-router';
 
 const ProductFormPage = () => import('#/views/sales/product/form.vue');
+const ProductDesignerFormPage = () => import('#/views/sales/product/designer-form.vue');
+const ProductDesignerListPage = () => import('#/views/sales/product/designer-index.vue');
+const ProductDesignerPage = () => import('#/views/sales/product/designer.vue');
 const ProductPage = () => import('#/views/sales/product/index.vue');
 const ProductSchedulePage = () => import('#/views/sales/product/schedule.vue');
 const ProductTeamArrangementPage = () => import('#/views/sales/product/team-arrangement.vue');
@@ -20,10 +23,14 @@ const routes: RouteRecordRaw[] = [
     redirect: '/sales/product',
     children: [
       { name: 'Product', path: '/sales/product', component: ProductPage, meta: { icon: 'lucide:package', title: '产品管理' } },
+      { name: 'ProductDesignerHome', path: '/sales/product/designer', component: ProductDesignerListPage, meta: { icon: 'lucide:map', title: '产品设计' } },
       { name: 'SalesTeam', path: '/sales/team', component: TeamPage, meta: { icon: 'lucide:users-round', title: '团队管理' } },
       { name: 'SalesOrder', path: '/sales/order', component: SalesOrderPage, meta: { icon: 'lucide:file-text', title: '订单管理' } },
       { name: 'ProductCreate', path: '/sales/product/create', component: ProductFormPage, meta: { hideInMenu: true, title: '新增产品' } },
       { name: 'ProductEdit', path: '/sales/product/edit/:id', component: ProductFormPage, meta: { hideInMenu: true, title: '修改产品' } },
+      { name: 'ProductDesignerCreate', path: '/sales/product/designer/create', component: ProductDesignerFormPage, meta: { hideInMenu: true, title: '新建产品设计' } },
+      { name: 'ProductDesignerEdit', path: '/sales/product/designer/edit/:id', component: ProductDesignerFormPage, meta: { hideInMenu: true, title: '修改产品设计' } },
+      { name: 'ProductDesigner', path: '/sales/product/designer/:id', component: ProductDesignerPage, meta: { hideInMenu: true, title: '产品设计' } },
       { name: 'ProductSchedule', path: '/sales/product/schedule/:id', component: ProductSchedulePage, meta: { hideInMenu: true, title: '团期管理' } },
       { name: 'ProductTeamArrangement', path: '/sales/product/team-arrangement/:id', component: ProductTeamArrangementPage, meta: { hideInMenu: true, title: '产品团队安排' } },
       { name: 'SalesTeamCreate', path: '/sales/team/create/:type', component: TeamCreatePage, meta: { hideInMenu: true, title: '新增团队' } },

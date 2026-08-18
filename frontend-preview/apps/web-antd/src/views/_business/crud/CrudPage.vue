@@ -60,6 +60,7 @@ export interface CrudColumn {
 }
 
 export interface CrudPageConfig<T extends Record<string, any>> {
+  actionWidth?: number;
   columns: CrudColumn[];
   create: (data: Record<string, any>) => Promise<T>;
   delete: (id: number) => Promise<void>;
@@ -101,7 +102,12 @@ const tableColumns = computed(() => [
     title: column.title,
     width: column.width,
   })),
-  { fixed: 'right' as const, key: 'action', title: '操作', width: 150 },
+  {
+    fixed: 'right' as const,
+    key: 'action',
+    title: '操作',
+    width: props.config.actionWidth || 150,
+  },
 ]);
 
 async function loadData() {
@@ -412,6 +418,7 @@ onMounted(init);
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'action'">
             <Space>
+              <slot name="row-actions" :record="record" />
               <Button type="link" size="small" @click="openEditModal(record)">
                 编辑
               </Button>

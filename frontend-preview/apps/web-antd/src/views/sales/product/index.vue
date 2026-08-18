@@ -33,7 +33,7 @@ type ProductRow = SalesProductApi.Item;
 
 const router = useRouter();
 
-const columns = [
+const columns = computed(() => [
   { dataIndex: 'city', key: 'departure', title: '出发地/接团城市', width: 170 },
   { dataIndex: 'productName', key: 'productName', title: '产品名称', width: 260 },
   { dataIndex: 'receptionStandard', key: 'receptionStandard', title: '标准', width: 130 },
@@ -42,8 +42,13 @@ const columns = [
   { dataIndex: 'createdBy', key: 'createdBy', title: '创建人', width: 110 },
   { dataIndex: 'createdAt', key: 'createdAt', title: '创建时间', width: 170 },
   { dataIndex: 'status', key: 'status', title: '状态', width: 90 },
-  { fixed: 'right' as const, key: 'action', title: '操作', width: 420 },
-];
+  {
+    fixed: 'right' as const,
+    key: 'action',
+    title: '操作',
+    width: 390,
+  },
+]);
 
 const statusOptions = [
   { label: '启用', value: 'active' },
@@ -223,12 +228,16 @@ onMounted(() => {
 </script>
 
 <template>
-  <Page title="产品管理" description="维护线路产品模板，新增和修改进入独立页面，避免复杂产品信息挤在弹窗里。">
+  <Page
+    title="产品管理"
+    description="维护已完成设计的正式产品模板，新增和修改进入独立页面，避免复杂产品信息挤在弹窗里。"
+  >
     <Card>
       <BusinessSearchForm
         label-width="86px"
         :model="query"
         :search-loading="loading"
+        show-create
         @create="openCreatePage"
         @reset="resetQuery"
         @search="handleSearch"

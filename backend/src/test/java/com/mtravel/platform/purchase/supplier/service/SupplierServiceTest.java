@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.mtravel.platform.common.BizException;
 import com.mtravel.platform.customer.unit.entity.CustomerUnitEntity;
 import com.mtravel.platform.customer.unit.mapper.CustomerUnitMapper;
+import com.mtravel.platform.purchase.relation.mapper.PurchaseRelationMapper;
+import com.mtravel.platform.purchase.relation.price.mapper.SupplierResourcePriceMapper;
 import com.mtravel.platform.purchase.supplier.dto.SupplierSaveRequest;
 import com.mtravel.platform.purchase.supplier.entity.SupplierEntity;
 import com.mtravel.platform.purchase.supplier.mapper.SupplierMapper;
@@ -51,7 +53,7 @@ class SupplierServiceTest {
     void createShouldRejectDuplicateSupplierName() {
         SupplierMapper mapper = mock(SupplierMapper.class);
         CustomerUnitMapper customerMapper = mock(CustomerUnitMapper.class);
-        SupplierService service = new SupplierService(mapper, customerMapper);
+        SupplierService service = service(mapper, customerMapper);
         SupplierSaveRequest request = request("杭州测试酒店", "hotel");
 
         when(mapper.selectCount(any(Wrapper.class))).thenReturn(1L);
@@ -67,7 +69,7 @@ class SupplierServiceTest {
     void deleteShouldSoftDeleteSupplier() {
         SupplierMapper mapper = mock(SupplierMapper.class);
         CustomerUnitMapper customerMapper = mock(CustomerUnitMapper.class);
-        SupplierService service = new SupplierService(mapper, customerMapper);
+        SupplierService service = service(mapper, customerMapper);
         ArgumentCaptor<SupplierEntity> captor = ArgumentCaptor.forClass(SupplierEntity.class);
 
         when(mapper.update(any(SupplierEntity.class), any(Wrapper.class))).thenReturn(1);
@@ -84,7 +86,7 @@ class SupplierServiceTest {
     void createShouldSaveOldSystemBuyerAndFaxFields() {
         SupplierMapper mapper = mock(SupplierMapper.class);
         CustomerUnitMapper customerMapper = mock(CustomerUnitMapper.class);
-        SupplierService service = new SupplierService(mapper, customerMapper);
+        SupplierService service = service(mapper, customerMapper);
         ArgumentCaptor<SupplierEntity> captor = ArgumentCaptor.forClass(SupplierEntity.class);
         CustomerUnitEntity buyer = new CustomerUnitEntity();
         buyer.setId(3847L);
@@ -114,7 +116,7 @@ class SupplierServiceTest {
     void createShouldRejectMissingBuyer() {
         SupplierMapper mapper = mock(SupplierMapper.class);
         CustomerUnitMapper customerMapper = mock(CustomerUnitMapper.class);
-        SupplierService service = new SupplierService(mapper, customerMapper);
+        SupplierService service = service(mapper, customerMapper);
 
         when(mapper.selectCount(any(Wrapper.class))).thenReturn(0L);
         when(customerMapper.selectOne(any(Wrapper.class))).thenReturn(null);
@@ -130,7 +132,7 @@ class SupplierServiceTest {
     void createShouldDefaultEmptyCategoryToCommon() {
         SupplierMapper mapper = mock(SupplierMapper.class);
         CustomerUnitMapper customerMapper = mock(CustomerUnitMapper.class);
-        SupplierService service = new SupplierService(mapper, customerMapper);
+        SupplierService service = service(mapper, customerMapper);
         ArgumentCaptor<SupplierEntity> captor = ArgumentCaptor.forClass(SupplierEntity.class);
         SupplierEntity[] insertedEntity = new SupplierEntity[1];
 
@@ -158,6 +160,15 @@ class SupplierServiceTest {
         return buyer;
     }
 
+    private SupplierService service(SupplierMapper mapper, CustomerUnitMapper customerMapper) {
+        return new SupplierService(
+                mapper,
+                customerMapper,
+                mock(PurchaseRelationMapper.class),
+                mock(SupplierResourcePriceMapper.class)
+        );
+    }
+
     private SupplierSaveRequest request(String name, String category) {
         return new SupplierSaveRequest(
                 "SUP-001",
@@ -168,6 +179,7 @@ class SupplierServiceTest {
                 "杭州市",
                 "西湖区",
                 "月结",
+                null,
                 "张经理",
                 "13800000000",
                 "0571-88888888",

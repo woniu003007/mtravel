@@ -13,6 +13,7 @@ import com.mtravel.platform.finance.guideimprest.dto.GuideImprestDecisionRequest
 import com.mtravel.platform.finance.guideimprest.dto.GuideImprestPaymentRequest;
 import com.mtravel.platform.finance.guideimprest.entity.FinanceGuideImprestCalcLineEntity;
 import com.mtravel.platform.finance.guideimprest.entity.FinanceGuideImprestEntity;
+import com.mtravel.platform.finance.guideimprest.entity.FinanceGuideImprestPaymentEntity;
 import com.mtravel.platform.finance.guideimprest.mapper.FinanceGuideImprestCalcLineMapper;
 import com.mtravel.platform.finance.guideimprest.mapper.FinanceGuideImprestMapper;
 import com.mtravel.platform.finance.guideimprest.mapper.FinanceGuideImprestPaymentMapper;
@@ -182,6 +183,7 @@ class FinanceGuideImprestServiceTest {
                 arrangement(11L, "traffic", "大交通现付", "800.00")
         ));
         when(fixture.priceLineMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(fixture.imprestMapper.maxRequestNoSuffix(any(), any())).thenReturn(0, 1);
         doAnswer(invocation -> {
             FinanceGuideImprestEntity entity = invocation.getArgument(0);
             entity.setId(entity.getId() == null ? 7001L : entity.getId());
@@ -203,8 +205,12 @@ class FinanceGuideImprestServiceTest {
         verify(fixture.imprestMapper, times(2)).insert(captor.capture());
         assertThat(captor.getAllValues()).extracting(FinanceGuideImprestEntity::getStatus)
                 .containsExactly("pending_manager", "pending_manager");
+        assertThat(captor.getAllValues()).extracting(FinanceGuideImprestEntity::getRequestNo)
+                .containsExactly("GI-260706-00001", "GI-260706-00002");
         assertThat(captor.getAllValues()).extracting(FinanceGuideImprestEntity::getRequestedAmount)
                 .containsExactly(new BigDecimal("800.00"), new BigDecimal("300.00"));
+        verify(fixture.imprestMapper, times(2)).lockRequestNoGeneration(1L, "GI-260706-");
+        verify(fixture.imprestMapper, times(2)).maxRequestNoSuffix(1L, "GI-260706-");
     }
 
     @Test
@@ -450,6 +456,33 @@ class FinanceGuideImprestServiceTest {
         verify(fixture.imprestMapper).update(captor.capture(), any());
         assertThat(captor.getValue().getStatus()).isEqualTo("cancelled");
         assertThat(captor.getValue().getCancelReason()).isEqualTo("录错现付金额");
+    }
+
+    @Test
+    void registerPaymentShouldGeneratePaymentNoWithDatabaseLock() {
+        TestFixture fixture = fixture();
+        FinanceGuideImprestEntity current = existingImprest("manager_approved", "800.00", "800.00", "0.00");
+        current.setCompanyMarkupRate(new BigDecimal("70.00"));
+        when(fixture.imprestMapper.selectOne(any(Wrapper.class))).thenReturn(current);
+        when(fixture.orderMapper.sumGuestCountByTeam(1L, 1001L)).thenReturn(10);
+        when(fixture.arrangementMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                arrangement(11L, "traffic", "大交通现付", "800.00")
+        ));
+        when(fixture.priceLineMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(fixture.paymentMapper.maxPaymentNoSuffix(any(), any())).thenReturn(12);
+
+        fixture.service.registerPayment(
+                1L,
+                7001L,
+                new GuideImprestPaymentRequest(new BigDecimal("800.00"), LocalDate.of(2026, 7, 6), "bank", "工行", "付款"),
+                "finance01"
+        );
+
+        ArgumentCaptor<FinanceGuideImprestPaymentEntity> paymentCaptor = ArgumentCaptor.forClass(FinanceGuideImprestPaymentEntity.class);
+        verify(fixture.paymentMapper).insert(paymentCaptor.capture());
+        assertThat(paymentCaptor.getValue().getPaymentNo()).isEqualTo("GIP-260706-00013");
+        verify(fixture.paymentMapper).lockPaymentNoGeneration(1L, "GIP-260706-");
+        verify(fixture.paymentMapper).maxPaymentNoSuffix(1L, "GIP-260706-");
     }
 
     @Test

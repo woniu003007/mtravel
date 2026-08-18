@@ -17,7 +17,7 @@ public class SalesProductEntity extends TenantSoftDeleteEntity {
     @TableField("product_name")
     private String productName;
 
-    /** 产品记录用途：template 正式产品模板，team_snapshot 团队专属快照。 */
+    /** 产品记录用途：design_draft 设计草稿，template 正式模板，team_snapshot 团队快照。 */
     @TableField("product_scope")
     private String productScope;
 

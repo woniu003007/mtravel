@@ -46,15 +46,19 @@ describe('visible business menu routes', () => {
     const businessRouteFiles = readdirSync(routeModuleDir)
       .filter((fileName) => fileName.endsWith('.ts'))
       .filter((fileName) => !fileName.endsWith('.test.ts'))
-      .filter((fileName) => !['dashboard.ts', 'demos.ts', 'vben.ts'].includes(fileName));
+      .filter(
+        (fileName) =>
+          !['dashboard.ts', 'demos.ts', 'vben.ts'].includes(fileName),
+      );
 
     for (const fileName of businessRouteFiles) {
       const source = readRouteModule(fileName);
 
       // 可见菜单只能指向真实业务页面；PrototypePage 是原型占位页，不能继续出现在侧边栏。
-      expect(source, `${fileName} still references PrototypePage`).not.toContain(
-        'PrototypePage',
-      );
+      expect(
+        source,
+        `${fileName} still references PrototypePage`,
+      ).not.toContain('PrototypePage');
     }
   });
 
@@ -68,6 +72,7 @@ describe('visible business menu routes', () => {
 
     expect(allBusinessRoutes).toContain("title: '客户单位'");
     expect(allBusinessRoutes).toContain("title: '产品管理'");
+    expect(allBusinessRoutes).toContain("title: '产品设计'");
     expect(allBusinessRoutes).toContain("title: '团队管理'");
     expect(allBusinessRoutes).toContain("title: '订单管理'");
     expect(allBusinessRoutes).toContain("title: '导游排班汇总'");
@@ -77,6 +82,10 @@ describe('visible business menu routes', () => {
     expect(allBusinessRoutes).toContain("title: '产品字典'");
     expect(allBusinessRoutes).toContain("title: '系统配置'");
     expect(allBusinessRoutes).toContain("title: '总经理审批'");
+    expect(allBusinessRoutes).toContain("title: '配置管理'");
+    expect(allBusinessRoutes).toContain("title: '客户等级授信配置'");
+    expect(allBusinessRoutes).toContain("title: '审批管理'");
+    expect(allBusinessRoutes).toContain("title: '授信超额审批'");
 
     expect(allBusinessRoutes).not.toContain("title: '团期管理'");
     expect(allBusinessRoutes).not.toContain("title: '财务管理'");
@@ -96,12 +105,14 @@ describe('visible business menu routes', () => {
       resolve(appRoot, 'src/views/_business/prototype-data.ts'),
       'utf8',
     );
-    const prototypeModuleChunk = prototypeDataSource.match(
-      /export const prototypeModules[\s\S]*?\n\];/,
-    )?.[0] ?? '';
-    const workbenchAlertChunk = prototypeDataSource.match(
-      /export const workbenchAlerts[\s\S]*?\n\];/,
-    )?.[0] ?? '';
+    const prototypeModuleChunk =
+      prototypeDataSource.match(
+        /export const prototypeModules[\s\S]*?\n\];/,
+      )?.[0] ?? '';
+    const workbenchAlertChunk =
+      prototypeDataSource.match(
+        /export const workbenchAlerts[\s\S]*?\n\];/,
+      )?.[0] ?? '';
 
     for (const prefix of undevelopedPrefixes) {
       expect(workspaceSource, `workspace still links ${prefix}`).not.toContain(

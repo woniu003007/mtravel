@@ -817,7 +817,10 @@ describe('sales product form helpers', () => {
     expect(arrangementPageSource).toContain('loadSelectedScenicTicketTemplate');
     expect(arrangementPageSource).toContain('applySelectedResource');
     expect(arrangementPageSource).toContain('openScenicTemplateConfigPage');
-    expect(arrangementPageSource).toContain('templateRelationId');
+    expect(arrangementPageSource).toContain("path: '/purchase/resource'");
+    expect(arrangementPageSource).toContain("openTemplate: '1'");
+    expect(arrangementPageSource).toContain('relationId: selectedScenicResourceRelation.value?.relationId');
+    expect(arrangementPageSource).toContain('resourceId: selectedScenicResourceRelation.value?.resourceId');
     expect(arrangementPageSource).toContain('游客名单模板');
     expect(arrangementPageSource).toContain("resourceType: 'scenic'");
     expect(arrangementEditorSource()).toContain("emit('apply-selected-resource'");
@@ -826,14 +829,14 @@ describe('sales product form helpers', () => {
     expect(arrangementPageSource).not.toContain("getScenicResourcePage({ page: 1, pageSize: 200, status: 'active' })");
   });
 
-  it('opens purchase relation ticket template drawer from scenic arrangement deep link', () => {
-    const relationPageSource = readAppFile('src/views/purchase/relation/index.vue');
+  it('opens resource supplier ticket template drawer from scenic arrangement deep link', () => {
+    const resourcePageSource = readAppFile('src/views/purchase/resource/index.vue');
 
-    expect(relationPageSource).toContain('useRoute');
-    expect(relationPageSource).toContain('openTemplateDrawerFromRoute');
-    expect(relationPageSource).toContain('route.query.templateRelationId');
-    expect(relationPageSource).toContain('query.resourceType =');
-    expect(relationPageSource).toContain('openTemplateDrawer(row)');
+    expect(resourcePageSource).toContain('useRoute');
+    expect(resourcePageSource).toContain('openBindingsFromRoute');
+    expect(resourcePageSource).toContain('route.query.resourceId');
+    expect(resourcePageSource).toContain('route.query.relationId');
+    expect(resourcePageSource).toContain('openTemplateDrawer(binding)');
   });
 
   it('loads hotel arrangement dropdown from resource overview and opens add hotel page', () => {

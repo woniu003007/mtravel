@@ -1,12 +1,19 @@
 package com.mtravel.platform.sales.booking.aiimport.service;
 
 import com.mtravel.platform.common.BizException;
+import com.mtravel.platform.common.knowledge.service.AliyunOcrClient;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import javax.imageio.ImageIO;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.rendering.ImageType;
+import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
@@ -26,15 +33,26 @@ import org.springframework.util.StringUtils;
 @Component
 public class BookingImportAttachmentTextExtractor {
 
+    private static final int MAX_SCANNED_PDF_PAGES_FOR_OCR = 30;
+
     private final AiModelClient aiModelClient;
+    private final AliyunOcrClient aliyunOcrClient;
 
     public BookingImportAttachmentTextExtractor() {
-        this(null);
+        this(null, null);
+    }
+
+    public BookingImportAttachmentTextExtractor(AiModelClient aiModelClient) {
+        this(aiModelClient, null);
     }
 
     @Autowired
-    public BookingImportAttachmentTextExtractor(AiModelClient aiModelClient) {
+    public BookingImportAttachmentTextExtractor(
+            AiModelClient aiModelClient,
+            AliyunOcrClient aliyunOcrClient
+    ) {
         this.aiModelClient = aiModelClient;
+        this.aliyunOcrClient = aliyunOcrClient;
     }
 
     /**
@@ -125,7 +143,47 @@ public class BookingImportAttachmentTextExtractor {
                 return text;
             }
         }
+        String aliyunText = extractScannedPdfByAliyunOcr(content, tenantId);
+        if (StringUtils.hasText(aliyunText)) {
+            return aliyunText;
+        }
         return extractByVision(content, "pdf", tenantId);
+    }
+
+    /**
+     * 扫描版 PDF 先逐页渲染为 PNG，再复用阿里云图片 OCR。
+     *
+     * <p>有文本层的 PDF 不会进入这里；阿里云未配置、PDF 页面过多或单页渲染失败时返回空，
+     * 由上层继续使用百炼视觉模型兜底。</p>
+     */
+    private String extractScannedPdfByAliyunOcr(byte[] content, Long tenantId) throws IOException {
+        if (aliyunOcrClient == null) {
+            return "";
+        }
+        List<String> pages = new ArrayList<>();
+        try (var document = Loader.loadPDF(content)) {
+            if (document.getNumberOfPages() > MAX_SCANNED_PDF_PAGES_FOR_OCR) {
+                return "";
+            }
+            int pageCount = document.getNumberOfPages();
+            PDFRenderer renderer = new PDFRenderer(document);
+            for (int page = 0; page < pageCount; page++) {
+                BufferedImage image = renderer.renderImageWithDPI(page, 144, ImageType.RGB);
+                try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+                    if (!ImageIO.write(image, "png", output)) {
+                        return "";
+                    }
+                    aliyunOcrClient.recognize(tenantId, "png", output.toByteArray())
+                            .filter(StringUtils::hasText)
+                            .ifPresent(pages::add);
+                } finally {
+                    image.flush();
+                }
+            }
+        } catch (RuntimeException ex) {
+            return "";
+        }
+        return String.join("\n\n", pages).trim();
     }
 
     private void addLine(List<String> lines, String value) {
@@ -139,6 +197,13 @@ public class BookingImportAttachmentTextExtractor {
     }
 
     private String extractByVision(byte[] content, String sourceType, Long tenantId) {
+        if (aliyunOcrClient != null) {
+            Optional<String> aliyunText = aliyunOcrClient.recognize(tenantId, sourceType, content)
+                    .filter(StringUtils::hasText);
+            if (aliyunText.isPresent()) {
+                return aliyunText.get();
+            }
+        }
         if (aiModelClient == null) {
             throw new BizException("当前文件需要AI视觉/OCR识别服务，识别服务未启用");
         }

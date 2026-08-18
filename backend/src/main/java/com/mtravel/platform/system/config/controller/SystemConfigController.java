@@ -1,5 +1,7 @@
 package com.mtravel.platform.system.config.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.mtravel.platform.auth.dto.AuthenticatedUser;
 import com.mtravel.platform.common.ApiResponse;
 import com.mtravel.platform.system.config.dto.AiConfigResponse;
 import com.mtravel.platform.system.config.dto.AiConfigUpdateRequest;
@@ -14,9 +16,14 @@ import com.mtravel.platform.system.config.service.AuthConfigService;
 import com.mtravel.platform.system.config.service.BusinessRiskConfigService;
 import com.mtravel.platform.system.config.service.MapConfigService;
 import com.mtravel.platform.system.log.web.OperationLog;
+import com.mtravel.platform.system.user.entity.SystemUserEntity;
+import com.mtravel.platform.system.user.mapper.SystemUserMapper;
 import com.mtravel.platform.tenant.TenantContextHolder;
 import com.mtravel.platform.tenant.TenantProperties;
 import jakarta.validation.Valid;
+import java.util.Objects;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -32,19 +39,22 @@ public class SystemConfigController {
     private final BusinessRiskConfigService businessRiskConfigService;
     private final MapConfigService mapConfigService;
     private final TenantProperties tenantProperties;
+    private final SystemUserMapper userMapper;
 
     public SystemConfigController(
             AuthConfigService authConfigService,
             AiConfigService aiConfigService,
             BusinessRiskConfigService businessRiskConfigService,
             MapConfigService mapConfigService,
-            TenantProperties tenantProperties
+            TenantProperties tenantProperties,
+            SystemUserMapper userMapper
     ) {
         this.authConfigService = authConfigService;
         this.aiConfigService = aiConfigService;
         this.businessRiskConfigService = businessRiskConfigService;
         this.mapConfigService = mapConfigService;
         this.tenantProperties = tenantProperties;
+        this.userMapper = userMapper;
     }
 
     @OperationLog(module = "系统设置", type = "查询")
@@ -84,9 +94,12 @@ public class SystemConfigController {
     @OperationLog(module = "系统设置", type = "修改")
     @PostMapping("/business-risk/update")
     public ApiResponse<BusinessRiskConfigResponse> updateBusinessRiskConfig(
-            @Valid @RequestBody BusinessRiskConfigUpdateRequest request
+            @Valid @RequestBody BusinessRiskConfigUpdateRequest request,
+            Authentication authentication
     ) {
-        return ApiResponse.ok(businessRiskConfigService.updateBusinessRiskConfig(currentTenantId(), request));
+        Long tenantId = currentTenantId();
+        requireTenantConfigAdministrator(authentication, tenantId);
+        return ApiResponse.ok(businessRiskConfigService.updateBusinessRiskConfig(tenantId, request));
     }
 
     /** 查询高德地图配置，Key 只返回脱敏值。 */
@@ -105,5 +118,27 @@ public class SystemConfigController {
 
     private Long currentTenantId() {
         return TenantContextHolder.getTenantId(tenantProperties.getDefaultTenantId());
+    }
+
+    /**
+     * 校验租户级业务风控配置写权限。
+     *
+     * <p>配置会改变授信超额订单是否必须审批，因此必须按数据库中的最新账号状态校验，
+     * 只允许 admin 角色或租户管理员修改；查询和其他系统配置接口不受此限制。</p>
+     */
+    private void requireTenantConfigAdministrator(Authentication authentication, Long tenantId) {
+        if (authentication == null || !(authentication.getPrincipal() instanceof AuthenticatedUser user)
+                || user.id() == null || !Objects.equals(user.tenantId(), tenantId)) {
+            throw new AccessDeniedException("仅租户管理员可修改客户授信审批配置");
+        }
+        SystemUserEntity currentUser = userMapper.selectOne(new LambdaQueryWrapper<SystemUserEntity>()
+                .eq(SystemUserEntity::getTenantId, tenantId)
+                .eq(SystemUserEntity::getId, user.id())
+                .eq(SystemUserEntity::getStatus, "active")
+                .eq(SystemUserEntity::getIsDeleted, false));
+        if (currentUser == null || (!"admin".equals(currentUser.getRoleCode())
+                && !Boolean.TRUE.equals(currentUser.getIsTenantAdmin()))) {
+            throw new AccessDeniedException("仅租户管理员可修改客户授信审批配置");
+        }
     }
 }

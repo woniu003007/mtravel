@@ -142,7 +142,7 @@ onMounted(() => {
       <div class="system-config-page">
         <Card title="业务风控" :bordered="false">
           <Form layout="vertical">
-            <Form.Item label="客户风险总经理审批">
+            <Form.Item label="客户授信审批">
               <Switch v-model:checked="riskForm.customerRiskApprovalEnabled" checked-children="开启" un-checked-children="关闭" />
             </Form.Item>
             <div class="config-action-row">

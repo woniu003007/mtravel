@@ -7,7 +7,7 @@ import java.time.LocalDate;
 /**
  * 收客订单游客名单保存请求。
  *
- * @param id 游客 ID，当前版本保存时以订单为单位重建，允许为空。
+ * @param id 游客 ID，修改订单时用于增量更新已有游客；新增游客为空。
  * @param indexNo 页面序号。
  * @param guestName 游客姓名。
  * @param englishName 英文姓名或拼音名。

@@ -15,7 +15,6 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import java.math.BigDecimal;
-import java.util.List;
 import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -28,8 +27,8 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 客户风控审批接口。
  *
- * <p>收客页通过 check/apply 判断客户是否需要总经理审批；总经理审批页通过 page/detail/approve/reject
- * 处理审批单。Controller 不直接判断合同或授信规则。</p>
+ * <p>收客页通过 check/apply 判断客户是否需要客户等级审批；审批页通过 page/detail/approve/reject
+ * 处理审批单。审批人严格按客户等级配置的顺序确定，Controller 不直接判断合同或授信规则。</p>
  */
 @Validated
 @RestController
@@ -62,23 +61,28 @@ public class CustomerRiskApprovalController extends ControllerSupport {
             @Valid @RequestBody CustomerRiskApprovalApplyRequest request,
             Authentication authentication
     ) {
-        return ApiResponse.ok(service.apply(currentTenantId(), request, currentOperator(authentication)));
+        AuthenticatedUser user = currentUser(authentication);
+        return ApiResponse.ok(service.apply(currentTenantId(), request, user.id(), currentOperator(authentication)));
     }
 
     /** 分页查询客户风控审批申请。 */
     @OperationLog(module = "客户管理", type = "查询")
     @GetMapping("/page")
     public ApiResponse<PageResult<CustomerRiskApprovalResponse>> page(
+            @RequestParam(defaultValue = "to_approve") String view,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Long customerId,
             @RequestParam(required = false) Long teamId,
             @RequestParam(required = false) Long orderId,
             @RequestParam(defaultValue = "1") @Min(1) long page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(200) long pageSize
+            @RequestParam(defaultValue = "20") @Min(1) @Max(200) long pageSize,
+            Authentication authentication
     ) {
         return ApiResponse.ok(service.page(
                 currentTenantId(),
+                currentUser(authentication).id(),
+                view,
                 keyword,
                 status,
                 customerId,
@@ -92,11 +96,11 @@ public class CustomerRiskApprovalController extends ControllerSupport {
     /** 查询客户风控审批详情。 */
     @OperationLog(module = "客户管理", type = "查询")
     @GetMapping("/detail")
-    public ApiResponse<CustomerRiskApprovalResponse> detail(@RequestParam Long id) {
-        return ApiResponse.ok(service.detail(currentTenantId(), id));
+    public ApiResponse<CustomerRiskApprovalResponse> detail(@RequestParam Long id, Authentication authentication) {
+        return ApiResponse.ok(service.detail(currentTenantId(), id, currentUser(authentication).id()));
     }
 
-    /** 总经理或管理员同意客户风控审批。 */
+    /** 当前指定审批人同意客户授信超额审批。 */
     @OperationLog(module = "客户管理", type = "审批")
     @PostMapping("/approve")
     public ApiResponse<CustomerRiskApprovalResponse> approve(
@@ -108,12 +112,12 @@ public class CustomerRiskApprovalController extends ControllerSupport {
                 currentTenantId(),
                 id,
                 request.approvalRemark(),
-                currentOperator(authentication),
-                currentRoles(authentication)
+                currentUser(authentication).id(),
+                currentOperator(authentication)
         ));
     }
 
-    /** 总经理或管理员拒绝客户风控审批。 */
+    /** 当前指定审批人拒绝客户授信超额审批。 */
     @OperationLog(module = "客户管理", type = "审批")
     @PostMapping("/reject")
     public ApiResponse<CustomerRiskApprovalResponse> reject(
@@ -125,15 +129,15 @@ public class CustomerRiskApprovalController extends ControllerSupport {
                 currentTenantId(),
                 id,
                 request.approvalRemark(),
-                currentOperator(authentication),
-                currentRoles(authentication)
+                currentUser(authentication).id(),
+                currentOperator(authentication)
         ));
     }
 
-    private List<String> currentRoles(Authentication authentication) {
+    private AuthenticatedUser currentUser(Authentication authentication) {
         if (authentication != null && authentication.getPrincipal() instanceof AuthenticatedUser user) {
-            return user.roles();
+            return user;
         }
-        return List.of();
+        throw new com.mtravel.platform.common.BizException("未获取到当前登录用户");
     }
 }

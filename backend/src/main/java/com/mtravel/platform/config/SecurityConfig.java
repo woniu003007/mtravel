@@ -1,8 +1,10 @@
 package com.mtravel.platform.config;
 
 import com.mtravel.platform.auth.filter.JwtAuthenticationFilter;
+import com.mtravel.platform.agent.security.filter.AgentServiceTokenFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -29,7 +31,11 @@ public class SecurityConfig {
      * @return 安全过滤链
      */
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationFilter jwtAuthenticationFilter)
+    public SecurityFilterChain securityFilterChain(
+            HttpSecurity http,
+            AgentServiceTokenFilter agentServiceTokenFilter,
+            JwtAuthenticationFilter jwtAuthenticationFilter
+    )
             throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
@@ -40,6 +46,7 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(agentServiceTokenFilter, JwtAuthenticationFilter.class)
                 .build();
     }
 
@@ -51,5 +58,17 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    /**
+     * Agent 令牌过滤器由 Spring Security 链显式调用，禁止 Servlet 容器再注册一次。
+     */
+    @Bean
+    public FilterRegistrationBean<AgentServiceTokenFilter> agentServiceTokenFilterRegistration(
+            AgentServiceTokenFilter filter
+    ) {
+        FilterRegistrationBean<AgentServiceTokenFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
     }
 }

@@ -1,4 +1,5 @@
 import { requestClient } from '#/api/request';
+import type { SalesTeamApi } from '#/api/sales/team';
 
 export namespace SalesBookingApi {
   export type OrderStatus = 'cancelled' | 'confirmed' | 'pending';
@@ -7,8 +8,13 @@ export namespace SalesBookingApi {
     content?: {
       bookingNotice?: string;
       internalRemark?: string;
+      optionalMarkupRate?: number;
+      perCapitaPitAmount?: number;
+      perCapitaShoppingAmount?: number;
       productDescription?: string;
     };
+    itineraryDays?: SalesTeamApi.OperationItineraryDay[];
+    prices?: SalesTeamApi.PriceItem[];
     product?: {
       businessType?: string;
       departurePlace?: string;
@@ -30,11 +36,15 @@ export namespace SalesBookingApi {
       remainingSeats?: number;
       status?: string;
       statusLabel?: string;
+      businessType?: string;
       teamNo?: string;
+      teamType?: SalesTeamApi.TeamType;
       teamTypeLabel?: string;
       totalSeats?: number;
+      travelDays?: number;
       usedSeats?: number;
     };
+    routeSummary?: SalesTeamApi.OperationRouteSummary;
   }
 
   export interface PriceLine {
@@ -112,7 +122,6 @@ export namespace SalesBookingApi {
     pickupInfo?: string;
     pickupRemark?: string;
     priceLines?: PriceLine[];
-    receivedAmount?: number;
     riskApprovalRequestId?: number;
     salespersonEmployeeId?: number;
     salespersonEmployeeName?: string;
@@ -137,7 +146,19 @@ export namespace SalesBookingApi {
     id: number;
     orderNo: string;
     receivableAmount?: number;
+    receivedAmount?: number;
     seniorCount?: number;
+  }
+
+  export interface SaveResult {
+    balanceAmount?: number;
+    guestCount?: number;
+    id: number;
+    orderNo?: string;
+    receivableAmount?: number;
+    receivedAmount?: number;
+    status?: OrderStatus;
+    teamId?: number;
   }
 
   export interface GuestImportPreview {
@@ -231,7 +252,7 @@ export function getSalesBookingOrderDetail(id: number) {
 
 /** 保存收客订单。 */
 export function saveSalesBookingOrder(data: SalesBookingApi.SaveParams) {
-  return requestClient.post<SalesBookingApi.Detail>('/sales/booking/save', data);
+  return requestClient.post<SalesBookingApi.SaveResult>('/sales/booking/save', data);
 }
 
 /** 新增订单费用变更。 */

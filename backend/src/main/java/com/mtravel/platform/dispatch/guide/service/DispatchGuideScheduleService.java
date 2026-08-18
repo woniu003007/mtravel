@@ -28,6 +28,7 @@ import com.mtravel.platform.finance.guideimprest.enums.GuideImprestStatus;
 import com.mtravel.platform.finance.guideimprest.mapper.FinanceGuideImprestMapper;
 import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
 import com.mtravel.platform.sales.team.mapper.SalesTeamMapper;
+import com.mtravel.platform.sales.team.service.SalesTeamListSummaryRefreshService;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -62,6 +63,7 @@ public class DispatchGuideScheduleService {
     private final SalesTeamMapper teamMapper;
     private final EnterpriseGuideMapper guideMapper;
     private final FinanceGuideImprestMapper imprestMapper;
+    private final SalesTeamListSummaryRefreshService teamListSummaryRefreshService;
 
     /**
      * 构造导游排班服务。
@@ -77,13 +79,25 @@ public class DispatchGuideScheduleService {
             DispatchGuideLeaveRecordMapper leaveRecordMapper,
             SalesTeamMapper teamMapper,
             EnterpriseGuideMapper guideMapper,
-            FinanceGuideImprestMapper imprestMapper
+            FinanceGuideImprestMapper imprestMapper,
+            SalesTeamListSummaryRefreshService teamListSummaryRefreshService
     ) {
         this.teamGuideMapper = teamGuideMapper;
         this.leaveRecordMapper = leaveRecordMapper;
         this.teamMapper = teamMapper;
         this.guideMapper = guideMapper;
         this.imprestMapper = imprestMapper;
+        this.teamListSummaryRefreshService = teamListSummaryRefreshService;
+    }
+
+    DispatchGuideScheduleService(
+            DispatchTeamGuideMapper teamGuideMapper,
+            DispatchGuideLeaveRecordMapper leaveRecordMapper,
+            SalesTeamMapper teamMapper,
+            EnterpriseGuideMapper guideMapper,
+            FinanceGuideImprestMapper imprestMapper
+    ) {
+        this(teamGuideMapper, leaveRecordMapper, teamMapper, guideMapper, imprestMapper, null);
     }
 
     DispatchGuideScheduleService(
@@ -92,7 +106,7 @@ public class DispatchGuideScheduleService {
             SalesTeamMapper teamMapper,
             EnterpriseGuideMapper guideMapper
     ) {
-        this(teamGuideMapper, leaveRecordMapper, teamMapper, guideMapper, null);
+        this(teamGuideMapper, leaveRecordMapper, teamMapper, guideMapper, null, null);
     }
 
     /**
@@ -191,6 +205,7 @@ public class DispatchGuideScheduleService {
         entity.setCreatedBy(operator);
         entity.setIsDeleted(false);
         teamGuideMapper.insert(entity);
+        refreshTeamListSummary(team.getId(), tenantId);
         return TeamGuideResponse.fromEntity(entity);
     }
 
@@ -219,6 +234,7 @@ public class DispatchGuideScheduleService {
         if (updated == 0) {
             throw new BizException("导游安排不存在或已删除");
         }
+        refreshTeamListSummary(teamId, tenantId);
         return TeamGuideResponse.fromEntity(entity);
     }
 
@@ -234,6 +250,18 @@ public class DispatchGuideScheduleService {
         int updated = teamGuideMapper.update(entity, teamGuideUpdate(tenantId).eq("id", recordId).eq("team_id", teamId));
         if (updated == 0) {
             throw new BizException("导游安排不存在或已删除");
+        }
+        refreshTeamListSummary(teamId, tenantId);
+    }
+
+    /**
+     * 刷新团队列表缓存中的导游摘要和导游安排状态。
+     *
+     * <p>同一团队可有多个导游，刷新服务会重新读取该团所有有效导游后覆盖汇总字段，避免单条增量维护残留旧导游。</p>
+     */
+    private void refreshTeamListSummary(Long teamId, Long tenantId) {
+        if (teamListSummaryRefreshService != null) {
+            teamListSummaryRefreshService.refresh(teamId, tenantId);
         }
     }
 

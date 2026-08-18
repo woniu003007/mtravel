@@ -69,6 +69,7 @@ class SalesBookingOrderServiceTest {
         SalesTeamEntity team = team(1001L, 20, 0, 20);
         when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(team);
         when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(null);
+        when(orderMapper.maxOrderNoSuffix(any(), any())).thenReturn(41);
         when(orderMapper.sumGuestCountByTeam(1L, 1001L)).thenReturn(3);
         doAnswer(invocation -> {
             SalesBookingOrderEntity order = invocation.getArgument(0);
@@ -81,13 +82,16 @@ class SalesBookingOrderServiceTest {
         assertThat(response.id()).isEqualTo(2001L);
         assertThat(response.guestCount()).isEqualTo(3);
         assertThat(response.receivableAmount()).isEqualByComparingTo("9540.00");
-        assertThat(response.balanceAmount()).isEqualByComparingTo("8540.00");
+        assertThat(response.receivedAmount()).isEqualByComparingTo("0.00");
+        assertThat(response.balanceAmount()).isEqualByComparingTo("9540.00");
 
         ArgumentCaptor<SalesBookingOrderEntity> orderCaptor = ArgumentCaptor.forClass(SalesBookingOrderEntity.class);
         verify(orderMapper).insert(orderCaptor.capture());
         SalesBookingOrderEntity savedOrder = orderCaptor.getValue();
         assertThat(savedOrder.getTeamId()).isEqualTo(1001L);
-        assertThat(savedOrder.getOrderNo()).startsWith("SO-");
+        assertThat(savedOrder.getOrderNo()).matches("SO-\\d{6}-00042");
+        verify(orderMapper).lockOrderNoGeneration(any(), any());
+        verify(orderMapper).maxOrderNoSuffix(any(), any());
         assertThat(savedOrder.getTravelDescription()).contains("大连-上海");
         assertThat(savedOrder.getGuideName()).isEqualTo("王导");
         assertThat(savedOrder.getCustomerName()).isEqualTo("杭州百缘旅行社");
@@ -103,6 +107,8 @@ class SalesBookingOrderServiceTest {
         assertThat(savedOrder.getGuestCount()).isEqualTo(3);
         assertThat(savedOrder.getAdultCount()).isEqualTo(1);
         assertThat(savedOrder.getChildCount()).isEqualTo(1);
+        assertThat(savedOrder.getReceivedAmount()).isEqualByComparingTo("0.00");
+        assertThat(savedOrder.getBalanceAmount()).isEqualByComparingTo("9540.00");
 
         ArgumentCaptor<SalesBookingOrderChargeLineEntity> chargeCaptor = ArgumentCaptor.forClass(SalesBookingOrderChargeLineEntity.class);
         verify(chargeLineMapper, org.mockito.Mockito.times(2)).insert(chargeCaptor.capture());
@@ -128,6 +134,120 @@ class SalesBookingOrderServiceTest {
         verify(teamMapper).update(teamCaptor.capture(), any(UpdateWrapper.class));
         assertThat(teamCaptor.getValue().getUsedSeats()).isEqualTo(3);
         assertThat(teamCaptor.getValue().getRemainingSeats()).isEqualTo(17);
+    }
+
+    @Test
+    void updateOrderShouldPreserveExistingReceivedAmountInsteadOfRequestValue() {
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
+        SalesBookingOrderGuestMapper guestMapper = mock(SalesBookingOrderGuestMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesBookingOrderService service = new SalesBookingOrderService(
+                orderMapper,
+                chargeLineMapper,
+                guestMapper,
+                teamMapper
+        );
+        SalesBookingOrderEntity current = existingOrder(2001L);
+        current.setReceivedAmount(new BigDecimal("1200.00"));
+        when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(team(1001L, 20, 3, 17));
+        when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(current);
+        when(orderMapper.sumGuestCountByTeam(1L, 1001L)).thenReturn(3);
+
+        var response = service.save(request(2001L, "confirmed"), 1L, "admin");
+
+        assertThat(response.receivableAmount()).isEqualByComparingTo("9540.00");
+        assertThat(response.receivedAmount()).isEqualByComparingTo("1200.00");
+        assertThat(response.balanceAmount()).isEqualByComparingTo("8340.00");
+        ArgumentCaptor<SalesBookingOrderEntity> orderCaptor = ArgumentCaptor.forClass(SalesBookingOrderEntity.class);
+        verify(orderMapper).update(orderCaptor.capture(), any(UpdateWrapper.class));
+        SalesBookingOrderEntity updatedOrder = orderCaptor.getValue();
+        assertThat(updatedOrder.getReceivedAmount()).isEqualByComparingTo("1200.00");
+        assertThat(updatedOrder.getBalanceAmount()).isEqualByComparingTo("8340.00");
+    }
+
+    @Test
+    void updateOrderShouldSyncGuestsIncrementally() {
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
+        SalesBookingOrderGuestMapper guestMapper = mock(SalesBookingOrderGuestMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesBookingOrderService service = new SalesBookingOrderService(
+                orderMapper,
+                chargeLineMapper,
+                guestMapper,
+                teamMapper
+        );
+        SalesBookingOrderEntity current = existingOrder(2001L);
+        when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(team(1001L, 20, 2, 18));
+        when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(current);
+        when(orderMapper.sumGuestCountByTeam(1L, 1001L)).thenReturn(2);
+        SalesBookingOrderGuestEntity retained = existingGuest(11L, "张三", "adult");
+        SalesBookingOrderGuestEntity removed = existingGuest(12L, "李四", "child");
+        when(guestMapper.selectList(any(Wrapper.class))).thenReturn(List.of(retained, removed), List.of(retained));
+
+        service.save(requestWithGuests(2001L, "confirmed", List.of(
+                guestRequest(11L, 1, "张三", "adult"),
+                guestRequest(null, 2, "王五", "child")
+        )), 1L, "admin");
+
+        ArgumentCaptor<SalesBookingOrderGuestEntity> insertCaptor = ArgumentCaptor.forClass(SalesBookingOrderGuestEntity.class);
+        verify(guestMapper).insert(insertCaptor.capture());
+        assertThat(insertCaptor.getValue().getGuestName()).isEqualTo("王五");
+        ArgumentCaptor<SalesBookingOrderGuestEntity> deleteCaptor = ArgumentCaptor.forClass(SalesBookingOrderGuestEntity.class);
+        verify(guestMapper).update(deleteCaptor.capture(), any(UpdateWrapper.class));
+        assertThat(deleteCaptor.getValue().getIsDeleted()).isTrue();
+    }
+
+    @Test
+    void updateOrderShouldUpdateChangedExistingGuestWithoutReinserting() {
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
+        SalesBookingOrderGuestMapper guestMapper = mock(SalesBookingOrderGuestMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesBookingOrderService service = new SalesBookingOrderService(
+                orderMapper,
+                chargeLineMapper,
+                guestMapper,
+                teamMapper
+        );
+        when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(team(1001L, 20, 1, 19));
+        when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(existingOrder(2001L));
+        when(orderMapper.sumGuestCountByTeam(1L, 1001L)).thenReturn(1);
+        SalesBookingOrderGuestEntity existing = existingGuest(11L, "张三", "adult");
+        when(guestMapper.selectList(any(Wrapper.class))).thenReturn(List.of(existing), List.of(existing));
+
+        service.save(requestWithGuests(2001L, "confirmed", List.of(
+                guestRequest(11L, 1, "张三修改", "adult")
+        )), 1L, "admin");
+
+        verify(guestMapper, never()).insert(any(SalesBookingOrderGuestEntity.class));
+        verify(guestMapper).update(any(SalesBookingOrderGuestEntity.class), any(UpdateWrapper.class));
+    }
+
+    @Test
+    void updateOrderShouldRejectGuestIdFromOtherOrder() {
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesBookingOrderChargeLineMapper chargeLineMapper = mock(SalesBookingOrderChargeLineMapper.class);
+        SalesBookingOrderGuestMapper guestMapper = mock(SalesBookingOrderGuestMapper.class);
+        SalesTeamMapper teamMapper = mock(SalesTeamMapper.class);
+        SalesBookingOrderService service = new SalesBookingOrderService(
+                orderMapper,
+                chargeLineMapper,
+                guestMapper,
+                teamMapper
+        );
+        when(teamMapper.selectOne(any(Wrapper.class))).thenReturn(team(1001L, 20, 2, 18));
+        when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(existingOrder(2001L));
+        when(guestMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.save(requestWithGuests(2001L, "confirmed", List.of(
+                guestRequest(999L, 1, "张三", "adult")
+        )), 1L, "admin"))
+                .isInstanceOf(BizException.class)
+                .hasMessage("游客名单记录不存在或不属于当前订单，请刷新后重试");
+
+        verify(guestMapper, never()).insert(any(SalesBookingOrderGuestEntity.class));
     }
 
     @Test
@@ -828,6 +948,93 @@ class SalesBookingOrderServiceTest {
     }
 
     @Test
+    void orderManagePageShouldUseExactGuestCertificateFilterForIdCardKeyword() {
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesBookingOrderService service = new SalesBookingOrderService(
+                orderMapper,
+                mock(SalesBookingOrderChargeLineMapper.class),
+                mock(SalesBookingOrderGuestMapper.class),
+                mock(SalesTeamMapper.class)
+        );
+        when(orderMapper.selectPage(any(), any(Wrapper.class)))
+                .thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<SalesBookingOrderEntity>(1, 20, 0));
+
+        service.orderManagePage(
+                1L,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "210281201012158614",
+                null,
+                null,
+                "booked",
+                null,
+                null,
+                1,
+                20
+        );
+
+        ArgumentCaptor<Wrapper> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(orderMapper).selectPage(any(), wrapperCaptor.capture());
+        String sqlSegment = wrapperCaptor.getValue().getSqlSegment();
+        assertThat(sqlSegment)
+                .contains("g.certificate_no =")
+                .doesNotContain("g.certificate_no ILIKE")
+                .doesNotContain("g.passport_no ILIKE")
+                .doesNotContain("g.phone ILIKE");
+    }
+
+    @Test
+    void orderManagePageShouldKeepFuzzyGuestNameFilterForNameKeyword() {
+        SalesBookingOrderMapper orderMapper = mock(SalesBookingOrderMapper.class);
+        SalesBookingOrderService service = new SalesBookingOrderService(
+                orderMapper,
+                mock(SalesBookingOrderChargeLineMapper.class),
+                mock(SalesBookingOrderGuestMapper.class),
+                mock(SalesTeamMapper.class)
+        );
+        when(orderMapper.selectPage(any(), any(Wrapper.class)))
+                .thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<SalesBookingOrderEntity>(1, 20, 0));
+
+        service.orderManagePage(
+                1L,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "张三",
+                null,
+                null,
+                "booked",
+                null,
+                null,
+                1,
+                20
+        );
+
+        ArgumentCaptor<Wrapper> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(orderMapper).selectPage(any(), wrapperCaptor.capture());
+        String sqlSegment = wrapperCaptor.getValue().getSqlSegment();
+        assertThat(sqlSegment)
+                .contains("g.guest_name ILIKE")
+                .contains("g.certificate_no =")
+                .doesNotContain("g.certificate_no ILIKE")
+                .doesNotContain("g.passport_no ILIKE")
+                .doesNotContain("g.phone ILIKE");
+    }
+
+    @Test
     void operationLeaderSummaryShouldUseLeaderGuestsFromEffectiveOrders() {
         SalesBookingOrderGuestMapper guestMapper = mock(SalesBookingOrderGuestMapper.class);
         SalesBookingOrderService service = new SalesBookingOrderService(
@@ -949,6 +1156,14 @@ class SalesBookingOrderServiceTest {
         return request(id, status, "330110198206214839", "310101201010287414");
     }
 
+    private SalesBookingOrderSaveRequest requestWithGuests(
+            Long id,
+            String status,
+            List<SalesBookingOrderGuestRequest> guests
+    ) {
+        return request(id, status, "330110198206214839", "310101201010287414", guests);
+    }
+
     private SalesBookingOrderSaveRequest requestWithGuestCertificates(String firstCertificateNo, String secondCertificateNo) {
         return request(null, "confirmed", firstCertificateNo, secondCertificateNo);
     }
@@ -958,6 +1173,51 @@ class SalesBookingOrderServiceTest {
             String status,
             String firstCertificateNo,
             String secondCertificateNo
+    ) {
+        return request(id, status, firstCertificateNo, secondCertificateNo, List.of(
+                new SalesBookingOrderGuestRequest(
+                        null,
+                        1,
+                        "张三",
+                        null,
+                        firstCertificateNo,
+                        null,
+                        "男",
+                        LocalDate.of(1982, 6, 21),
+                        44,
+                        "13521124678",
+                        "adult",
+                        "1房",
+                        "1大床（必须保证大床）",
+                        true,
+                        "领队"
+                ),
+                new SalesBookingOrderGuestRequest(
+                        null,
+                        2,
+                        "李四",
+                        null,
+                        secondCertificateNo,
+                        null,
+                        "女",
+                        LocalDate.of(2010, 10, 28),
+                        15,
+                        "13521124678",
+                        "child",
+                        "1房",
+                        "1大床（必须保证大床）",
+                        false,
+                        null
+                )
+        ));
+    }
+
+    private SalesBookingOrderSaveRequest request(
+            Long id,
+            String status,
+            String firstCertificateNo,
+            String secondCertificateNo,
+            List<SalesBookingOrderGuestRequest> guests
     ) {
         return new SalesBookingOrderSaveRequest(
                 id,
@@ -1007,43 +1267,48 @@ class SalesBookingOrderServiceTest {
                         false,
                         "按占位游客数量自动计入"
                 )),
-                List.of(
-                        new SalesBookingOrderGuestRequest(
-                                null,
-                                1,
-                                "张三",
-                                null,
-                                firstCertificateNo,
-                                null,
-                                "男",
-                                LocalDate.of(1982, 6, 21),
-                                44,
-                                "13521124678",
-                                "adult",
-                                "1房",
-                                "1大床（必须保证大床）",
-                                true,
-                                "领队"
-                        ),
-                        new SalesBookingOrderGuestRequest(
-                                null,
-                                2,
-                                "李四",
-                                null,
-                                secondCertificateNo,
-                                null,
-                                "女",
-                                LocalDate.of(2010, 10, 28),
-                                15,
-                                "13521124678",
-                                "child",
-                                "1房",
-                                "1大床（必须保证大床）",
-                                false,
-                                null
-                        )
-                )
+                guests
         );
+    }
+
+    private SalesBookingOrderGuestRequest guestRequest(Long id, Integer indexNo, String guestName, String guestType) {
+        return new SalesBookingOrderGuestRequest(
+                id,
+                indexNo,
+                guestName,
+                null,
+                null,
+                null,
+                "男",
+                LocalDate.of(1982, 6, 21),
+                44,
+                "13521124678",
+                guestType,
+                "1房",
+                "1大床（必须保证大床）",
+                false,
+                null
+        );
+    }
+
+    private SalesBookingOrderGuestEntity existingGuest(Long id, String guestName, String guestType) {
+        SalesBookingOrderGuestEntity guest = new SalesBookingOrderGuestEntity();
+        guest.setId(id);
+        guest.setTenantId(1L);
+        guest.setOrderId(2001L);
+        guest.setTeamId(1001L);
+        guest.setIndexNo(id.equals(11L) ? 1 : 2);
+        guest.setGuestName(guestName);
+        guest.setGender("男");
+        guest.setBirthDate(LocalDate.of(1982, 6, 21));
+        guest.setAge(44);
+        guest.setPhone("13521124678");
+        guest.setGuestType(guestType);
+        guest.setRoomGroup("1房");
+        guest.setRoomRemark("1大床（必须保证大床）");
+        guest.setLeaderFlag(false);
+        guest.setIsDeleted(false);
+        return guest;
     }
 
     private SalesTeamEntity team(Long id, int total, int used, int remaining) {

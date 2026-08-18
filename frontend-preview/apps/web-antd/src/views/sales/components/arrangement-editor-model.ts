@@ -220,6 +220,19 @@ export const arrangementEditorConfigs: Record<ArrangementType, ArrangementEditor
   },
 };
 
+const RESOURCE_BOUND_SUPPLIER_TYPES = new Set<ArrangementType>([
+  'hotel',
+  'meal',
+  'optional',
+  'scenic',
+  'shopping',
+]);
+
+/** 这些资源类型的供应商必须来自资源采购关系，不能直接展示同分类全部供应商。 */
+export function shouldFilterSupplierByResource(type: ArrangementType) {
+  return RESOURCE_BOUND_SUPPLIER_TYPES.has(type);
+}
+
 export const trafficTypeOptions: SelectOption[] = ['飞机', '高铁', '火车', '邮轮']
   .map((item) => ({ label: item, value: item }));
 

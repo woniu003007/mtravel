@@ -95,8 +95,7 @@ import {
   resolveSupplierOptionsForResource,
   routeDurationText,
   parseScheduleDayNo,
-  scheduleExclusiveNightsCount,
-  scheduleInclusiveDaysCount,
+  shouldFilterSupplierByResource,
   vehicleDistanceText,
   type ArrangementEditorForm,
   type AutoCompleteOption,
@@ -596,13 +595,84 @@ const guidePendingImprestTotal = computed(() => teamGuides.value.reduce(
 ));
 const budgetProfitAmount = computed(() => numericMoney(teamArrangementSummary.value?.budgetProfitAmount));
 const teamTravelDays = computed(() => Math.max(Number(team.value?.travelDays || 1), 1));
-const scheduleDayOptions = computed<SelectOption[]>(() => [
-  { label: '=出发日期=', value: '=出发日期=' },
-  ...Array.from({ length: teamTravelDays.value }, (_, index) => {
-    const day = index + 1;
-    return { label: `第${day}天`, value: `第${day}天` };
-  }),
-]);
+
+/** 只接受完整 ISO 日期，避免把“第1天”等历史相对日期误当作真实日期。 */
+function parseScheduleIsoDate(value?: string) {
+  const normalized = value?.trim();
+  if (!normalized || !/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return undefined;
+  const parsed = dayjs(normalized);
+  return parsed.isValid() && parsed.format('YYYY-MM-DD') === normalized ? parsed : undefined;
+}
+
+function teamDepartureScheduleDate() {
+  return parseScheduleIsoDate(team.value?.departureDate);
+}
+
+/** 将真实日期或历史“第N天”统一换算为团队第几天，供路书和天数计算使用。 */
+function scheduleDayNo(value?: string) {
+  const date = parseScheduleIsoDate(value);
+  const departureDate = teamDepartureScheduleDate();
+  if (date && departureDate) {
+    const dayNo = date.diff(departureDate, 'day') + 1;
+    return dayNo >= 1 ? dayNo : undefined;
+  }
+  return parseScheduleDayNo(value);
+}
+
+/** 酒店按退房日减入住日计算，兼容 Word 导入的真实日期和历史相对日期。 */
+function scheduleNightsCount(startValue?: string, endValue?: string) {
+  const startDate = parseScheduleIsoDate(startValue);
+  const endDate = parseScheduleIsoDate(endValue);
+  if (startDate && endDate) {
+    return Math.max(0, endDate.diff(startDate, 'day'));
+  }
+  const start = scheduleDayNo(startValue) || 1;
+  const end = Math.max(start, scheduleDayNo(endValue) || start + 1);
+  return Math.max(0, end - start);
+}
+
+/** 用车和地接按首尾日期都计入天数，兼容 Word 导入的真实日期和历史相对日期。 */
+function scheduleDaysCount(startValue?: string, endValue?: string) {
+  const startDate = parseScheduleIsoDate(startValue);
+  const endDate = parseScheduleIsoDate(endValue);
+  if (startDate && endDate) {
+    return Math.max(1, endDate.diff(startDate, 'day') + 1);
+  }
+  const start = scheduleDayNo(startValue) || 1;
+  const end = Math.max(start, scheduleDayNo(endValue) || start);
+  return Math.max(1, end - start + 1);
+}
+
+/** 历史安排仍可能保存“第N天”；下拉同时提供历史和真实日期，编辑时不丢失原值。 */
+const scheduleDayOptions = computed<SelectOption[]>(() => {
+  const options = new Map<string, SelectOption>();
+  const addOption = (value: string, label: string) => {
+    if (!options.has(value)) options.set(value, { label, value });
+  };
+  addOption('=出发日期=', '=出发日期=');
+  const departureDate = teamDepartureScheduleDate();
+  if (departureDate) {
+    Array.from({ length: teamTravelDays.value }, (_, index) => {
+      const dayNo = index + 1;
+      const value = departureDate.add(index, 'day').format('YYYY-MM-DD');
+      addOption(value, `${value}（第${dayNo}天）`);
+    });
+  }
+  Array.from({ length: teamTravelDays.value }, (_, index) => {
+    const dayNo = index + 1;
+    addOption(`第${dayNo}天`, `第${dayNo}天（历史）`);
+  });
+  // 旧数据可能超出当前行程天数，仍应保留在编辑下拉中，不能因前端选项缺失而被误改。
+  [arrangementForm.scheduleStartDay, arrangementForm.scheduleEndDay]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .forEach((value) => {
+      const dayNo = scheduleDayNo(value);
+      addOption(value, parseScheduleIsoDate(value)
+        ? `${value}${dayNo ? `（第${dayNo}天）` : ''}`
+        : parseScheduleDayNo(value) ? `${value}（历史）` : value);
+    });
+  return [...options.values()];
+});
 const editorTotalAmount = computed(() => (
   arrangementForm.priceLines.reduce((sum, line) => (
     sum + Number(line.unitPrice || 0) * Number(line.quantity || 0)
@@ -1095,6 +1165,9 @@ async function openArrangementEditor(type: ArrangementType) {
   activeEditorType.value = type;
   editingArrangementId.value = undefined;
   Object.assign(arrangementForm, createDefaultArrangementEditorForm(type));
+  if (type === 'scenic') {
+    prefillScenicTicketQuantity();
+  }
   departureRegionPath.value = [];
   arrivalRegionPath.value = [];
   supplierOptions.value = [];
@@ -1212,7 +1285,7 @@ async function loadEditorOptions(type: ArrangementType) {
   try {
     const supplierCategory = supplierCategoryMap[type];
     const [suppliers, projects, employees, resources, quoteRules] = await Promise.all([
-      type === 'scenic' || type === 'optional' || type === 'meal' || type === 'shopping'
+      shouldFilterSupplierByResource(type)
         ? Promise.resolve([])
         : getSupplierAll(supplierCategory),
       getExpenseItemAll(expenseResourceTypeMap[type] as never),
@@ -1239,7 +1312,7 @@ async function loadEditorOptions(type: ArrangementType) {
       resources,
       arrangementForm.resourceName,
     );
-    if (type === 'scenic' || type === 'optional' || type === 'meal' || type === 'shopping') {
+    if (shouldFilterSupplierByResource(type)) {
       loadResourceSupplierOptions(arrangementForm.resourceName);
     }
     if (type === 'vehicle') {
@@ -1265,20 +1338,8 @@ async function loadVehicleQuoteRuleOptions(): Promise<SelectOption[]> {
 
 async function loadResourceOptions(type: ArrangementType): Promise<SelectOptionWithId[]> {
   resourceRelationOptions.value = [];
-  if (type === 'hotel') {
-    const result = await getPurchaseResourcePage({
-      page: 1,
-      pageSize: 200,
-      resourceType: 'hotel',
-      status: 'active',
-    });
-    return result.items.map((item) => ({
-      id: item.id,
-      label: [item.resourceName, item.city, item.district].filter(Boolean).join(' / '),
-      value: item.resourceName,
-    }));
-  }
-  const relationResourceTypeMap: Partial<Record<ArrangementType, 'restaurant' | 'scenic' | 'shopping'>> = {
+  const relationResourceTypeMap: Partial<Record<ArrangementType, 'hotel' | 'restaurant' | 'scenic' | 'shopping'>> = {
+    hotel: 'hotel',
     meal: 'restaurant',
     optional: 'scenic',
     scenic: 'scenic',
@@ -1340,6 +1401,17 @@ function syncPrimaryPriceFields() {
   arrangementForm.unitPrice = Number(firstLine.unitPrice || 0);
   arrangementForm.quantity = Number(firstLine.quantity || 0);
   arrangementForm.priceRemark = firstLine.remark;
+}
+
+/** 新增景区安排时按当前未取消订单人数预填门票数量，计调仍可按免票等情况调整。 */
+function prefillScenicTicketQuantity() {
+  const receivedGuestCount = orders.value
+    .filter((order) => !isOrderStatus(order, ['已取消', 'cancelled']))
+    .reduce((sum, order) => sum + Math.max(0, Number(order.guestCount || 0)), 0);
+  const firstLine = arrangementForm.priceLines[0];
+  if (!firstLine) return;
+  firstLine.quantity = receivedGuestCount;
+  syncPrimaryPriceFields();
 }
 
 function addArrangementPriceLine() {
@@ -1424,10 +1496,7 @@ function applySelectedResource(value?: unknown) {
   const selectedValue = normalizeSelectValue(value);
   arrangementForm.resourceName = selectedValue;
   if (
-    activeEditorType.value === 'scenic'
-    || activeEditorType.value === 'optional'
-    || activeEditorType.value === 'meal'
-    || activeEditorType.value === 'shopping'
+    shouldFilterSupplierByResource(activeEditorType.value)
   ) {
     loadResourceSupplierOptions(selectedValue);
   }
@@ -1498,14 +1567,14 @@ function applySelectedResponsible(value?: unknown) {
 }
 
 function syncHotelNightsCount() {
-  arrangementForm.daysCount = scheduleExclusiveNightsCount(
+  arrangementForm.daysCount = scheduleNightsCount(
     arrangementForm.scheduleStartDay,
     arrangementForm.scheduleEndDay,
   );
 }
 
 function syncVehicleDaysCount() {
-  const days = scheduleInclusiveDaysCount(
+  const days = scheduleDaysCount(
     arrangementForm.scheduleStartDay,
     arrangementForm.scheduleEndDay,
   );
@@ -1513,8 +1582,8 @@ function syncVehicleDaysCount() {
 }
 
 function selectedVehicleDayRange() {
-  const start = parseScheduleDayNo(arrangementForm.scheduleStartDay) || 1;
-  const end = parseScheduleDayNo(arrangementForm.scheduleEndDay) || start;
+  const start = scheduleDayNo(arrangementForm.scheduleStartDay) || 1;
+  const end = scheduleDayNo(arrangementForm.scheduleEndDay) || start;
   return {
     end: Math.max(start, end),
     start,
@@ -1522,7 +1591,7 @@ function selectedVehicleDayRange() {
 }
 
 function syncGroundAgentDaysCount() {
-  const days = scheduleInclusiveDaysCount(
+  const days = scheduleDaysCount(
     arrangementForm.scheduleStartDay,
     arrangementForm.scheduleEndDay,
   );
@@ -1755,10 +1824,11 @@ async function recordVehicleHistoryUsage(
 function openArrangementRelationPage() {
   if (activeEditorType.value === 'scenic') {
     const routeInfo = router.resolve({
-      path: '/purchase/relation',
+      path: '/purchase/resource',
       query: {
-        resourceType: 'scenic',
-        templateRelationId: selectedScenicResourceRelation.value?.relationId,
+        openTemplate: '1',
+        relationId: selectedScenicResourceRelation.value?.relationId,
+        resourceId: selectedScenicResourceRelation.value?.resourceId,
       },
     });
     window.open(routeInfo.href, '_blank', 'noopener,noreferrer');
@@ -2525,6 +2595,16 @@ async function loadDetail() {
     loading.value = false;
   }
 }
+
+watch(
+  () => route.params.id,
+  async (currentTeamId, previousTeamId) => {
+    // 团队安排页会被多标签缓存复用；切换到另一团时必须重新读取安排、汇总和分类状态。
+    if (!currentTeamId || currentTeamId === previousTeamId) return;
+    await loadDetail();
+    await scrollToRouteHashAnchor();
+  },
+);
 
 watch(
   () => route.hash,

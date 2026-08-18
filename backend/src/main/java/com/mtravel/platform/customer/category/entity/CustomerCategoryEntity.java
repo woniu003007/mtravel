@@ -33,6 +33,14 @@ public class CustomerCategoryEntity {
     @TableField("default_credit_limit")
     private BigDecimal defaultCreditLimit;
 
+    /** 默认账期天数。0 表示不提供账期。 */
+    @TableField("credit_term_days")
+    private Integer creditTermDays;
+
+    /** 是否允许超出授信额度后发起指定人员审批。 */
+    @TableField("allow_over_limit")
+    private Boolean allowOverLimit;
+
     /** 排序号，数字越小越靠前，用于列表和下拉框展示。 */
     @TableField("sort_order")
     private Integer sortOrder;
@@ -100,6 +108,14 @@ public class CustomerCategoryEntity {
     public void setDefaultCreditLimit(BigDecimal defaultCreditLimit) {
         this.defaultCreditLimit = defaultCreditLimit;
     }
+
+    public Integer getCreditTermDays() { return creditTermDays; }
+
+    public void setCreditTermDays(Integer creditTermDays) { this.creditTermDays = creditTermDays; }
+
+    public Boolean getAllowOverLimit() { return allowOverLimit; }
+
+    public void setAllowOverLimit(Boolean allowOverLimit) { this.allowOverLimit = allowOverLimit; }
 
     public Integer getSortOrder() {
         return sortOrder;

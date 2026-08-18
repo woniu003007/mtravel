@@ -17,6 +17,31 @@ import org.apache.ibatis.annotations.Select;
 public interface SalesBookingOrderMapper extends BaseMapper<SalesBookingOrderEntity> {
 
     /**
+     * 获取订单编号生成的事务级数据库锁。
+     *
+     * <p>同一租户、同一日期前缀的订单号生成必须串行化，避免并发请求读取到相同最大后缀。</p>
+     *
+     * @return PostgreSQL void 锁函数的文本占位结果，业务层只依赖加锁副作用
+     */
+    @Select("""
+            SELECT pg_advisory_xact_lock(hashtextextended(CONCAT('sales_order_no:', #{tenantId}, ':', #{prefix}), 0))::text
+            """)
+    String lockOrderNoGeneration(@Param("tenantId") Long tenantId, @Param("prefix") String prefix);
+
+    /**
+     * 查询当前订单编号前缀下的最大数字后缀。
+     */
+    @Select("""
+            SELECT COALESCE(MAX(CAST(SUBSTRING(order_no FROM LENGTH(#{prefix}) + 1) AS integer)), 0)
+            FROM sales_orders
+            WHERE tenant_id = #{tenantId}
+              AND is_deleted = false
+              AND order_no LIKE CONCAT(#{prefix}, '%')
+              AND SUBSTRING(order_no FROM LENGTH(#{prefix}) + 1) ~ '^[0-9]+$'
+            """)
+    Integer maxOrderNoSuffix(@Param("tenantId") Long tenantId, @Param("prefix") String prefix);
+
+    /**
      * 汇总团队下已确认且未删除订单的游客人数。
      *
      * @param tenantId 当前租户 ID

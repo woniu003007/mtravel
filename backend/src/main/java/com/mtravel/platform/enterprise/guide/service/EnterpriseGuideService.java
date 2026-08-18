@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.mtravel.platform.common.BizException;
 import com.mtravel.platform.common.BusinessCrudService;
 import com.mtravel.platform.common.PageResult;
+import com.mtravel.platform.configuration.quote.entity.SalesQuoteGuideLevelEntity;
+import com.mtravel.platform.configuration.quote.mapper.SalesQuoteGuideLevelMapper;
 import com.mtravel.platform.enterprise.employee.entity.EnterpriseEmployeeEntity;
 import com.mtravel.platform.enterprise.employee.mapper.EnterpriseEmployeeMapper;
 import com.mtravel.platform.enterprise.guide.dto.EnterpriseGuideResponse;
@@ -49,18 +51,21 @@ public class EnterpriseGuideService extends BusinessCrudService<EnterpriseGuideE
     private final EnterpriseGuideTagMapper tagMapper;
     private final EnterpriseGuideTagRelationMapper relationMapper;
     private final EnterpriseEmployeeMapper employeeMapper;
+    private final SalesQuoteGuideLevelMapper guideLevelMapper;
 
     public EnterpriseGuideService(
             EnterpriseGuideMapper guideMapper,
             EnterpriseGuideTagMapper tagMapper,
             EnterpriseGuideTagRelationMapper relationMapper,
-            EnterpriseEmployeeMapper employeeMapper
+            EnterpriseEmployeeMapper employeeMapper,
+            SalesQuoteGuideLevelMapper guideLevelMapper
     ) {
         super(guideMapper);
         this.guideMapper = guideMapper;
         this.tagMapper = tagMapper;
         this.relationMapper = relationMapper;
         this.employeeMapper = employeeMapper;
+        this.guideLevelMapper = guideLevelMapper;
     }
 
     /**
@@ -150,10 +155,11 @@ public class EnterpriseGuideService extends BusinessCrudService<EnterpriseGuideE
     ) {
         assertGuideUnique(request, tenantId, null);
         EnterpriseEmployeeEntity manager = resolveGuideManager(request.guideManagerEmployeeId(), tenantId);
+        SalesQuoteGuideLevelEntity guideLevel = resolveGuideLevel(request.guideLevelId(), tenantId);
         List<Long> tagIds = assertTagsActive(request.tagIds(), tenantId);
         EnterpriseGuideEntity entity = new EnterpriseGuideEntity();
         entity.setTenantId(tenantId);
-        applyFields(entity, request, manager);
+        applyFields(entity, request, manager, guideLevel);
         entity.setCreatedBy(operator);
         entity.setIsDeleted(false);
         guideMapper.insert(entity);
@@ -171,6 +177,7 @@ public class EnterpriseGuideService extends BusinessCrudService<EnterpriseGuideE
         assertGuideUnique(request, tenantId, id);
         assertGuideExists(id, tenantId);
         EnterpriseEmployeeEntity manager = resolveGuideManager(request.guideManagerEmployeeId(), tenantId);
+        SalesQuoteGuideLevelEntity guideLevel = resolveGuideLevel(request.guideLevelId(), tenantId);
         List<Long> tagIds = assertTagsActive(request.tagIds(), tenantId);
         assertRatingValid(request.rating());
         assertTotalToursValid(request.totalTours());
@@ -183,6 +190,8 @@ public class EnterpriseGuideService extends BusinessCrudService<EnterpriseGuideE
                 .set("username", clean(request.username()))
                 .set("guide_manager_employee_id", manager == null ? null : manager.getId())
                 .set("guide_manager_name", manager == null ? null : manager.getEmployeeName())
+                .set("guide_level_id", guideLevel == null ? null : guideLevel.getId())
+                .set("guide_level_name", guideLevel == null ? null : guideLevel.getLevelName())
                 .set("gender", EnterpriseGuideGender.fromValueOrDefault(request.gender()).getValue())
                 .set("certificate_no", clean(request.certificateNo()))
                 .set("id_card_no", clean(request.idCardNo()))
@@ -279,7 +288,8 @@ public class EnterpriseGuideService extends BusinessCrudService<EnterpriseGuideE
     private void applyFields(
             EnterpriseGuideEntity entity,
             EnterpriseGuideSaveRequest request,
-            EnterpriseEmployeeEntity manager
+            EnterpriseEmployeeEntity manager,
+            SalesQuoteGuideLevelEntity guideLevel
     ) {
         assertRatingValid(request.rating());
         assertTotalToursValid(request.totalTours());
@@ -290,6 +300,8 @@ public class EnterpriseGuideService extends BusinessCrudService<EnterpriseGuideE
         entity.setUsername(clean(request.username()));
         entity.setGuideManagerEmployeeId(manager == null ? null : manager.getId());
         entity.setGuideManagerName(manager == null ? null : manager.getEmployeeName());
+        entity.setGuideLevelId(guideLevel == null ? null : guideLevel.getId());
+        entity.setGuideLevelName(guideLevel == null ? null : guideLevel.getLevelName());
         entity.setGender(EnterpriseGuideGender.fromValueOrDefault(request.gender()).getValue());
         entity.setCertificateNo(clean(request.certificateNo()));
         entity.setIdCardNo(clean(request.idCardNo()));
@@ -329,6 +341,21 @@ public class EnterpriseGuideService extends BusinessCrudService<EnterpriseGuideE
             throw new BizException("所属导管员工不存在或已停用");
         }
         return employee;
+    }
+
+    private SalesQuoteGuideLevelEntity resolveGuideLevel(Long guideLevelId, Long tenantId) {
+        if (guideLevelId == null) {
+            return null;
+        }
+        SalesQuoteGuideLevelEntity level = guideLevelMapper.selectOne(new QueryWrapper<SalesQuoteGuideLevelEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq("status", "active")
+                .eq("id", guideLevelId));
+        if (level == null) {
+            throw new BizException("导游等级不存在或已停用");
+        }
+        return level;
     }
 
     private List<Long> assertTagsActive(List<Long> tagIds, Long tenantId) {
@@ -450,6 +477,8 @@ public class EnterpriseGuideService extends BusinessCrudService<EnterpriseGuideE
         entity.setUsername(response.username());
         entity.setGuideManagerEmployeeId(response.guideManagerEmployeeId());
         entity.setGuideManagerName(response.guideManagerName());
+        entity.setGuideLevelId(response.guideLevelId());
+        entity.setGuideLevelName(response.guideLevelName());
         entity.setGender(response.gender());
         entity.setCertificateNo(response.certificateNo());
         entity.setIdCardNo(response.idCardNo());

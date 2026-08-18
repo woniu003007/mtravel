@@ -7,9 +7,9 @@ describe('supplier form fields', () => {
     expect(supplierConfig.fields.map((field) => field.label)).toEqual([
       '所在地',
       '公司名称',
-      '关联采购商',
       '负责人',
       '商家分类',
+      '基础信息',
       '联系电话',
       '传真号码',
       '办公地址',

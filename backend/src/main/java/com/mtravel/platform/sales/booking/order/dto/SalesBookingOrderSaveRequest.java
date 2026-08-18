@@ -40,7 +40,7 @@ import java.util.List;
  * @param feeRemark 费用说明。
  * @param confirmRemark 确认说明。
  * @param orderRemark 订单备注。
- * @param receivedAmount 已收金额。
+ * @param receivedAmount 历史兼容字段；订单保存不采信该值，已收金额只能由收款或核销链路维护。
  * @param riskApprovalRequestId 客户风控审批申请 ID。合同到期或授信超限且系统开启强制审批时必填。
  * @param status 订单状态，pending、confirmed、cancelled。
  * @param priceLines 价格明细。

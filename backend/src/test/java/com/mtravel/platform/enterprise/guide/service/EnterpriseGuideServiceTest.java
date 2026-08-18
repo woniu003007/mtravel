@@ -2,6 +2,8 @@ package com.mtravel.platform.enterprise.guide.service;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.mtravel.platform.common.BizException;
+import com.mtravel.platform.configuration.quote.entity.SalesQuoteGuideLevelEntity;
+import com.mtravel.platform.configuration.quote.mapper.SalesQuoteGuideLevelMapper;
 import com.mtravel.platform.enterprise.guide.dto.EnterpriseGuideSaveRequest;
 import com.mtravel.platform.enterprise.guide.entity.EnterpriseGuideEntity;
 import com.mtravel.platform.enterprise.guide.entity.EnterpriseGuideTagEntity;
@@ -50,13 +52,15 @@ class EnterpriseGuideServiceTest {
         EnterpriseGuideTagMapper tagMapper = mock(EnterpriseGuideTagMapper.class);
         EnterpriseGuideTagRelationMapper relationMapper = mock(EnterpriseGuideTagRelationMapper.class);
         EnterpriseEmployeeMapper employeeMapper = mock(EnterpriseEmployeeMapper.class);
-        EnterpriseGuideService service = new EnterpriseGuideService(mapper, tagMapper, relationMapper, employeeMapper);
+        SalesQuoteGuideLevelMapper guideLevelMapper = mock(SalesQuoteGuideLevelMapper.class);
+        EnterpriseGuideService service = new EnterpriseGuideService(mapper, tagMapper, relationMapper, employeeMapper, guideLevelMapper);
         ArgumentCaptor<EnterpriseGuideEntity> captor = ArgumentCaptor.forClass(EnterpriseGuideEntity.class);
         ArgumentCaptor<EnterpriseGuideTagRelationEntity> relationCaptor =
                 ArgumentCaptor.forClass(EnterpriseGuideTagRelationEntity.class);
 
         when(mapper.selectCount(any(Wrapper.class))).thenReturn(0L);
         when(employeeMapper.selectOne(any(Wrapper.class))).thenReturn(employee(7L, "张导管"));
+        when(guideLevelMapper.selectOne(any(Wrapper.class))).thenReturn(guideLevel(5L, "金牌"));
         when(tagMapper.selectList(any(Wrapper.class))).thenReturn(List.of(tag(31L, "金牌导游"), tag(32L, "研学")));
         when(relationMapper.selectList(any(Wrapper.class))).thenReturn(List.of(relation(12L, 31L), relation(12L, 32L)));
         doAnswer((Answer<Integer>) invocation -> {
@@ -81,6 +85,8 @@ class EnterpriseGuideServiceTest {
         assertThat(entity.getUsername()).isEqualTo("chendao");
         assertThat(entity.getGuideManagerEmployeeId()).isEqualTo(7L);
         assertThat(entity.getGuideManagerName()).isEqualTo("张导管");
+        assertThat(entity.getGuideLevelId()).isEqualTo(5L);
+        assertThat(entity.getGuideLevelName()).isEqualTo("金牌");
         assertThat(entity.getGender()).isEqualTo("male");
         assertThat(entity.getFax()).isEqualTo("0571-88001002");
         assertThat(entity.getCertificateNo()).isEqualTo("D-330100001");
@@ -110,7 +116,7 @@ class EnterpriseGuideServiceTest {
         EnterpriseGuideMapper mapper = mock(EnterpriseGuideMapper.class);
         EnterpriseGuideService service = service(mapper);
         EnterpriseGuideSaveRequest bad = new EnterpriseGuideSaveRequest(
-                "GD001", "陈导", "chendao", null, null, "male", "D-330100001", "3301",
+                "GD001", "陈导", "chendao", null, null, null, "male", "D-330100001", "3301",
                 "0571-88001001", "0571-88001002", "13900139001", "招商银行", "账户",
                 "支付宝姓名", "支付宝", "ecode", "signed_success", null, null, null, null,
                 null, null, null, new BigDecimal("5.50"), 18, 10, "active", "备注"
@@ -172,6 +178,7 @@ class EnterpriseGuideServiceTest {
                 "陈导",
                 "chendao",
                 7L,
+                5L,
                 List.of(31L, 32L),
                 "male",
                 "D-330100001",
@@ -205,8 +212,19 @@ class EnterpriseGuideServiceTest {
                 mapper,
                 mock(EnterpriseGuideTagMapper.class),
                 mock(EnterpriseGuideTagRelationMapper.class),
-                mock(EnterpriseEmployeeMapper.class)
+                mock(EnterpriseEmployeeMapper.class),
+                mock(SalesQuoteGuideLevelMapper.class)
         );
+    }
+
+    private SalesQuoteGuideLevelEntity guideLevel(Long id, String name) {
+        SalesQuoteGuideLevelEntity entity = new SalesQuoteGuideLevelEntity();
+        entity.setId(id);
+        entity.setTenantId(1L);
+        entity.setLevelName(name);
+        entity.setStatus("active");
+        entity.setIsDeleted(false);
+        return entity;
     }
 
     private EnterpriseEmployeeEntity employee(Long id, String name) {

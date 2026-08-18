@@ -10,6 +10,9 @@ import com.mtravel.platform.sales.team.dto.SalesTeamOperationResponse;
 public record SalesBookingTeamDraftResponse(
         SalesTeamOperationResponse.TeamInfo team,
         SalesTeamOperationResponse.ProductInfo product,
-        SalesTeamOperationResponse.ContentInfo content
+        SalesTeamOperationResponse.ContentInfo content,
+        SalesTeamOperationResponse.RouteSummary routeSummary,
+        java.util.List<SalesTeamOperationResponse.ItineraryDayInfo> itineraryDays,
+        java.util.List<com.mtravel.platform.sales.team.dto.SalesTeamPriceResponse> prices
 ) {
 }

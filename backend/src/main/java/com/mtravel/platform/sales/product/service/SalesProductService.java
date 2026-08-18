@@ -19,6 +19,14 @@ import com.mtravel.platform.sales.product.dto.SalesProductVehicleInquiryRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductVehicleInquiryResponse;
 import com.mtravel.platform.sales.product.dto.SalesProductVehicleQuoteSnapshotRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductVehicleQuoteSnapshotResponse;
+import com.mtravel.platform.sales.product.designer.entity.SalesProductAdultQuoteEntity;
+import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceEntity;
+import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceImageEntity;
+import com.mtravel.platform.sales.product.designer.entity.SalesProductDocumentVersionEntity;
+import com.mtravel.platform.sales.product.designer.mapper.SalesProductAdultQuoteMapper;
+import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceImageMapper;
+import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceMapper;
+import com.mtravel.platform.sales.product.designer.mapper.SalesProductDocumentVersionMapper;
 import com.mtravel.platform.sales.product.entity.SalesProductArrangementItemEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductArrangementPriceLineEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductDescriptionEntity;
@@ -47,6 +55,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -70,6 +79,10 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
     private final SalesProductRoadbookPointMapper roadbookMapper;
     private final SalesProductVehicleQuoteSnapshotMapper vehicleQuoteSnapshotMapper;
     private final SalesProductVehicleInquiryMapper vehicleInquiryMapper;
+    private final SalesProductDayResourceMapper dayResourceMapper;
+    private final SalesProductDayResourceImageMapper dayResourceImageMapper;
+    private final SalesProductAdultQuoteMapper adultQuoteMapper;
+    private final SalesProductDocumentVersionMapper documentVersionMapper;
 
     public SalesProductService(
             SalesProductMapper productMapper,
@@ -79,7 +92,11 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
             SalesProductArrangementPriceLineMapper priceLineMapper,
             SalesProductRoadbookPointMapper roadbookMapper,
             SalesProductVehicleQuoteSnapshotMapper vehicleQuoteSnapshotMapper,
-            SalesProductVehicleInquiryMapper vehicleInquiryMapper
+            SalesProductVehicleInquiryMapper vehicleInquiryMapper,
+            SalesProductDayResourceMapper dayResourceMapper,
+            SalesProductDayResourceImageMapper dayResourceImageMapper,
+            SalesProductAdultQuoteMapper adultQuoteMapper,
+            SalesProductDocumentVersionMapper documentVersionMapper
     ) {
         super(productMapper);
         this.productMapper = productMapper;
@@ -90,6 +107,10 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
         this.roadbookMapper = roadbookMapper;
         this.vehicleQuoteSnapshotMapper = vehicleQuoteSnapshotMapper;
         this.vehicleInquiryMapper = vehicleInquiryMapper;
+        this.dayResourceMapper = dayResourceMapper;
+        this.dayResourceImageMapper = dayResourceImageMapper;
+        this.adultQuoteMapper = adultQuoteMapper;
+        this.documentVersionMapper = documentVersionMapper;
     }
 
     /**
@@ -139,7 +160,9 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
      */
     @Override
     public SalesProductResponse detail(Long id, Long tenantId) {
-        SalesProductEntity product = productMapper.selectOne(baseQuery(tenantId).eq("id", id));
+        SalesProductEntity product = productMapper.selectOne(baseQuery(tenantId)
+                .eq("product_scope", PRODUCT_SCOPE_TEMPLATE)
+                .eq("id", id));
         if (product == null) {
             throw new BizException(notFoundMessage());
         }
@@ -166,7 +189,12 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
         applyProductFields(entity, request);
         entity.setCreatedBy(operator);
         entity.setIsDeleted(false);
-        productMapper.insert(entity);
+        try {
+            productMapper.insert(entity);
+        } catch (DataIntegrityViolationException exception) {
+            // 数据库部分唯一索引用于兜住并发创建，不能让底层唯一键错误直接返回给前端。
+            throw duplicateProductNameException();
+        }
         replaceChildren(entity.getId(), request, tenantId, operator);
         return detail(entity.getId(), tenantId);
     }
@@ -190,7 +218,15 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
         SalesProductEntity entity = new SalesProductEntity();
         entity.setProductScope(PRODUCT_SCOPE_TEMPLATE);
         applyProductFields(entity, request);
-        int updated = productMapper.update(entity, baseUpdate(tenantId).eq("id", id));
+        int updated;
+        try {
+            updated = productMapper.update(entity, baseUpdate(tenantId)
+                    .eq("product_scope", PRODUCT_SCOPE_TEMPLATE)
+                    .eq("id", id));
+        } catch (DataIntegrityViolationException exception) {
+            // 名称变更与其它会话并发时，由数据库唯一索引作为最终裁决。
+            throw duplicateProductNameException();
+        }
         if (updated == 0) {
             throw new BizException(notFoundMessage());
         }
@@ -217,7 +253,9 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
             Long tenantId,
             String operator
     ) {
-        SalesProductEntity product = productMapper.selectOne(baseQuery(tenantId).eq("id", id));
+        SalesProductEntity product = productMapper.selectOne(baseQuery(tenantId)
+                .eq("product_scope", PRODUCT_SCOPE_TEMPLATE)
+                .eq("id", id));
         if (product == null) {
             throw new BizException(notFoundMessage());
         }
@@ -244,7 +282,9 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
             Long tenantId,
             String operator
     ) {
-        SalesProductEntity product = productMapper.selectOne(baseQuery(tenantId).eq("id", productId));
+        SalesProductEntity product = productMapper.selectOne(baseQuery(tenantId)
+                .eq("product_scope", PRODUCT_SCOPE_TEMPLATE)
+                .eq("id", productId));
         if (product == null) {
             throw new BizException(notFoundMessage());
         }
@@ -269,6 +309,7 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
      */
     @Transactional
     public void deleteArrangement(Long productId, Long arrangementId, Long tenantId, String operator) {
+        requireTemplateProduct(productId, tenantId);
         SalesProductArrangementItemEntity current = arrangementMapper.selectOne(new QueryWrapper<SalesProductArrangementItemEntity>()
                 .eq("tenant_id", tenantId)
                 .eq("product_id", productId)
@@ -288,8 +329,29 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
     @Transactional
     @Override
     public void delete(Long id, Long tenantId, String operator) {
-        super.delete(id, tenantId, operator);
+        SalesProductEntity deleted = new SalesProductEntity();
+        deleted.setIsDeleted(true);
+        deleted.setDeletedAt(OffsetDateTime.now());
+        deleted.setDeletedBy(operator);
+        int updated = productMapper.update(deleted, baseUpdate(tenantId)
+                .eq("product_scope", PRODUCT_SCOPE_TEMPLATE)
+                .eq("id", id));
+        if (updated == 0) {
+            throw new BizException(notFoundMessage());
+        }
         softDeleteChildren(id, tenantId, operator);
+        softDeleteDesignerChildren(id, tenantId, operator);
+    }
+
+    /** 校验当前ID属于正式产品，防止草稿绕过产品设计流程被修改。 */
+    private SalesProductEntity requireTemplateProduct(Long id, Long tenantId) {
+        SalesProductEntity product = productMapper.selectOne(baseQuery(tenantId)
+                .eq("product_scope", PRODUCT_SCOPE_TEMPLATE)
+                .eq("id", id));
+        if (product == null) {
+            throw new BizException(notFoundMessage());
+        }
+        return product;
     }
 
     /** 将产品保存请求写入主表实体，并补齐默认枚举值。 */
@@ -650,6 +712,38 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
         vehicleInquiryMapper.update(vehicleInquiry, childUpdate(tenantId, productId));
     }
 
+    /** 正式产品删除时同步软删其设计工作台快照，避免留下仍标记有效的孤立资源和文件版本。 */
+    private void softDeleteDesignerChildren(Long productId, Long tenantId, String operator) {
+        OffsetDateTime now = OffsetDateTime.now();
+
+        SalesProductDayResourceImageEntity image = new SalesProductDayResourceImageEntity();
+        markDeleted(image, operator, now);
+        dayResourceImageMapper.update(image, childUpdate(tenantId, productId));
+
+        SalesProductDayResourceEntity resource = new SalesProductDayResourceEntity();
+        markDeleted(resource, operator, now);
+        dayResourceMapper.update(resource, childUpdate(tenantId, productId));
+
+        SalesProductAdultQuoteEntity quote = new SalesProductAdultQuoteEntity();
+        markDeleted(quote, operator, now);
+        adultQuoteMapper.update(quote, childUpdate(tenantId, productId));
+
+        SalesProductDocumentVersionEntity document = new SalesProductDocumentVersionEntity();
+        markDeleted(document, operator, now);
+        documentVersionMapper.update(document, childUpdate(tenantId, productId));
+    }
+
+    /** 填充统一软删除审计字段。 */
+    private void markDeleted(
+            com.mtravel.platform.common.TenantSoftDeleteEntity entity,
+            String operator,
+            OffsetDateTime now
+    ) {
+        entity.setIsDeleted(true);
+        entity.setDeletedAt(now);
+        entity.setDeletedBy(operator);
+    }
+
     /**
      * 只软删除团队安排相关子表。
      *
@@ -725,12 +819,17 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
     /** 校验同租户未删除产品名称唯一。 */
     private void assertDuplicateName(Long tenantId, String productName, Long excludeId) {
         Long count = productMapper.selectCount(baseQuery(tenantId)
-                .eq("product_scope", PRODUCT_SCOPE_TEMPLATE)
+                .in("product_scope", List.of(PRODUCT_SCOPE_TEMPLATE, "design_draft"))
                 .eq("product_name", cleanRequired(productName))
                 .ne(excludeId != null, "id", excludeId));
         if (count != null && count > 0) {
-            throw new BizException("产品名称已存在");
+            throw duplicateProductNameException();
         }
+    }
+
+    /** 返回统一的重名错误，覆盖预查和数据库并发唯一约束两条路径。 */
+    private BizException duplicateProductNameException() {
+        return new BizException("同名产品或设计草稿已存在");
     }
 
     /** 校验行程天数不能重复，也不能超过产品旅游天数。 */

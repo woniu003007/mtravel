@@ -29,6 +29,9 @@ public record EnterpriseGuideSaveRequest(
         /** 所属导管员工 ID，用于导游绩效和导管小组归属统计。 */
         Long guideManagerEmployeeId,
 
+        /** 导游等级 ID，单选并参与导游报价规则匹配。 */
+        Long guideLevelId,
+
         /** 导游标签 ID 集合，用于能力分类和后续排团筛选。 */
         List<Long> tagIds,
 

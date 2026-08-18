@@ -626,6 +626,8 @@ describe('sales team operation layout', () => {
     const arrangementLayoutSource = readAppFile('src/views/sales/team-arrangement-layout.css');
 
     expect(routeSource).toContain("path: '/sales/team/arrangement/:id'");
+    expect(arrangementSource).toContain('() => route.params.id,');
+    expect(arrangementSource).toContain('切换到另一团时必须重新读取安排、汇总和分类状态');
     expect(routeSource).toContain("path: '/sales/team/edit/:id'");
     expect(routeSource).toContain("title: '修改团队'");
     expect(routeSource).toContain("title: '团队安排总览'");
@@ -819,6 +821,31 @@ describe('sales team operation layout', () => {
     expect(arrangementSource).toContain('deleteTeamArrangement');
     expect(arrangementSource).toContain('teamArrangements');
     expect(arrangementSource).not.toContain('正式排团数据表设计后接入保存');
+  });
+
+  it('supports Word-imported ISO schedule dates while retaining legacy relative-day arrangements', () => {
+    const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
+
+    expect(arrangementSource).toContain('function parseScheduleIsoDate(value?: string)');
+    expect(arrangementSource).toContain("departureDate.add(index, 'day').format('YYYY-MM-DD')");
+    expect(arrangementSource).toContain('`${value}（第${dayNo}天）`');
+    expect(arrangementSource).toContain('`第${dayNo}天（历史）`');
+    expect(arrangementSource).toContain('[arrangementForm.scheduleStartDay, arrangementForm.scheduleEndDay]');
+    expect(arrangementSource).toContain('function scheduleNightsCount(startValue?: string, endValue?: string)');
+    expect(arrangementSource).toContain('function scheduleDaysCount(startValue?: string, endValue?: string)');
+    expect(arrangementSource).toContain('arrangementForm.daysCount = scheduleNightsCount(');
+    expect(arrangementSource).toContain('const days = scheduleDaysCount(');
+    expect(arrangementSource).toContain('const start = scheduleDayNo(arrangementForm.scheduleStartDay) || 1;');
+  });
+
+  it('prefills a new scenic ticket quantity from active booking order guest counts', () => {
+    const arrangementSource = readAppFile('src/views/sales/team/arrangement.vue');
+
+    expect(arrangementSource).toContain("if (type === 'scenic') {\n    prefillScenicTicketQuantity();");
+    expect(arrangementSource).toContain(".filter((order) => !isOrderStatus(order, ['已取消', 'cancelled']))");
+    expect(arrangementSource).toContain('.reduce((sum, order) => sum + Math.max(0, Number(order.guestCount || 0)), 0);');
+    expect(arrangementSource).toContain('firstLine.quantity = receivedGuestCount;');
+    expect(arrangementSource).toContain('syncPrimaryPriceFields();');
   });
 
   it('loads formal team arrangement supplier resource project and order options for editor modal', () => {

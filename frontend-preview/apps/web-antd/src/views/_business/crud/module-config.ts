@@ -198,6 +198,7 @@ export const customerProductAuthConfig: CrudPageConfig<Record<string, any>> = {
 };
 
 export const supplierConfig: CrudPageConfig<Record<string, any>> = {
+  actionWidth: 230,
   title: '供应商管理',
   description: '维护景区、酒店、餐厅、车队、大交通、地接、购物等采购供应商档案。',
   loadOptions: loadCustomerOptions,
@@ -213,9 +214,9 @@ export const supplierConfig: CrudPageConfig<Record<string, any>> = {
   fields: [
     { key: 'area', label: '所在地', type: 'region' },
     { key: 'supplierName', label: '公司名称', required: true },
-    { key: 'buyerId', label: '关联采购商', type: 'select', options: customerOptions },
     { key: 'contactName', label: '负责人', required: true },
     { key: 'supplierCategory', label: '商家分类', type: 'select', options: supplierCategoryOptions },
+    { key: 'basicInfo', label: '基础信息', type: 'textarea' },
     { key: 'contactPhone', label: '联系电话' },
     { key: 'faxNumber', label: '传真号码' },
     { key: 'officeAddress', label: '办公地址' },
@@ -226,8 +227,10 @@ export const supplierConfig: CrudPageConfig<Record<string, any>> = {
     { key: 'supplierName', title: '供应商名称', width: 220 },
     { key: 'supplierCategory', title: '分类', format: 'status', width: 110 },
     { key: 'area', title: '所在地', format: 'area', width: 170 },
-    { key: 'buyerName', title: '关联采购商', width: 180 },
     { key: 'contactName', title: '联系人', width: 120 },
+    { key: 'basicInfo', title: '基础信息', width: 240 },
+    { key: 'defaultResourceNames', title: '默认供应商', width: 220 },
+    { key: 'priceSummary', title: '报价', width: 320 },
     { key: 'contactPhone', title: '电话', width: 140 },
     { key: 'status', title: '状态', format: 'status', width: 110 },
   ],

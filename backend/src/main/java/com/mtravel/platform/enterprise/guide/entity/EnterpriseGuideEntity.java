@@ -35,6 +35,14 @@ public class EnterpriseGuideEntity extends TenantSoftDeleteEntity {
     @TableField("guide_manager_name")
     private String guideManagerName;
 
+    /** 导游等级 ID，用于导游报价规则匹配。 */
+    @TableField("guide_level_id")
+    private Long guideLevelId;
+
+    /** 导游等级名称快照，用于列表快速展示。 */
+    @TableField("guide_level_name")
+    private String guideLevelName;
+
     /** 性别。male 男，female 女，unknown 未填写。 */
     @TableField("gender")
     private String gender;
@@ -169,6 +177,22 @@ public class EnterpriseGuideEntity extends TenantSoftDeleteEntity {
 
     public void setGuideManagerName(String guideManagerName) {
         this.guideManagerName = guideManagerName;
+    }
+
+    public Long getGuideLevelId() {
+        return guideLevelId;
+    }
+
+    public void setGuideLevelId(Long guideLevelId) {
+        this.guideLevelId = guideLevelId;
+    }
+
+    public String getGuideLevelName() {
+        return guideLevelName;
+    }
+
+    public void setGuideLevelName(String guideLevelName) {
+        this.guideLevelName = guideLevelName;
     }
 
     public String getGender() {

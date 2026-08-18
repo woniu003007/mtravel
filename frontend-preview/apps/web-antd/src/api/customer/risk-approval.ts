@@ -1,7 +1,27 @@
 import { requestClient } from '#/api/request';
 
 export namespace CustomerRiskApprovalApi {
-  export type ApprovalStatus = 'approved' | 'cancelled' | 'pending' | 'rejected';
+  export type ApprovalStatus =
+    | 'approved'
+    | 'cancelled'
+    | 'pending'
+    | 'rejected';
+  export type ApprovalView = 'cc' | 'initiated' | 'to_approve';
+
+  export interface ApprovalStep {
+    approverName?: string;
+    approverUserId: number;
+    decidedAt?: string;
+    decisionRemark?: string;
+    status: ApprovalStatus;
+    stepOrder: number;
+  }
+
+  export interface CcUser {
+    ccName?: string;
+    ccUserId: number;
+    visibleAt?: string;
+  }
 
   export interface PageResult<T> {
     items: T[];
@@ -48,14 +68,22 @@ export namespace CustomerRiskApprovalApi {
   }
 
   export interface Approval {
+    applicantUserId?: number;
     applicant?: string;
+    approvalSteps?: ApprovalStep[];
     approvalRemark?: string;
     approvedAt?: string;
     approvedBy?: string;
     availableAmount?: number;
+    canApprove?: boolean;
+    categoryId?: number;
+    categoryName?: string;
+    ccUsers?: CcUser[];
     contractExpireDate?: string;
     createdAt?: string;
     creditLimit?: number;
+    creditTermDays?: number;
+    currentApprovalStep?: number;
     customerId: number;
     customerName?: string;
     id: number;
@@ -83,6 +111,7 @@ export namespace CustomerRiskApprovalApi {
     pageSize?: number;
     status?: ApprovalStatus;
     teamId?: number;
+    view?: ApprovalView;
   }
 
   export interface DecisionParams {

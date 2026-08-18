@@ -65,6 +65,7 @@ import {
   routeDurationText,
   scheduleExclusiveNightsCount,
   scheduleInclusiveDaysCount,
+  shouldFilterSupplierByResource,
   parseScheduleDayNo,
   vehicleDistanceText,
   type ArrangementEditorForm,
@@ -1318,7 +1319,7 @@ function applyEditorOptionsCache(type: SalesProductApi.ArrangementType, cacheEnt
   resourceRelationOptions.value = [...cacheEntry.resourceRelationOptions];
   scenicResourceRelationOptions.value = [...cacheEntry.scenicResourceRelationOptions];
   vehicleQuoteRuleOptions.value = [...cacheEntry.vehicleQuoteRuleOptions];
-  if (type === 'scenic' || type === 'optional' || type === 'meal' || type === 'shopping') {
+  if (shouldFilterSupplierByResource(type)) {
     loadResourceSupplierOptions(arrangementForm.resourceName);
   } else {
     scenicTicketTemplate.value = null;
@@ -1340,7 +1341,7 @@ async function loadEditorOptions(type: SalesProductApi.ArrangementType, force = 
   try {
     const supplierCategory = supplierCategoryMap[type];
     const [suppliers, projects, employees, resources, quoteRules] = await Promise.all([
-      type === 'scenic' || type === 'optional' || type === 'meal' || type === 'shopping'
+      shouldFilterSupplierByResource(type)
         ? Promise.resolve([])
         : getSupplierAll(supplierCategory),
       getExpenseItemAll(expenseResourceTypeMap[type] as never),
@@ -1367,7 +1368,7 @@ async function loadEditorOptions(type: SalesProductApi.ArrangementType, force = 
       resources,
       arrangementForm.resourceName,
     );
-    if (type === 'scenic' || type === 'optional' || type === 'meal' || type === 'shopping') {
+    if (shouldFilterSupplierByResource(type)) {
       loadResourceSupplierOptions(arrangementForm.resourceName);
     } else {
       resourceRelationOptions.value = [];
@@ -1409,15 +1410,35 @@ async function loadResourceOptions(type: SalesProductApi.ArrangementType): Promi
   resourceRelationOptions.value = [];
   scenicResourceRelationOptions.value = [];
   if (type === 'hotel') {
-    const result = await getPurchaseResourcePage({
-      page: 1,
-      pageSize: 200,
-      resourceType: 'hotel',
-      status: 'active',
-    });
-    return result.items.map((item) => ({
+    const [resources, relations] = await Promise.all([
+      getPurchaseResourcePage({
+        page: 1,
+        pageSize: 200,
+        resourceType: 'hotel',
+        status: 'active',
+      }),
+      getPurchaseRelationPage({
+        page: 1,
+        pageSize: 200,
+        resourceType: 'hotel',
+        status: 'active',
+      }),
+    ]);
+    resourceRelationOptions.value = relations.items.map((item) => ({
+      relationId: item.id,
+      resourceId: item.resourceId,
+      resourceName: item.resourceName,
+      supplierId: item.supplierId,
+      supplierName: item.supplierName,
+    }));
+    return resources.items.map((item) => ({
       id: item.id,
-      label: [item.resourceName, item.city, item.district].filter(Boolean).join(' / '),
+      label: [
+        item.resourceName,
+        item.city,
+        item.district,
+        item.boundSupplierCount ? `${item.boundSupplierCount}家供应商` : '',
+      ].filter(Boolean).join(' / '),
       value: item.resourceName,
     }));
   }
@@ -1608,10 +1629,7 @@ function applySelectedResource(value?: unknown) {
   const selectedValue = normalizeSelectValue(value);
   arrangementForm.resourceName = selectedValue;
   if (
-    activeEditorType.value === 'scenic'
-    || activeEditorType.value === 'optional'
-    || activeEditorType.value === 'meal'
-    || activeEditorType.value === 'shopping'
+    shouldFilterSupplierByResource(activeEditorType.value)
   ) {
     loadResourceSupplierOptions(selectedValue);
   }
@@ -1642,10 +1660,11 @@ async function loadSelectedScenicTicketTemplate() {
 
 function openScenicTemplateConfigPage() {
   const routeInfo = router.resolve({
-    path: '/purchase/relation',
+    path: '/purchase/resource',
     query: {
-      resourceType: 'scenic',
-      templateRelationId: selectedScenicResourceRelation.value?.relationId,
+      openTemplate: '1',
+      relationId: selectedScenicResourceRelation.value?.relationId,
+      resourceId: selectedScenicResourceRelation.value?.resourceId,
     },
   });
   window.open(routeInfo.href, '_blank', 'noopener,noreferrer');

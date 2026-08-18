@@ -25,6 +25,7 @@ import {
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 
 import { downloadAttachment, uploadAttachment } from '#/api/common/attachment';
+import { getQuoteGuideLevelAll } from '#/api/configuration/quote';
 import BusinessSearchForm from '#/components/business/BusinessSearchForm.vue';
 import { getEnterpriseEmployeeAll, type EnterpriseEmployeeApi } from '#/api/enterprise/employee';
 import {
@@ -55,6 +56,7 @@ type GuideTagRow = EnterpriseGuideApi.TagItem;
 const guideColumns: TableColumnsType<GuideRow> = [
   { title: '导游名称', dataIndex: 'guideName', key: 'guideName', width: 130 },
   { title: '所属导管', dataIndex: 'guideManagerName', key: 'guideManagerName', width: 120 },
+  { title: '导游等级', dataIndex: 'guideLevelName', key: 'guideLevelName', width: 110 },
   { title: '标签', key: 'tags', width: 220 },
   { title: '用户名', dataIndex: 'username', key: 'username', width: 120 },
   { title: '性别', dataIndex: 'gender', key: 'gender', width: 80 },
@@ -100,6 +102,7 @@ const activeTab = ref('guides');
 const guides = ref<GuideRow[]>([]);
 const guideTags = ref<GuideTagRow[]>([]);
 const employees = ref<EnterpriseEmployeeApi.Item[]>([]);
+const guideLevelOptions = ref<Array<{ label: string; value: number }>>([]);
 const loading = ref(false);
 const tagLoading = ref(false);
 const modalOpen = ref(false);
@@ -138,6 +141,7 @@ const formState = reactive<EnterpriseGuideApi.SaveParams>({
   fax: '',
   gender: 'unknown',
   guideCode: '',
+  guideLevelId: undefined,
   guideName: '',
   idCardNo: '',
   languages: '',
@@ -194,12 +198,17 @@ const tagOptions = computed(() =>
 );
 
 async function loadOptions() {
-  const [employeeList, tagList] = await Promise.all([
+  const [employeeList, tagList, guideLevels] = await Promise.all([
     getEnterpriseEmployeeAll(true),
     getEnterpriseGuideTagAll(),
+    getQuoteGuideLevelAll(),
   ]);
   employees.value = employeeList;
   guideTags.value = tagList;
+  guideLevelOptions.value = guideLevels.map((item) => ({
+    label: item.levelName,
+    value: item.id,
+  }));
 }
 
 async function loadGuides() {
@@ -297,6 +306,7 @@ function resetForm() {
     fax: '',
     gender: 'unknown',
     guideCode: '',
+    guideLevelId: undefined,
     guideManagerEmployeeId: undefined,
     guideName: '',
     idCardNo: '',
@@ -350,6 +360,7 @@ async function openEditModal(record: GuideRow) {
     fax: record.fax || '',
     gender: record.gender,
     guideCode: record.guideCode || '',
+    guideLevelId: record.guideLevelId,
     guideManagerEmployeeId: record.guideManagerEmployeeId,
     guideName: record.guideName,
     idCardNo: record.idCardNo || '',
@@ -410,6 +421,7 @@ function buildSaveParams(): EnterpriseGuideApi.SaveParams {
     fax: clean(formState.fax),
     gender: formState.gender,
     guideCode: clean(formState.guideCode),
+    guideLevelId: formState.guideLevelId,
     guideManagerEmployeeId: formState.guideManagerEmployeeId,
     guideName: formState.guideName.trim(),
     idCardNo: clean(formState.idCardNo),
@@ -822,6 +834,9 @@ onBeforeUnmount(() => {
             <template v-if="column.key === 'guideManagerName'">
               {{ record.guideManagerName || '-' }}
             </template>
+            <template v-else-if="column.key === 'guideLevelName'">
+              {{ record.guideLevelName || '-' }}
+            </template>
             <template v-else-if="column.key === 'tags'">
               <Tooltip :title="tagNamesText(record)">
                 <Space :size="[4, 4]" wrap>
@@ -982,6 +997,14 @@ onBeforeUnmount(() => {
               allow-clear
               :options="employeeOptions"
               placeholder="请选择负责导管"
+            />
+          </Form.Item>
+          <Form.Item label="导游等级">
+            <Select
+              v-model:value="formState.guideLevelId"
+              allow-clear
+              :options="guideLevelOptions"
+              placeholder="请选择参与报价的等级"
             />
           </Form.Item>
           <Form.Item label="导游标签">

@@ -17,6 +17,9 @@ import com.mtravel.platform.sales.product.service.AmapRouteService;
 import com.mtravel.platform.sales.product.service.SalesProductService;
 import com.mtravel.platform.system.log.web.OperationLog;
 import com.mtravel.platform.tenant.TenantProperties;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -40,6 +43,47 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/sales/product")
 public class SalesProductController extends ControllerSupport {
+
+    private static final String PRODUCT_SAVE_EXAMPLE = """
+            {
+              "productName": "华东五市四日游",
+              "businessType": "domestic",
+              "domesticInternational": "domestic",
+              "province": "江苏省",
+              "city": "南京市",
+              "tripType": "daily",
+              "receptionStandard": "舒适型",
+              "productTheme": "华东常规散拼",
+              "travelDays": 4,
+              "closeDaysBefore": 2,
+              "singleRoomDifference": 300,
+              "plannedCapacity": 30,
+              "status": "active",
+              "itineraryDays": [
+                {
+                  "dayNo": 1,
+                  "dayTitle": "南京接团-夫子庙",
+                  "itineraryContent": "南京接团后游览夫子庙秦淮风光带，晚餐后入住酒店。",
+                  "accommodationNote": "南京舒适型酒店",
+                  "relatedHotel": "南京市区酒店",
+                  "breakfastIncluded": false,
+                  "lunchIncluded": true,
+                  "dinnerIncluded": true
+                }
+              ],
+              "bookingNotice": "请提前提供游客姓名、手机号和证件信息。",
+              "productDescription": "适合常规华东散拼接待的四日游产品模板。",
+              "feeIncluded": "住宿、用车、导游服务、行程内首道门票。",
+              "feeExcluded": "单房差、个人消费、自费项目。",
+              "childPolicy": "儿童默认不占床，门票按景区政策现询。",
+              "shoppingArrangement": "全程无强制购物。",
+              "optionalItems": "夜游项目自愿参加。",
+              "giftItems": "每人每天一瓶矿泉水。",
+              "attentionItems": "请游客携带有效身份证件。",
+              "warmReminder": "旺季酒店和用车以最终确认为准。",
+              "remark": "Swagger 精简示例，团队安排和路书点位按需另填。"
+            }
+            """;
 
     private final SalesProductService service;
     private final AmapRouteService amapRouteService;
@@ -101,6 +145,21 @@ public class SalesProductController extends ControllerSupport {
      * @param authentication 当前登录认证信息，用于记录创建人
      * @return 新增后的产品详情
      */
+    @Operation(
+            summary = "新增产品模板",
+            description = "新增线路产品模板，保存产品基础信息、每日行程、产品说明和可选团队安排参数。",
+            requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                    description = "产品保存请求。示例只保留常用创建字段；完整字段请查看 Schema。",
+                    content = @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(
+                                    name = "productCreateExample",
+                                    summary = "常用产品创建示例",
+                                    value = PRODUCT_SAVE_EXAMPLE
+                            )
+                    )
+            )
+    )
     @OperationLog(module = "销售管理", type = "新增")
     @PostMapping("/create")
     public ApiResponse<SalesProductResponse> create(
@@ -118,6 +177,21 @@ public class SalesProductController extends ControllerSupport {
      * @param authentication 当前登录认证信息，用于记录子表重建操作人
      * @return 修改后的产品详情
      */
+    @Operation(
+            summary = "修改产品模板",
+            description = "修改线路产品模板。该接口保存完整产品请求体，会覆盖产品基础信息、行程、说明和团队安排参数。",
+            requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(
+                    description = "产品保存请求。示例只保留常用修改字段；完整字段请查看 Schema。",
+                    content = @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(
+                                    name = "productUpdateExample",
+                                    summary = "常用产品修改示例",
+                                    value = PRODUCT_SAVE_EXAMPLE
+                            )
+                    )
+            )
+    )
     @OperationLog(module = "销售管理", type = "修改")
     @PostMapping("/update")
     public ApiResponse<SalesProductResponse> update(

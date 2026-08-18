@@ -1,5 +1,6 @@
 package com.mtravel.platform.customer.category.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mtravel.platform.auth.dto.AuthenticatedUser;
 import com.mtravel.platform.common.ApiResponse;
 import com.mtravel.platform.common.PageResult;
@@ -8,12 +9,16 @@ import com.mtravel.platform.customer.category.dto.CustomerCategoryResponse;
 import com.mtravel.platform.customer.category.dto.CustomerCategoryUpdateRequest;
 import com.mtravel.platform.customer.category.service.CustomerCategoryService;
 import com.mtravel.platform.system.log.web.OperationLog;
+import com.mtravel.platform.system.user.entity.SystemUserEntity;
+import com.mtravel.platform.system.user.mapper.SystemUserMapper;
 import com.mtravel.platform.tenant.TenantContextHolder;
 import com.mtravel.platform.tenant.TenantProperties;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import java.util.List;
+import java.util.Objects;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,10 +41,16 @@ public class CustomerCategoryController {
 
     private final CustomerCategoryService service;
     private final TenantProperties tenantProperties;
+    private final SystemUserMapper userMapper;
 
-    public CustomerCategoryController(CustomerCategoryService service, TenantProperties tenantProperties) {
+    public CustomerCategoryController(
+            CustomerCategoryService service,
+            TenantProperties tenantProperties,
+            SystemUserMapper userMapper
+    ) {
         this.service = service;
         this.tenantProperties = tenantProperties;
+        this.userMapper = userMapper;
     }
 
     /**
@@ -86,7 +97,9 @@ public class CustomerCategoryController {
             @Valid @RequestBody CustomerCategoryCreateRequest request,
             Authentication authentication
     ) {
-        return ApiResponse.ok(service.create(request, currentTenantId(), currentOperator(authentication)));
+        Long tenantId = currentTenantId();
+        SystemUserEntity operator = requireTenantConfigAdministrator(authentication, tenantId);
+        return ApiResponse.ok(service.create(request, tenantId, operator.getUsername()));
     }
 
     /** 修改客户分类。 */
@@ -94,16 +107,21 @@ public class CustomerCategoryController {
     @PostMapping("/update")
     public ApiResponse<CustomerCategoryResponse> update(
             @RequestParam Long id,
-            @Valid @RequestBody CustomerCategoryUpdateRequest request
+            @Valid @RequestBody CustomerCategoryUpdateRequest request,
+            Authentication authentication
     ) {
-        return ApiResponse.ok(service.update(id, request, currentTenantId()));
+        Long tenantId = currentTenantId();
+        SystemUserEntity operator = requireTenantConfigAdministrator(authentication, tenantId);
+        return ApiResponse.ok(service.update(id, request, tenantId, operator.getUsername()));
     }
 
     /** 软删除客户分类。 */
     @OperationLog(module = "客户管理", type = "删除")
     @PostMapping("/delete")
     public ApiResponse<Void> delete(@RequestParam Long id, Authentication authentication) {
-        service.delete(id, currentTenantId(), currentOperator(authentication));
+        Long tenantId = currentTenantId();
+        SystemUserEntity operator = requireTenantConfigAdministrator(authentication, tenantId);
+        service.delete(id, tenantId, operator.getUsername());
         return ApiResponse.ok();
     }
 
@@ -111,10 +129,26 @@ public class CustomerCategoryController {
         return TenantContextHolder.getTenantId(tenantProperties.getDefaultTenantId());
     }
 
-    private String currentOperator(Authentication authentication) {
-        if (authentication != null && authentication.getPrincipal() instanceof AuthenticatedUser user) {
-            return user.username();
+    /**
+     * 校验客户等级授信配置写权限。
+     *
+     * <p>不能只信任 JWT 中可能尚未刷新的角色快照；每次写入前按当前租户重新读取有效账号，
+     * 只允许 admin 角色或租户管理员维护等级、授信额度和审批人员。</p>
+     */
+    private SystemUserEntity requireTenantConfigAdministrator(Authentication authentication, Long tenantId) {
+        if (authentication == null || !(authentication.getPrincipal() instanceof AuthenticatedUser user)
+                || user.id() == null || !Objects.equals(user.tenantId(), tenantId)) {
+            throw new AccessDeniedException("仅租户管理员可维护客户等级授信配置");
         }
-        return "system";
+        SystemUserEntity currentUser = userMapper.selectOne(new LambdaQueryWrapper<SystemUserEntity>()
+                .eq(SystemUserEntity::getTenantId, tenantId)
+                .eq(SystemUserEntity::getId, user.id())
+                .eq(SystemUserEntity::getStatus, "active")
+                .eq(SystemUserEntity::getIsDeleted, false));
+        if (currentUser == null || (!"admin".equals(currentUser.getRoleCode())
+                && !Boolean.TRUE.equals(currentUser.getIsTenantAdmin()))) {
+            throw new AccessDeniedException("仅租户管理员可维护客户等级授信配置");
+        }
+        return currentUser;
     }
 }

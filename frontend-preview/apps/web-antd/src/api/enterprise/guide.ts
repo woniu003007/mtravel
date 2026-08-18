@@ -39,6 +39,8 @@ export namespace EnterpriseGuideApi {
     fax?: string;
     gender: Gender;
     guideCode?: string;
+    guideLevelId?: number;
+    guideLevelName?: string;
     guideManagerEmployeeId?: number;
     guideManagerName?: string;
     guideName: string;
@@ -90,6 +92,7 @@ export namespace EnterpriseGuideApi {
     fax?: string;
     gender?: Gender;
     guideCode?: string;
+    guideLevelId?: number;
     guideManagerEmployeeId?: number;
     guideName: string;
     idCardNo?: string;

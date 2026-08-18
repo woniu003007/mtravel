@@ -80,7 +80,7 @@ class PurchaseRelationServiceTest {
         });
         when(mapper.selectOne(any(Wrapper.class))).thenAnswer(invocation -> inserted[0]);
 
-        service.create(new PurchaseRelationSaveRequest(88L, 66L, 0, "active", "散团同价"), 1L, "admin");
+        service.create(new PurchaseRelationSaveRequest(88L, 66L, 0, false, "active", "散团同价"), 1L, "admin");
 
         verify(supplierLookup).assertSupplierIfPresent(1L, 66L);
         verify(mapper).insert(captor.capture());
@@ -106,7 +106,7 @@ class PurchaseRelationServiceTest {
         when(resourceMapper.selectOne(any(Wrapper.class))).thenReturn(resource(88L, "hotel", "苏州中心酒店"));
         when(mapper.selectCount(any(Wrapper.class))).thenReturn(1L);
 
-        assertThatThrownBy(() -> service.create(new PurchaseRelationSaveRequest(88L, 66L, 10, "active", null), 1L, "admin"))
+        assertThatThrownBy(() -> service.create(new PurchaseRelationSaveRequest(88L, 66L, 10, false, "active", null), 1L, "admin"))
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("采购关系已存在");
 

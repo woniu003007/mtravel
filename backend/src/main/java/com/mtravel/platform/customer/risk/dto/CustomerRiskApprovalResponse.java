@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * 客户风控审批申请返回对象。
  *
- * <p>包含申请时的合同和授信快照，供总经理审批页、订单页和后续查账展示。</p>
+ * <p>包含申请时的合同和授信快照，供客户等级审批页、订单页和后续查账展示。</p>
  */
 public record CustomerRiskApprovalResponse(
         Long id,
@@ -28,7 +28,12 @@ public record CustomerRiskApprovalResponse(
         BigDecimal pendingApprovalAmount,
         BigDecimal availableAmount,
         BigDecimal overLimitAmount,
+        Long categoryId,
+        String categoryName,
+        Integer creditTermDays,
+        Integer currentApprovalStep,
         String status,
+        Long applicantUserId,
         String applicant,
         String approvedBy,
         OffsetDateTime approvedAt,
@@ -38,7 +43,10 @@ public record CustomerRiskApprovalResponse(
         String remark,
         String createdBy,
         OffsetDateTime createdAt,
-        OffsetDateTime updatedAt
+        OffsetDateTime updatedAt,
+        List<CustomerRiskApprovalStepResponse> approvalSteps,
+        List<CustomerRiskApprovalCcResponse> ccUsers,
+        boolean canApprove
 ) {
 
     /** 从数据库实体构造接口响应。 */
@@ -59,7 +67,12 @@ public record CustomerRiskApprovalResponse(
                 entity.getPendingApprovalAmount(),
                 entity.getAvailableAmount(),
                 entity.getOverLimitAmount(),
+                entity.getCategoryId(),
+                entity.getCategoryName(),
+                entity.getCreditTermDays(),
+                entity.getCurrentApprovalStep(),
                 entity.getStatus(),
+                entity.getApplicantUserId(),
                 entity.getApplicant(),
                 entity.getApprovedBy(),
                 entity.getApprovedAt(),
@@ -69,7 +82,71 @@ public record CustomerRiskApprovalResponse(
                 entity.getRemark(),
                 entity.getCreatedBy(),
                 entity.getCreatedAt(),
-                entity.getUpdatedAt()
+                entity.getUpdatedAt(),
+                List.of(),
+                List.of(),
+                false
+        );
+    }
+
+    /**
+     * 从申请主单和人员快照构造审批页响应。
+     */
+    public static CustomerRiskApprovalResponse fromEntity(
+            CustomerRiskApprovalRequestEntity entity,
+            List<CustomerRiskApprovalStepResponse> approvalSteps,
+            List<CustomerRiskApprovalCcResponse> ccUsers,
+            boolean canApprove
+    ) {
+        CustomerRiskApprovalResponse base = fromEntity(entity);
+        return new CustomerRiskApprovalResponse(
+                base.id(), base.customerId(), base.customerName(), base.teamId(), base.orderId(), base.requestNo(),
+                base.requestedAmount(), base.riskTypes(), base.riskSummary(), base.contractExpireDate(),
+                base.creditLimit(), base.occupiedAmount(), base.pendingApprovalAmount(), base.availableAmount(),
+                base.overLimitAmount(), base.categoryId(), base.categoryName(), base.creditTermDays(),
+                base.currentApprovalStep(), base.status(), base.applicantUserId(), base.applicant(), base.approvedBy(),
+                base.approvedAt(), base.rejectedBy(), base.rejectedAt(), base.approvalRemark(), base.remark(),
+                base.createdBy(), base.createdAt(), base.updatedAt(),
+                approvalSteps == null ? List.of() : approvalSteps,
+                ccUsers == null ? List.of() : ccUsers,
+                canApprove
+        );
+    }
+
+    /** 兼容订单服务旧测试数据的构造方式。 */
+    public CustomerRiskApprovalResponse(
+            Long id,
+            Long customerId,
+            String customerName,
+            Long teamId,
+            Long orderId,
+            String requestNo,
+            BigDecimal requestedAmount,
+            List<String> riskTypes,
+            String riskSummary,
+            LocalDate contractExpireDate,
+            BigDecimal creditLimit,
+            BigDecimal occupiedAmount,
+            BigDecimal pendingApprovalAmount,
+            BigDecimal availableAmount,
+            BigDecimal overLimitAmount,
+            String status,
+            String applicant,
+            String approvedBy,
+            OffsetDateTime approvedAt,
+            String rejectedBy,
+            OffsetDateTime rejectedAt,
+            String approvalRemark,
+            String remark,
+            String createdBy,
+            OffsetDateTime createdAt,
+            OffsetDateTime updatedAt
+    ) {
+        this(
+                id, customerId, customerName, teamId, orderId, requestNo, requestedAmount, riskTypes, riskSummary,
+                contractExpireDate, creditLimit, occupiedAmount, pendingApprovalAmount, availableAmount, overLimitAmount,
+                null, null, null, null, status, null, applicant, approvedBy, approvedAt, rejectedBy, rejectedAt,
+                approvalRemark, remark, createdBy, createdAt, updatedAt, List.of(), List.of(), false
         );
     }
 

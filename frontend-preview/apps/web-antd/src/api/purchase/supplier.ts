@@ -25,13 +25,17 @@ export namespace SupplierApi {
     city?: string;
     district?: string;
     settlementMethod?: string;
+    basicInfo?: string;
+    boundResourceCount?: number;
     contactName?: string;
     contactPhone?: string;
     faxNumber?: string;
     officeAddress?: string;
     agreementName?: string;
     rating: number;
+    defaultResourceNames?: string;
     status: Status;
+    priceSummary?: string;
     remark?: string;
     createdBy?: string;
     createdAt?: string;
@@ -60,6 +64,7 @@ export namespace SupplierApi {
     city?: string;
     district?: string;
     settlementMethod?: string;
+    basicInfo?: string;
     contactName?: string;
     contactPhone?: string;
     faxNumber?: string;
@@ -72,6 +77,7 @@ export namespace SupplierApi {
 }
 export function getSupplierPage(params: SupplierApi.QueryParams){return requestClient.get<SupplierApi.PageResult<SupplierApi.Item>>('/purchase/supplier/page',{params});}
 export function getSupplierAll(category?: SupplierApi.Category){return requestClient.get<SupplierApi.Item[]>('/purchase/supplier/all',{params:{category}});}
+export function getSupplierDetail(id:number){return requestClient.get<SupplierApi.Item>('/purchase/supplier/detail',{params:{id}});}
 export function createSupplier(data: SupplierApi.SaveParams){return requestClient.post<SupplierApi.Item>('/purchase/supplier/create',data);}
 export function updateSupplier(id:number,data:SupplierApi.SaveParams){return requestClient.post<SupplierApi.Item>('/purchase/supplier/update',data,{params:{id}});}
 export function deleteSupplier(id:number){return requestClient.post<void>('/purchase/supplier/delete',{}, {params:{id}});}

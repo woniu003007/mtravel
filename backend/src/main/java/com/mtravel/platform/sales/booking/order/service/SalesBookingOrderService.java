@@ -23,6 +23,7 @@ import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderPriceLineRe
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderPriceLineResponse;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderResponse;
 import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderSaveRequest;
+import com.mtravel.platform.sales.booking.order.dto.SalesBookingOrderSaveResponse;
 import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderChargeLineEntity;
 import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderEntity;
 import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderGuestEntity;
@@ -40,6 +41,7 @@ import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
 import com.mtravel.platform.sales.team.enums.SalesTeamStatus;
 import com.mtravel.platform.sales.team.enums.SalesTeamType;
 import com.mtravel.platform.sales.team.mapper.SalesTeamMapper;
+import com.mtravel.platform.sales.team.service.SalesTeamListSummaryRefreshService;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -52,6 +54,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.List;
 import java.util.Objects;
@@ -97,6 +100,7 @@ public class SalesBookingOrderService {
     private final SalesOrderTransferLogMapper transferLogMapper;
     private final SalesProductMapper productMapper;
     private final CommonAttachmentMapper attachmentMapper;
+    private final SalesTeamListSummaryRefreshService teamListSummaryRefreshService;
 
     /**
      * 单元测试兼容构造器。测试只验证主链路，可不显式传身份证校验器。
@@ -107,7 +111,7 @@ public class SalesBookingOrderService {
             SalesBookingOrderGuestMapper guestMapper,
             SalesTeamMapper teamMapper
     ) {
-        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), null, null, null, null, null);
+        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), null, null, null, null, null, null);
     }
 
     /**
@@ -120,7 +124,7 @@ public class SalesBookingOrderService {
             SalesTeamMapper teamMapper,
             CustomerRiskApprovalService riskApprovalService
     ) {
-        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), null, riskApprovalService, null, null, null);
+        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), null, riskApprovalService, null, null, null, null);
     }
 
     /**
@@ -133,7 +137,7 @@ public class SalesBookingOrderService {
             SalesTeamMapper teamMapper,
             EnterpriseExpenseItemMapper expenseItemMapper
     ) {
-        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), expenseItemMapper, null, null, null, null);
+        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, new IdCardValidator(), expenseItemMapper, null, null, null, null, null);
     }
 
     /**
@@ -150,7 +154,26 @@ public class SalesBookingOrderService {
             SalesOrderTransferLogMapper transferLogMapper
     ) {
         this(orderMapper, chargeLineMapper, guestMapper, teamMapper, idCardValidator,
-                expenseItemMapper, riskApprovalService, transferLogMapper, null, null);
+                expenseItemMapper, riskApprovalService, transferLogMapper, null, null, null);
+    }
+
+    /**
+     * 运行时构造器，注入订单、价格、游客、费用变更、团队 Mapper 及身份证校验器。
+     */
+    public SalesBookingOrderService(
+            SalesBookingOrderMapper orderMapper,
+            SalesBookingOrderChargeLineMapper chargeLineMapper,
+            SalesBookingOrderGuestMapper guestMapper,
+            SalesTeamMapper teamMapper,
+            IdCardValidator idCardValidator,
+            EnterpriseExpenseItemMapper expenseItemMapper,
+            CustomerRiskApprovalService riskApprovalService,
+            SalesOrderTransferLogMapper transferLogMapper,
+            SalesProductMapper productMapper,
+            CommonAttachmentMapper attachmentMapper
+    ) {
+        this(orderMapper, chargeLineMapper, guestMapper, teamMapper, idCardValidator, expenseItemMapper,
+                riskApprovalService, transferLogMapper, productMapper, attachmentMapper, null);
     }
 
     /**
@@ -167,7 +190,8 @@ public class SalesBookingOrderService {
             CustomerRiskApprovalService riskApprovalService,
             SalesOrderTransferLogMapper transferLogMapper,
             SalesProductMapper productMapper,
-            CommonAttachmentMapper attachmentMapper
+            CommonAttachmentMapper attachmentMapper,
+            SalesTeamListSummaryRefreshService teamListSummaryRefreshService
     ) {
         this.orderMapper = orderMapper;
         this.chargeLineMapper = chargeLineMapper;
@@ -179,34 +203,37 @@ public class SalesBookingOrderService {
         this.transferLogMapper = transferLogMapper;
         this.productMapper = productMapper;
         this.attachmentMapper = attachmentMapper;
+        this.teamListSummaryRefreshService = teamListSummaryRefreshService;
     }
 
     /**
      * 保存收客订单。
      *
-     * <p>新增订单时自动生成订单编号；修改订单时校验订单属于当前租户和团队。价格明细与游客名单
-     * 按当前订单重建为未删除数据，避免逐行匹配导致历史脏数据残留。保存完成后按团队聚合刷新实收人数。</p>
+     * <p>新增订单时自动生成订单编号；修改订单时校验订单属于当前租户和团队。价格明细按当前订单重建；
+     * 游客名单在编辑订单时按游客 ID 增量同步，避免每次保存都软删并重建所有游客。保存完成后按团队聚合刷新实收人数。</p>
      *
      * @param request 保存请求
      * @param tenantId 当前租户 ID
      * @param operator 当前操作人
-     * @return 保存后的订单详情
+     * @return 保存后的订单主表摘要
      */
     @Transactional
-    public SalesBookingOrderResponse save(SalesBookingOrderSaveRequest request, Long tenantId, String operator) {
+    public SalesBookingOrderSaveResponse save(SalesBookingOrderSaveRequest request, Long tenantId, String operator) {
         SalesTeamEntity team = requireTeam(request.teamId(), tenantId);
         SalesBookingOrderStatus status = parseStatus(request.status());
         SalesBookingOrderEntity current = request.id() == null ? null : requireOrder(request.id(), tenantId);
         assertOrderEditable(current);
         assertTeamCanReceive(team, status, current == null);
         BigDecimal requestedReceivable = sumReceivable(request.priceLines());
+        BigDecimal activeFeeChangeTotal = BigDecimal.ZERO;
         if (current != null && current.getId() != null) {
-            requestedReceivable = requestedReceivable.add(activeFeeChangeTotal(current.getId(), tenantId)).setScale(2, RoundingMode.HALF_UP);
+            activeFeeChangeTotal = activeFeeChangeTotal(current.getId(), tenantId);
+            requestedReceivable = requestedReceivable.add(activeFeeChangeTotal).setScale(2, RoundingMode.HALF_UP);
         }
         assertCustomerRiskApproved(request, current, tenantId, requestedReceivable);
 
         SalesBookingOrderEntity entity = current == null ? new SalesBookingOrderEntity() : new SalesBookingOrderEntity();
-        applyOrderFields(entity, request, team, status, tenantId, operator, current);
+        applyOrderFields(entity, request, team, status, tenantId, operator, current, activeFeeChangeTotal);
         if (current == null) {
             orderMapper.insert(entity);
         } else {
@@ -215,11 +242,16 @@ public class SalesBookingOrderService {
         }
 
         rebuildPriceLines(entity, request.priceLines(), tenantId, operator);
-        rebuildGuests(entity, request.guests(), tenantId, operator);
+        if (current == null) {
+            insertGuests(entity, request.guests(), tenantId, operator);
+        } else {
+            syncGuests(entity, request.guests(), tenantId, operator);
+        }
         bindRiskApprovalRequest(request, entity, tenantId);
         refreshTeamSeats(team, tenantId);
+        refreshTeamListSummary(team.getId(), tenantId);
 
-        return toResponse(entity);
+        return SalesBookingOrderSaveResponse.fromEntity(entity);
     }
 
     /**
@@ -485,22 +517,7 @@ public class SalesBookingOrderService {
             wrapper.eq("receivable_amount", money(priceAll));
         }
         wrapper.like(StringUtils.hasText(bookedBy), "booked_by", clean(bookedBy));
-        if (StringUtils.hasText(guestKeyword)) {
-            wrapper.apply("""
-                    EXISTS (
-                      SELECT 1 FROM sales_order_guests g
-                      WHERE g.tenant_id = sales_orders.tenant_id
-                        AND g.order_id = sales_orders.id
-                        AND g.is_deleted = false
-                        AND (
-                          g.guest_name ILIKE {0}
-                          OR g.certificate_no ILIKE {0}
-                          OR g.passport_no ILIKE {0}
-                          OR g.phone ILIKE {0}
-                        )
-                    )
-                    """, "%" + clean(guestKeyword) + "%");
-        }
+        applyGuestKeywordFilter(wrapper, guestKeyword);
         String normalizedTeamType = normalizeOrderManageTeamType(teamType);
         if (StringUtils.hasText(normalizedTeamType)) {
             wrapper.apply("""
@@ -533,6 +550,96 @@ public class SalesBookingOrderService {
             wrapper.apply(Boolean.TRUE.equals(hasOrderFile) ? existsSql : "NOT " + existsSql);
         }
         return wrapper;
+    }
+
+    /**
+     * 订单管理游客检索条件。
+     *
+     * <p>身份证、手机号和护照号等证件类字段优先走等值匹配，避免在大表上执行
+     * {@code ILIKE '%keyword%'} 导致普通索引失效；只有游客姓名保留包含查询。</p>
+     */
+    private void applyGuestKeywordFilter(QueryWrapper<SalesBookingOrderEntity> wrapper, String guestKeyword) {
+        if (!StringUtils.hasText(guestKeyword)) {
+            return;
+        }
+        String keyword = clean(guestKeyword);
+        if (isIdCardKeyword(keyword)) {
+            wrapper.apply("""
+                    EXISTS (
+                      SELECT 1 FROM sales_order_guests g
+                      WHERE g.tenant_id = sales_orders.tenant_id
+                        AND g.order_id = sales_orders.id
+                        AND g.is_deleted = false
+                        AND (
+                          g.certificate_no = {0}
+                          OR g.certificate_no = {1}
+                        )
+                    )
+                    """, keyword, keyword.toUpperCase(Locale.ROOT));
+            return;
+        }
+        if (isMobileKeyword(keyword)) {
+            wrapper.apply("""
+                    EXISTS (
+                      SELECT 1 FROM sales_order_guests g
+                      WHERE g.tenant_id = sales_orders.tenant_id
+                        AND g.order_id = sales_orders.id
+                        AND g.is_deleted = false
+                        AND g.phone = {0}
+                    )
+                    """, keyword);
+            return;
+        }
+        if (isPassportKeyword(keyword)) {
+            wrapper.apply("""
+                    EXISTS (
+                      SELECT 1 FROM sales_order_guests g
+                      WHERE g.tenant_id = sales_orders.tenant_id
+                        AND g.order_id = sales_orders.id
+                        AND g.is_deleted = false
+                        AND (
+                          g.passport_no = {0}
+                          OR g.passport_no = {1}
+                          OR g.certificate_no = {0}
+                          OR g.certificate_no = {1}
+                        )
+                    )
+                    """, keyword, keyword.toUpperCase(Locale.ROOT));
+            return;
+        }
+        wrapper.apply("""
+                EXISTS (
+                  SELECT 1 FROM sales_order_guests g
+                  WHERE g.tenant_id = sales_orders.tenant_id
+                    AND g.order_id = sales_orders.id
+                    AND g.is_deleted = false
+                    AND (
+                      g.guest_name ILIKE {0}
+                      OR g.certificate_no = {1}
+                      OR g.passport_no = {1}
+                      OR g.phone = {1}
+                    )
+                )
+                """, "%" + keyword + "%", keyword);
+    }
+
+    private boolean isIdCardKeyword(String keyword) {
+        return keyword != null && keyword.matches("\\d{17}[0-9Xx]");
+    }
+
+    private boolean isMobileKeyword(String keyword) {
+        return keyword != null && keyword.matches("1[3-9]\\d{9}");
+    }
+
+    private boolean isPassportKeyword(String keyword) {
+        return keyword != null
+                && keyword.matches("[A-Za-z][A-Za-z0-9]{5,19}")
+                && !containsChinese(keyword);
+    }
+
+    private boolean containsChinese(String value) {
+        return value != null && value.codePoints().anyMatch(codePoint ->
+                Character.UnicodeScript.of(codePoint) == Character.UnicodeScript.HAN);
     }
 
     private void applyOrderManageSort(QueryWrapper<SalesBookingOrderEntity> wrapper, String orderByType) {
@@ -791,13 +898,14 @@ public class SalesBookingOrderService {
             SalesBookingOrderStatus status,
             Long tenantId,
             String operator,
-            SalesBookingOrderEntity current
+            SalesBookingOrderEntity current,
+            BigDecimal activeFeeChangeTotal
     ) {
         List<SalesBookingOrderGuestRequest> guests = Objects.requireNonNullElse(request.guests(), List.of());
         List<SalesBookingOrderPriceLineRequest> priceLines = Objects.requireNonNullElse(request.priceLines(), List.of());
         entity.setTenantId(tenantId);
         entity.setTeamId(team.getId());
-        entity.setOrderNo(resolveOrderNo(current));
+        entity.setOrderNo(resolveOrderNo(current, tenantId));
         entity.setCustomerId(request.customerId());
         entity.setCustomerName(clean(request.customerName()));
         entity.setContactName(clean(request.contactName()));
@@ -825,9 +933,10 @@ public class SalesBookingOrderService {
         entity.setGuestCount(resolveOrderGuestCount(priceLines, guests));
         BigDecimal receivable = sumReceivable(priceLines);
         if (current != null && current.getId() != null) {
-            receivable = receivable.add(activeFeeChangeTotal(current.getId(), tenantId)).setScale(2, RoundingMode.HALF_UP);
+            receivable = receivable.add(activeFeeChangeTotal).setScale(2, RoundingMode.HALF_UP);
         }
-        BigDecimal received = money(request.receivedAmount());
+        // 已收金额只能由收款/核销链路维护；订单编辑请求即使携带历史兼容字段也不能覆盖财务结果。
+        BigDecimal received = current == null ? money(null) : money(current.getReceivedAmount());
         entity.setReceivableAmount(receivable);
         entity.setReceivedAmount(received);
         entity.setBalanceAmount(receivable.subtract(received).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP));
@@ -934,6 +1043,7 @@ public class SalesBookingOrderService {
         entity.setIsDeleted(false);
         chargeLineMapper.insert(entity);
         applyOrderReceivableDelta(order, entity.getAmount(), tenantId);
+        refreshTeamListSummary(order.getTeamId(), tenantId);
         return SalesBookingFeeChangeResponse.fromEntity(entity);
     }
 
@@ -962,6 +1072,7 @@ public class SalesBookingOrderService {
             throw new BizException("费用变更不存在或已删除");
         }
         applyOrderReceivableDelta(order, money(current.getAmount()).negate(), tenantId);
+        refreshTeamListSummary(order.getTeamId(), tenantId);
     }
 
     /**
@@ -1147,39 +1258,141 @@ public class SalesBookingOrderService {
         }
     }
 
-    private void rebuildGuests(
+    private void insertGuests(
             SalesBookingOrderEntity order,
             List<SalesBookingOrderGuestRequest> requests,
             Long tenantId,
             String operator
     ) {
-        softDeleteGuests(order.getId(), tenantId, operator);
         List<SalesBookingOrderGuestRequest> guests = Objects.requireNonNullElse(requests, List.of());
         for (int index = 0; index < guests.size(); index++) {
             SalesBookingOrderGuestRequest request = guests.get(index);
-            if (!StringUtils.hasText(request.guestName())) {
+            if (isBlankGuest(request)) {
                 continue;
             }
-            SalesBookingOrderGuestEntity entity = new SalesBookingOrderGuestEntity();
-            entity.setTenantId(tenantId);
-            entity.setOrderId(order.getId());
-            entity.setTeamId(order.getTeamId());
-            entity.setIndexNo(request.indexNo() == null ? index + 1 : request.indexNo());
-            entity.setGuestName(clean(request.guestName()));
-            entity.setEnglishName(clean(request.englishName()));
-            entity.setCertificateNo(clean(request.certificateNo()));
-            entity.setPassportNo(clean(request.passportNo()));
-            entity.setPhone(clean(request.phone()));
-            entity.setGuestType(resolveGuestType(request.guestType()));
-            entity.setRoomGroup(clean(request.roomGroup()));
-            entity.setRoomRemark(clean(request.roomRemark()));
-            entity.setLeaderFlag(Boolean.TRUE.equals(request.leaderFlag()));
-            entity.setRemark(clean(request.remark()));
-            applyIdentityFields(entity, request);
-            entity.setCreatedBy(operator);
-            entity.setIsDeleted(false);
-            guestMapper.insert(entity);
+            guestMapper.insert(buildGuestEntity(order, request, index, tenantId, operator));
         }
+    }
+
+    /**
+     * 编辑订单时按游客 ID 增量同步名单，避免每次保存都软删并重建所有游客，导致名单表快速膨胀。
+     */
+    private void syncGuests(
+            SalesBookingOrderEntity order,
+            List<SalesBookingOrderGuestRequest> requests,
+            Long tenantId,
+            String operator
+    ) {
+        List<SalesBookingOrderGuestEntity> existingGuests = Objects.requireNonNullElse(
+                guestMapper.selectList(baseGuestQuery(tenantId).eq("order_id", order.getId())),
+                List.of()
+        );
+        Map<Long, SalesBookingOrderGuestEntity> existingById = existingGuests.stream()
+                .filter(guest -> guest.getId() != null)
+                .collect(Collectors.toMap(SalesBookingOrderGuestEntity::getId, guest -> guest, (left, right) -> left));
+        Set<Long> submittedIds = new HashSet<>();
+        List<SalesBookingOrderGuestRequest> guests = Objects.requireNonNullElse(requests, List.of());
+        for (int index = 0; index < guests.size(); index++) {
+            SalesBookingOrderGuestRequest request = guests.get(index);
+            if (isBlankGuest(request)) {
+                continue;
+            }
+            if (request.id() == null) {
+                guestMapper.insert(buildGuestEntity(order, request, index, tenantId, operator));
+                continue;
+            }
+            if (!submittedIds.add(request.id())) {
+                throw new BizException("游客名单存在重复记录，请刷新后重试");
+            }
+            SalesBookingOrderGuestEntity current = existingById.get(request.id());
+            if (current == null) {
+                throw new BizException("游客名单记录不存在或不属于当前订单，请刷新后重试");
+            }
+            SalesBookingOrderGuestEntity next = buildGuestEntity(order, request, index, tenantId, operator);
+            if (guestChanged(current, next)) {
+                updateGuest(current.getId(), order.getId(), next, tenantId);
+            }
+        }
+        Set<Long> idsToDelete = existingById.keySet().stream()
+                .filter(id -> !submittedIds.contains(id))
+                .collect(Collectors.toSet());
+        softDeleteMissingGuests(order.getId(), tenantId, idsToDelete, operator);
+    }
+
+    private SalesBookingOrderGuestEntity buildGuestEntity(
+            SalesBookingOrderEntity order,
+            SalesBookingOrderGuestRequest request,
+            int index,
+            Long tenantId,
+            String operator
+    ) {
+        SalesBookingOrderGuestEntity entity = new SalesBookingOrderGuestEntity();
+        entity.setTenantId(tenantId);
+        entity.setOrderId(order.getId());
+        entity.setTeamId(order.getTeamId());
+        entity.setIndexNo(request.indexNo() == null ? index + 1 : request.indexNo());
+        entity.setGuestName(clean(request.guestName()));
+        entity.setEnglishName(clean(request.englishName()));
+        entity.setCertificateNo(clean(request.certificateNo()));
+        entity.setPassportNo(clean(request.passportNo()));
+        entity.setPhone(clean(request.phone()));
+        entity.setGuestType(resolveGuestType(request.guestType()));
+        entity.setRoomGroup(clean(request.roomGroup()));
+        entity.setRoomRemark(clean(request.roomRemark()));
+        entity.setLeaderFlag(Boolean.TRUE.equals(request.leaderFlag()));
+        entity.setRemark(clean(request.remark()));
+        applyIdentityFields(entity, request);
+        entity.setCreatedBy(operator);
+        entity.setIsDeleted(false);
+        return entity;
+    }
+
+    private boolean isBlankGuest(SalesBookingOrderGuestRequest request) {
+        return request == null || !StringUtils.hasText(request.guestName());
+    }
+
+    private boolean guestChanged(SalesBookingOrderGuestEntity current, SalesBookingOrderGuestEntity next) {
+        return !Objects.equals(current.getTeamId(), next.getTeamId())
+                || !Objects.equals(current.getIndexNo(), next.getIndexNo())
+                || !Objects.equals(current.getGuestName(), next.getGuestName())
+                || !Objects.equals(current.getEnglishName(), next.getEnglishName())
+                || !Objects.equals(current.getCertificateNo(), next.getCertificateNo())
+                || !Objects.equals(current.getPassportNo(), next.getPassportNo())
+                || !Objects.equals(current.getGender(), next.getGender())
+                || !Objects.equals(current.getBirthDate(), next.getBirthDate())
+                || !Objects.equals(current.getAge(), next.getAge())
+                || !Objects.equals(current.getPhone(), next.getPhone())
+                || !Objects.equals(current.getGuestType(), next.getGuestType())
+                || !Objects.equals(current.getRoomGroup(), next.getRoomGroup())
+                || !Objects.equals(current.getRoomRemark(), next.getRoomRemark())
+                || !Objects.equals(current.getLeaderFlag(), next.getLeaderFlag())
+                || !Objects.equals(current.getIdCardValid(), next.getIdCardValid())
+                || !Objects.equals(current.getIdCardWarning(), next.getIdCardWarning())
+                || !Objects.equals(current.getRemark(), next.getRemark());
+    }
+
+    private void updateGuest(Long guestId, Long orderId, SalesBookingOrderGuestEntity next, Long tenantId) {
+        UpdateWrapper<SalesBookingOrderGuestEntity> wrapper = baseGuestUpdate(tenantId)
+                .eq("order_id", orderId)
+                .eq("id", guestId)
+                .set("team_id", next.getTeamId())
+                .set("index_no", next.getIndexNo())
+                .set("guest_name", next.getGuestName())
+                .set("english_name", next.getEnglishName())
+                .set("certificate_no", next.getCertificateNo())
+                .set("passport_no", next.getPassportNo())
+                .set("gender", next.getGender())
+                .set("birth_date", next.getBirthDate())
+                .set("age", next.getAge())
+                .set("phone", next.getPhone())
+                .set("guest_type", next.getGuestType())
+                .set("room_group", next.getRoomGroup())
+                .set("room_remark", next.getRoomRemark())
+                .set("leader_flag", next.getLeaderFlag())
+                .set("id_card_valid", next.getIdCardValid())
+                .set("id_card_warning", next.getIdCardWarning())
+                .set("remark", next.getRemark());
+        guestMapper.update(new SalesBookingOrderGuestEntity(), wrapper);
     }
 
     private void applyIdentityFields(SalesBookingOrderGuestEntity entity, SalesBookingOrderGuestRequest request) {
@@ -1210,6 +1423,18 @@ public class SalesBookingOrderService {
         teamMapper.update(update, baseTeamUpdate(tenantId).eq("id", team.getId()));
     }
 
+    /**
+     * 刷新团队列表缓存行。
+     *
+     * <p>订单保存和费用变更会影响客户摘要、业务员摘要、订单状态摘要以及团队人数。这里在事务内同步刷新
+     * {@code sales_team_list_summaries}，保证团队管理列表不再读取旧缓存。</p>
+     */
+    private void refreshTeamListSummary(Long teamId, Long tenantId) {
+        if (teamListSummaryRefreshService != null) {
+            teamListSummaryRefreshService.refresh(teamId, tenantId);
+        }
+    }
+
     private void softDeletePriceLines(Long orderId, Long tenantId, String operator) {
         SalesBookingOrderChargeLineEntity update = new SalesBookingOrderChargeLineEntity();
         update.setIsDeleted(true);
@@ -1220,12 +1445,17 @@ public class SalesBookingOrderService {
                 .eq("line_kind", "base_price"));
     }
 
-    private void softDeleteGuests(Long orderId, Long tenantId, String operator) {
+    private void softDeleteMissingGuests(Long orderId, Long tenantId, Set<Long> guestIds, String operator) {
+        if (guestIds.isEmpty()) {
+            return;
+        }
         SalesBookingOrderGuestEntity update = new SalesBookingOrderGuestEntity();
         update.setIsDeleted(true);
         update.setDeletedAt(OffsetDateTime.now());
         update.setDeletedBy(operator);
-        guestMapper.update(update, baseGuestUpdate(tenantId).eq("order_id", orderId));
+        guestMapper.update(update, baseGuestUpdate(tenantId)
+                .eq("order_id", orderId)
+                .in("id", guestIds));
     }
 
     private void applyOrderReceivableDelta(SalesBookingOrderEntity order, BigDecimal delta, Long tenantId) {
@@ -1403,11 +1633,14 @@ public class SalesBookingOrderService {
                 && !StringUtils.hasText(request.lineType()));
     }
 
-    private String resolveOrderNo(SalesBookingOrderEntity current) {
+    private String resolveOrderNo(SalesBookingOrderEntity current, Long tenantId) {
         if (current != null && StringUtils.hasText(current.getOrderNo())) {
             return current.getOrderNo();
         }
-        return "SO-" + LocalDate.now().format(ORDER_DATE_FORMATTER) + "-" + System.currentTimeMillis() % 100_000;
+        String prefix = "SO-" + LocalDate.now().format(ORDER_DATE_FORMATTER) + "-";
+        orderMapper.lockOrderNoGeneration(tenantId, prefix);
+        int nextSuffix = number(orderMapper.maxOrderNoSuffix(tenantId, prefix)) + 1;
+        return prefix + "%05d".formatted(nextSuffix);
     }
 
     /**

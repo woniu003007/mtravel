@@ -38,6 +38,7 @@ import com.mtravel.platform.sales.ordertransfer.entity.SalesOrderTransferLogEnti
 import com.mtravel.platform.sales.ordertransfer.mapper.SalesOrderTransferLogMapper;
 import com.mtravel.platform.sales.team.entity.SalesTeamEntity;
 import com.mtravel.platform.sales.team.mapper.SalesTeamMapper;
+import com.mtravel.platform.sales.team.service.SalesTeamListSummaryRefreshService;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
@@ -101,6 +102,7 @@ public class DispatchTeamArrangementService {
     private final SalesOrderTransferLogMapper transferLogMapper;
     private final DispatchTeamGuideMapper guideMapper;
     private final FinanceShoppingSettlementMapper shoppingSettlementMapper;
+    private SalesTeamListSummaryRefreshService teamListSummaryRefreshService;
 
     /**
      * 构造正式团队安排成本服务。
@@ -121,6 +123,7 @@ public class DispatchTeamArrangementService {
                 null,
                 teamMapper,
                 orderMapper,
+                null,
                 null,
                 null,
                 null
@@ -150,6 +153,7 @@ public class DispatchTeamArrangementService {
                 orderMapper,
                 null,
                 guideMapper,
+                null,
                 null
         );
     }
@@ -170,6 +174,37 @@ public class DispatchTeamArrangementService {
             DispatchTeamGuideMapper guideMapper,
             FinanceShoppingSettlementMapper shoppingSettlementMapper
     ) {
+        this(
+                arrangementMapper,
+                priceLineMapper,
+                allocationMapper,
+                flowRecordMapper,
+                sectionStatusMapper,
+                teamMapper,
+                orderMapper,
+                transferLogMapper,
+                guideMapper,
+                shoppingSettlementMapper,
+                null
+        );
+    }
+
+    /**
+     * 构造正式团队安排成本服务。
+     */
+    public DispatchTeamArrangementService(
+            DispatchTeamArrangementMapper arrangementMapper,
+            DispatchTeamArrangementPriceLineMapper priceLineMapper,
+            DispatchTeamArrangementOrderAllocationMapper allocationMapper,
+            DispatchTeamArrangementFlowRecordMapper flowRecordMapper,
+            DispatchTeamArrangementSectionStatusMapper sectionStatusMapper,
+            SalesTeamMapper teamMapper,
+            SalesBookingOrderMapper orderMapper,
+            SalesOrderTransferLogMapper transferLogMapper,
+            DispatchTeamGuideMapper guideMapper,
+            FinanceShoppingSettlementMapper shoppingSettlementMapper,
+            SalesTeamListSummaryRefreshService teamListSummaryRefreshService
+    ) {
         this.arrangementMapper = arrangementMapper;
         this.priceLineMapper = priceLineMapper;
         this.allocationMapper = allocationMapper;
@@ -180,6 +215,17 @@ public class DispatchTeamArrangementService {
         this.transferLogMapper = transferLogMapper;
         this.guideMapper = guideMapper;
         this.shoppingSettlementMapper = shoppingSettlementMapper;
+        this.teamListSummaryRefreshService = teamListSummaryRefreshService;
+    }
+
+    /**
+     * 注入团队列表汇总刷新服务。
+     *
+     * <p>保留原有运行时构造器签名，避免破坏既有测试和手工构造；Spring 启动时通过该 setter 补充缓存刷新能力。</p>
+     */
+    @Autowired
+    public void setTeamListSummaryRefreshService(SalesTeamListSummaryRefreshService teamListSummaryRefreshService) {
+        this.teamListSummaryRefreshService = teamListSummaryRefreshService;
     }
 
     /**
@@ -364,7 +410,9 @@ public class DispatchTeamArrangementService {
             if (request.arrangementId() != null) {
                 throw new BizException("多订单均摊成本只能新增，不能直接编辑已拆分记录");
             }
-            return saveMultiOrderAverage(team, type, request, tenantId, operator);
+            TeamArrangementSaveResponse response = saveMultiOrderAverage(team, type, request, tenantId, operator);
+            refreshTeamListSummary(teamId, tenantId);
+            return response;
         }
         if (request.arrangementId() != null) {
             softDeleteArrangementTree(teamId, request.arrangementId(), tenantId, operator);
@@ -386,6 +434,7 @@ public class DispatchTeamArrangementService {
         savePriceLines(entity, request.priceLines(), tenantId, operator, null);
         saveSingleAllocation(entity, request, totalAmount(request), tenantId, operator);
         syncNoGuideReportFlows(entity, tenantId, operator);
+        refreshTeamListSummary(teamId, tenantId);
         return new TeamArrangementSaveResponse(entity.getId(), List.of(entity.getId()));
     }
 
@@ -407,6 +456,7 @@ public class DispatchTeamArrangementService {
             throw new BizException("该安排已进入人工导游报账或审核流程，不能直接删除");
         }
         softDeleteArrangementTree(teamId, arrangementId, tenantId, operator);
+        refreshTeamListSummary(teamId, tenantId);
     }
 
     /**
@@ -466,6 +516,7 @@ public class DispatchTeamArrangementService {
             entity.setCreatedBy(operator);
             entity.setIsDeleted(false);
             sectionStatusMapper.insert(entity);
+            refreshTeamListSummary(teamId, tenantId);
             return TeamArrangementSectionStatusResponse.fromEntity(entity);
         }
         DispatchTeamArrangementSectionStatusEntity update = new DispatchTeamArrangementSectionStatusEntity();
@@ -475,7 +526,19 @@ public class DispatchTeamArrangementService {
                 .eq("id", current.getId())
                 .eq("is_deleted", false));
         current.setStatus(cleanStatus);
+        refreshTeamListSummary(teamId, tenantId);
         return TeamArrangementSectionStatusResponse.fromEntity(current);
+    }
+
+    /**
+     * 刷新团队列表缓存中的资源安排图标状态。
+     *
+     * <p>团队安排和分类状态改变后，列表页的酒店、用车、景区等计划状态必须从事实表重算，避免缓存继续显示旧图标。</p>
+     */
+    private void refreshTeamListSummary(Long teamId, Long tenantId) {
+        if (teamListSummaryRefreshService != null) {
+            teamListSummaryRefreshService.refresh(teamId, tenantId);
+        }
     }
 
     /** 保存多订单均摊成本，按旧系统口径拆成多条单订单成本记录。 */

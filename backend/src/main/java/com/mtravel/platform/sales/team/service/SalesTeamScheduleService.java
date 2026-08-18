@@ -18,6 +18,7 @@ import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangem
 import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementPriceLineMapper;
 import com.mtravel.platform.dispatch.teamarrangement.mapper.DispatchTeamArrangementSectionStatusMapper;
 import com.mtravel.platform.sales.booking.order.entity.SalesBookingOrderEntity;
+import com.mtravel.platform.sales.booking.order.dto.SalesBookingTeamDraftResponse;
 import com.mtravel.platform.sales.booking.order.mapper.SalesBookingOrderMapper;
 import com.mtravel.platform.sales.booking.order.service.SalesBookingOrderService;
 import com.mtravel.platform.sales.product.entity.SalesProductArrangementItemEntity;
@@ -123,6 +124,7 @@ public class SalesTeamScheduleService {
     private final DispatchTeamArrangementOrderAllocationMapper teamArrangementAllocationMapper;
     private final DispatchTeamArrangementSectionStatusMapper teamArrangementSectionStatusMapper;
     private final DispatchTeamGuideMapper teamGuideMapper;
+    private final SalesTeamListSummaryRefreshService teamListSummaryRefreshService;
 
     /**
      * 测试专用兼容构造器。
@@ -135,7 +137,7 @@ public class SalesTeamScheduleService {
             SalesTeamPriceMapper priceMapper,
             SalesTeamStatusLogMapper statusLogMapper
     ) {
-        this(productMapper, null, null, null, null, null, teamMapper, null, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null);
+        this(productMapper, null, null, null, null, null, teamMapper, null, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -148,7 +150,7 @@ public class SalesTeamScheduleService {
             SalesTeamPriceMapper priceMapper,
             SalesTeamStatusLogMapper statusLogMapper
     ) {
-        this(productMapper, descriptionMapper, null, null, null, null, teamMapper, null, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null);
+        this(productMapper, descriptionMapper, null, null, null, null, teamMapper, null, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -162,7 +164,7 @@ public class SalesTeamScheduleService {
             SalesTeamPriceMapper priceMapper,
             SalesTeamStatusLogMapper statusLogMapper
     ) {
-        this(productMapper, descriptionMapper, itineraryDayMapper, null, null, null, teamMapper, null, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null);
+        this(productMapper, descriptionMapper, itineraryDayMapper, null, null, null, teamMapper, null, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -177,7 +179,7 @@ public class SalesTeamScheduleService {
             SalesTeamPriceMapper priceMapper,
             SalesTeamStatusLogMapper statusLogMapper
     ) {
-        this(productMapper, descriptionMapper, itineraryDayMapper, roadbookPointMapper, null, null, teamMapper, null, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null);
+        this(productMapper, descriptionMapper, itineraryDayMapper, roadbookPointMapper, null, null, teamMapper, null, priceMapper, statusLogMapper, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -216,6 +218,7 @@ public class SalesTeamScheduleService {
                 teamArrangementMapper,
                 teamArrangementPriceLineMapper,
                 teamArrangementAllocationMapper,
+                null,
                 null,
                 null
         );
@@ -259,6 +262,53 @@ public class SalesTeamScheduleService {
                 teamArrangementPriceLineMapper,
                 teamArrangementAllocationMapper,
                 null,
+                null,
+                null
+        );
+    }
+
+    /**
+     * 运行时构造器，注入团队主表、价格表、状态日志、团号日志和团队执行安排访问对象。
+     */
+    public SalesTeamScheduleService(
+            SalesProductMapper productMapper,
+            SalesProductDescriptionMapper descriptionMapper,
+            SalesProductItineraryDayMapper itineraryDayMapper,
+            SalesProductRoadbookPointMapper roadbookPointMapper,
+            SalesProductArrangementItemMapper productArrangementMapper,
+            SalesProductArrangementPriceLineMapper productArrangementPriceLineMapper,
+            SalesTeamMapper teamMapper,
+            SalesTeamListSummaryMapper teamListSummaryMapper,
+            SalesTeamPriceMapper priceMapper,
+            SalesTeamStatusLogMapper statusLogMapper,
+            SalesTeamNoLogMapper noLogMapper,
+            SalesBookingOrderService bookingOrderService,
+            SalesBookingOrderMapper bookingOrderMapper,
+            DispatchTeamArrangementMapper teamArrangementMapper,
+            DispatchTeamArrangementPriceLineMapper teamArrangementPriceLineMapper,
+            DispatchTeamArrangementOrderAllocationMapper teamArrangementAllocationMapper,
+            DispatchTeamArrangementSectionStatusMapper teamArrangementSectionStatusMapper,
+            DispatchTeamGuideMapper teamGuideMapper
+    ) {
+        this(
+                productMapper,
+                descriptionMapper,
+                itineraryDayMapper,
+                roadbookPointMapper,
+                productArrangementMapper,
+                productArrangementPriceLineMapper,
+                teamMapper,
+                teamListSummaryMapper,
+                priceMapper,
+                statusLogMapper,
+                noLogMapper,
+                bookingOrderService,
+                bookingOrderMapper,
+                teamArrangementMapper,
+                teamArrangementPriceLineMapper,
+                teamArrangementAllocationMapper,
+                teamArrangementSectionStatusMapper,
+                teamGuideMapper,
                 null
         );
     }
@@ -285,7 +335,8 @@ public class SalesTeamScheduleService {
             DispatchTeamArrangementPriceLineMapper teamArrangementPriceLineMapper,
             DispatchTeamArrangementOrderAllocationMapper teamArrangementAllocationMapper,
             DispatchTeamArrangementSectionStatusMapper teamArrangementSectionStatusMapper,
-            DispatchTeamGuideMapper teamGuideMapper
+            DispatchTeamGuideMapper teamGuideMapper,
+            SalesTeamListSummaryRefreshService teamListSummaryRefreshService
     ) {
         this.productMapper = productMapper;
         this.descriptionMapper = descriptionMapper;
@@ -305,6 +356,7 @@ public class SalesTeamScheduleService {
         this.teamArrangementAllocationMapper = teamArrangementAllocationMapper;
         this.teamArrangementSectionStatusMapper = teamArrangementSectionStatusMapper;
         this.teamGuideMapper = teamGuideMapper;
+        this.teamListSummaryRefreshService = teamListSummaryRefreshService;
     }
 
     /**
@@ -631,6 +683,49 @@ public class SalesTeamScheduleService {
     }
 
     /**
+     * 查询收客订单编辑页所需的轻量团队草稿。
+     *
+     * <p>订单编辑页只需要团队基础信息、产品说明、行程和团队价格，不能复用团队操作页完整详情，
+     * 否则会额外加载订单列表、拼团关系和导游汇总，导致打开订单页面等待时间过长。</p>
+     *
+     * @param teamId 团队 ID
+     * @param tenantId 当前租户 ID
+     * @return 收客订单页面团队草稿
+     */
+    public SalesBookingTeamDraftResponse bookingTeamDraft(Long teamId, Long tenantId) {
+        SalesTeamEntity team = requireTeam(teamId, tenantId);
+        SalesProductEntity product = null;
+        if (team.getProductId() != null) {
+            product = productMapper.selectOne(baseProductQuery(tenantId).eq("id", team.getProductId()));
+        }
+        SalesProductDescriptionEntity description = null;
+        if (descriptionMapper != null && team.getProductId() != null) {
+            description = descriptionMapper.selectOne(baseDescriptionQuery(tenantId).eq("product_id", team.getProductId()));
+        }
+        List<SalesProductItineraryDayEntity> itineraryDays = loadProductItineraryDays(tenantId, team.getProductId());
+        List<SalesTeamPriceResponse> prices = loadPricesForTeams(tenantId, List.of(team))
+                .getOrDefault(team.getId(), List.of());
+        SalesTeamOperationResponse detail = SalesTeamOperationResponse.from(
+                team,
+                product,
+                description,
+                prices,
+                itineraryDays,
+                List.of(),
+                null,
+                null
+        );
+        return new SalesBookingTeamDraftResponse(
+                detail.team(),
+                detail.product(),
+                detail.content(),
+                detail.routeSummary(),
+                detail.itineraryDays(),
+                detail.prices()
+        );
+    }
+
+    /**
      * 团队管理页直接创建散拼、整团或散团。
      *
      * <p>老系统这三个入口复用“产品团队”基础信息页面。新系统保持统一团队主表，同时创建一个
@@ -852,6 +947,7 @@ public class SalesTeamScheduleService {
             throw new BizException("团队不存在或已删除");
         }
         SalesTeamEntity latest = requireTeam(teamId, tenantId);
+        refreshTeamListSummary(teamId, tenantId);
         return SalesTeamResponse.fromEntity(latest, loadPricesForTeams(tenantId, List.of(latest)).getOrDefault(teamId, List.of()));
     }
 
@@ -914,6 +1010,7 @@ public class SalesTeamScheduleService {
             SalesTeamEntity team = requireTeam(teamId, tenantId);
             if (updateTeam) {
                 batchUpdateTeam(team, request, tenantId);
+                refreshTeamListSummary(teamId, tenantId);
             }
             if (deletePrice) {
                 deletePricesByBatchRule(team, request, tenantId, operator);
@@ -987,6 +1084,7 @@ public class SalesTeamScheduleService {
         priceMapper.update(priceUpdate, basePriceUpdate(tenantId).eq("team_id", teamId));
 
         insertStatusLog(tenantId, teamId, team.getStatus(), team.getStatus(), SalesTeamStatusAction.DELETE, operator, "删除取消状态团队");
+        refreshTeamListSummary(teamId, tenantId);
     }
 
     private QueryWrapper<SalesTeamEntity> baseTeamQuery(Long tenantId) {
@@ -2221,6 +2319,10 @@ public class SalesTeamScheduleService {
      * <p>列表页只查汇总表；团队、订单、导游或安排变化后调用该方法，将相关来源表提前聚合为一行。</p>
      */
     public void refreshTeamListSummary(Long teamId, Long tenantId) {
+        if (teamListSummaryRefreshService != null) {
+            teamListSummaryRefreshService.refresh(teamId, tenantId);
+            return;
+        }
         if (teamListSummaryMapper == null || teamId == null || tenantId == null) {
             return;
         }
@@ -2531,6 +2633,7 @@ public class SalesTeamScheduleService {
             throw new BizException("团队状态已变化，请刷新后重试");
         }
         insertStatusLog(tenantId, teamId, requiredStatus.getValue(), targetStatus.getValue(), action, operator, remark);
+        refreshTeamListSummary(teamId, tenantId);
     }
 
     private void cancelTeam(Long teamId, Long tenantId, String operator, String remark) {
@@ -2543,6 +2646,7 @@ public class SalesTeamScheduleService {
         update.setStatus(SalesTeamStatus.CANCELLED.getValue());
         teamMapper.update(update, baseTeamUpdate(tenantId).eq("id", teamId));
         insertStatusLog(tenantId, teamId, current.getValue(), SalesTeamStatus.CANCELLED.getValue(), SalesTeamStatusAction.CANCEL, operator, remark);
+        refreshTeamListSummary(teamId, tenantId);
     }
 
     private String nextTeamNo(
@@ -2552,6 +2656,7 @@ public class SalesTeamScheduleService {
             Set<String> generatedInThisBatch
     ) {
         String base = teamNoBase(teamType, departureDate);
+        teamMapper.lockTeamNoGeneration(tenantId, base);
         List<String> existingNos = teamMapper.selectList(baseTeamQuery(tenantId)
                         .eq("departure_date", departureDate)
                         .likeRight("team_no", base))

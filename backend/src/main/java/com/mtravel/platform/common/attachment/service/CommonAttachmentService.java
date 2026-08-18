@@ -11,10 +11,13 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -52,7 +55,42 @@ public class CommonAttachmentService {
         if (file == null || file.isEmpty()) {
             throw new BizException("上传文件不能为空");
         }
-        String originalName = cleanFilename(file.getOriginalFilename());
+        try {
+            return uploadBytes(
+                    file.getBytes(),
+                    file.getOriginalFilename(),
+                    file.getContentType(),
+                    businessModule,
+                    businessType,
+                    businessId,
+                    tenantId,
+                    operator
+            );
+        } catch (IOException ex) {
+            throw new BizException("文件读取失败");
+        }
+    }
+
+    /**
+     * 保存业务服务生成的二进制文件并写入公共附件元数据。
+     *
+     * <p>生成 Word、报价单等服务没有 MultipartFile，但仍必须复用同一套租户目录、路径清洗和审计规则，
+     * 不能在业务服务里自行拼接上传路径。</p>
+     */
+    public AttachmentResponse uploadBytes(
+            byte[] bytes,
+            String originalFilename,
+            String contentType,
+            String businessModule,
+            String businessType,
+            Long businessId,
+            Long tenantId,
+            String operator
+    ) {
+        if (bytes == null || bytes.length == 0) {
+            throw new BizException("生成文件不能为空");
+        }
+        String originalName = cleanFilename(originalFilename);
         String extension = extension(originalName);
         String storedName = UUID.randomUUID() + (extension == null ? "" : "." + extension);
         LocalDate today = LocalDate.now();
@@ -65,7 +103,7 @@ public class CommonAttachmentService {
         }
         try {
             Files.createDirectories(directory);
-            file.transferTo(target);
+            Files.write(target, bytes);
         } catch (IOException ex) {
             throw new BizException("文件保存失败");
         }
@@ -79,8 +117,8 @@ public class CommonAttachmentService {
         entity.setStoredFilename(storedName);
         entity.setStoragePath(target.toString());
         entity.setFileUrl("/attachments/" + tenantId + "/" + today + "/" + storedName);
-        entity.setContentType(file.getContentType());
-        entity.setFileSize(file.getSize());
+        entity.setContentType(contentType);
+        entity.setFileSize((long) bytes.length);
         entity.setFileExt(extension);
         entity.setStatus("active");
         entity.setUploadedBy(operator);
@@ -154,6 +192,58 @@ public class CommonAttachmentService {
             return Files.newInputStream(path);
         } catch (IOException ex) {
             throw new BizException("附件文件读取失败");
+        }
+    }
+
+    /**
+     * 软删除附件元数据。
+     *
+     * <p>业务删除文件时先停用元数据，物理文件删除应在事务提交后执行，避免数据库回滚但文件已被删除。</p>
+     */
+    public CommonAttachmentEntity softDelete(Long attachmentId, Long tenantId, String operator) {
+        CommonAttachmentEntity existing = getEntity(attachmentId, tenantId);
+        CommonAttachmentEntity entity = new CommonAttachmentEntity();
+        entity.setStatus("disabled");
+        entity.setIsDeleted(true);
+        entity.setDeletedAt(OffsetDateTime.now());
+        entity.setDeletedBy(operator);
+        mapper.update(entity, new UpdateWrapper<CommonAttachmentEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq("id", attachmentId));
+        return existing;
+    }
+
+    /** 事务提交后尝试删除本地物理文件，失败时保留元数据审计信息并等待人工或后台清理。 */
+    public void deletePhysicalFileAfterCommit(CommonAttachmentEntity attachment) {
+        Runnable deleteAction = () -> deletePhysicalFile(attachment);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    deleteAction.run();
+                }
+            });
+            return;
+        }
+        deleteAction.run();
+    }
+
+    private void deletePhysicalFile(CommonAttachmentEntity attachment) {
+        if (attachment == null || !StringUtils.hasText(attachment.getStoragePath())) {
+            return;
+        }
+        Path path = Path.of(attachment.getStoragePath()).toAbsolutePath().normalize();
+        if (!path.startsWith(uploadRoot)) {
+            return;
+        }
+        for (int i = 0; i < 3; i += 1) {
+            try {
+                Files.deleteIfExists(path);
+                return;
+            } catch (IOException ex) {
+                // 本地文件删除失败不影响数据库事务；后续可由运维脚本按 disabled 附件清理。
+            }
         }
     }
 

@@ -1,6 +1,7 @@
 package com.mtravel.platform.sales.product.service;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.mtravel.platform.common.BizException;
 import com.mtravel.platform.sales.product.dto.SalesProductArrangementItemRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductArrangementUpsertRequest;
@@ -11,6 +12,14 @@ import com.mtravel.platform.sales.product.dto.SalesProductResponse;
 import com.mtravel.platform.sales.product.dto.SalesProductSaveRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductVehicleInquiryRequest;
 import com.mtravel.platform.sales.product.dto.SalesProductVehicleQuoteSnapshotRequest;
+import com.mtravel.platform.sales.product.designer.entity.SalesProductAdultQuoteEntity;
+import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceEntity;
+import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceImageEntity;
+import com.mtravel.platform.sales.product.designer.entity.SalesProductDocumentVersionEntity;
+import com.mtravel.platform.sales.product.designer.mapper.SalesProductAdultQuoteMapper;
+import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceImageMapper;
+import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceMapper;
+import com.mtravel.platform.sales.product.designer.mapper.SalesProductDocumentVersionMapper;
 import com.mtravel.platform.sales.product.entity.SalesProductArrangementItemEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductArrangementPriceLineEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductDescriptionEntity;
@@ -32,6 +41,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.stubbing.Answer;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -163,7 +173,106 @@ class SalesProductServiceTest {
 
         assertThatThrownBy(() -> service.create(request(), 1L, "admin"))
                 .isInstanceOf(BizException.class)
-                .hasMessage("产品名称已存在");
+                .hasMessage("同名产品或设计草稿已存在");
+    }
+
+    @Test
+    void createShouldTranslateConcurrentNameConstraintViolation() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductService service = service(
+                productMapper,
+                mock(SalesProductItineraryDayMapper.class),
+                mock(SalesProductDescriptionMapper.class),
+                mock(SalesProductArrangementItemMapper.class),
+                mock(SalesProductArrangementPriceLineMapper.class),
+                mock(SalesProductRoadbookPointMapper.class),
+                mock(SalesProductVehicleQuoteSnapshotMapper.class),
+                mock(SalesProductVehicleInquiryMapper.class)
+        );
+        when(productMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
+        when(productMapper.insert(any(SalesProductEntity.class)))
+                .thenThrow(new DataIntegrityViolationException("unique product name"));
+
+        assertThatThrownBy(() -> service.create(request(), 1L, "admin"))
+                .isInstanceOf(BizException.class)
+                .hasMessage("同名产品或设计草稿已存在");
+    }
+
+    @Test
+    void updateShouldTranslateConcurrentNameConstraintViolation() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductService service = service(
+                productMapper,
+                mock(SalesProductItineraryDayMapper.class),
+                mock(SalesProductDescriptionMapper.class),
+                mock(SalesProductArrangementItemMapper.class),
+                mock(SalesProductArrangementPriceLineMapper.class),
+                mock(SalesProductRoadbookPointMapper.class),
+                mock(SalesProductVehicleQuoteSnapshotMapper.class),
+                mock(SalesProductVehicleInquiryMapper.class)
+        );
+        when(productMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
+        when(productMapper.update(any(SalesProductEntity.class), any(Wrapper.class)))
+                .thenThrow(new DataIntegrityViolationException("unique product name"));
+
+        assertThatThrownBy(() -> service.update(88L, request(), 1L, "admin"))
+                .isInstanceOf(BizException.class)
+                .hasMessage("同名产品或设计草稿已存在");
+    }
+
+    @Test
+    void officialProductDetailShouldQueryOnlyTemplateScope() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductService service = service(
+                productMapper,
+                mock(SalesProductItineraryDayMapper.class),
+                mock(SalesProductDescriptionMapper.class),
+                mock(SalesProductArrangementItemMapper.class),
+                mock(SalesProductArrangementPriceLineMapper.class),
+                mock(SalesProductRoadbookPointMapper.class),
+                mock(SalesProductVehicleQuoteSnapshotMapper.class),
+                mock(SalesProductVehicleInquiryMapper.class)
+        );
+        ArgumentCaptor<QueryWrapper<SalesProductEntity>> wrapperCaptor = ArgumentCaptor.forClass(QueryWrapper.class);
+
+        assertThatThrownBy(() -> service.detail(88L, 1L))
+                .isInstanceOf(BizException.class)
+                .hasMessage("产品不存在或已删除");
+
+        verify(productMapper).selectOne(wrapperCaptor.capture());
+        assertThat(wrapperCaptor.getValue().getSqlSegment()).contains("tenant_id", "is_deleted", "product_scope", "id");
+        assertThat(wrapperCaptor.getValue().getParamNameValuePairs()).containsValue("template");
+    }
+
+    @Test
+    void deleteShouldSoftDeleteDesignerChildrenAfterDraftWasPublished() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDayResourceImageMapper imageMapper = mock(SalesProductDayResourceImageMapper.class);
+        SalesProductAdultQuoteMapper quoteMapper = mock(SalesProductAdultQuoteMapper.class);
+        SalesProductDocumentVersionMapper documentMapper = mock(SalesProductDocumentVersionMapper.class);
+        SalesProductService service = new SalesProductService(
+                productMapper,
+                mock(SalesProductItineraryDayMapper.class),
+                mock(SalesProductDescriptionMapper.class),
+                mock(SalesProductArrangementItemMapper.class),
+                mock(SalesProductArrangementPriceLineMapper.class),
+                mock(SalesProductRoadbookPointMapper.class),
+                mock(SalesProductVehicleQuoteSnapshotMapper.class),
+                mock(SalesProductVehicleInquiryMapper.class),
+                dayResourceMapper,
+                imageMapper,
+                quoteMapper,
+                documentMapper
+        );
+        when(productMapper.update(any(SalesProductEntity.class), any(Wrapper.class))).thenReturn(1);
+
+        service.delete(88L, 1L, "admin");
+
+        verify(imageMapper).update(any(SalesProductDayResourceImageEntity.class), any(Wrapper.class));
+        verify(dayResourceMapper).update(any(SalesProductDayResourceEntity.class), any(Wrapper.class));
+        verify(quoteMapper).update(any(SalesProductAdultQuoteEntity.class), any(Wrapper.class));
+        verify(documentMapper).update(any(SalesProductDocumentVersionEntity.class), any(Wrapper.class));
     }
 
     @Test
@@ -283,7 +392,11 @@ class SalesProductServiceTest {
                 priceLineMapper,
                 roadbookMapper,
                 vehicleQuoteMapper,
-                vehicleInquiryMapper
+                vehicleInquiryMapper,
+                mock(SalesProductDayResourceMapper.class),
+                mock(SalesProductDayResourceImageMapper.class),
+                mock(SalesProductAdultQuoteMapper.class),
+                mock(SalesProductDocumentVersionMapper.class)
         );
     }
 

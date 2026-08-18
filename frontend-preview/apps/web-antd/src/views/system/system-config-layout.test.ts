@@ -17,7 +17,7 @@ describe('system config page layout', () => {
     const routeSource = readAppFile('src/router/routes/modules/system.ts');
 
     expect(source).toContain('业务风控');
-    expect(source).toContain('客户风险总经理审批');
+    expect(source).toContain('客户授信审批');
     expect(source).toContain('百炼配置');
     expect(source).toContain('高德地图');
     expect(source).toContain('登录安全');

@@ -22,7 +22,7 @@ import java.util.List;
  * @param pendingApprovalAmount 审批中额度。
  * @param availableAmount 可用额度。
  * @param overLimitAmount 超限金额。
- * @param approvalEnabled 是否启用强制总经理审批。
+ * @param approvalEnabled 是否启用强制客户等级审批。
  * @param blocked 当前风险是否阻断订单保存。
  * @param riskApprovalRequestId 当前风险金额可复用的已通过审批申请 ID。
  * @param riskApprovalRequestNo 当前风险金额可复用的已通过审批申请编号。

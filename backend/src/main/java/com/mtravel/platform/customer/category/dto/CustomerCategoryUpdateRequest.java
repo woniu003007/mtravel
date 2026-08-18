@@ -5,6 +5,10 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
+import java.util.List;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 
 /**
  * 修改客户分类请求。
@@ -17,6 +21,12 @@ public record CustomerCategoryUpdateRequest(
         String categoryName,
         @DecimalMin(value = "0.00", message = "默认授信额度不能小于0")
         BigDecimal defaultCreditLimit,
+        @Min(value = 0, message = "账期天数不能小于0")
+        @Max(value = 3650, message = "账期天数不能超过3650")
+        Integer creditTermDays,
+        Boolean allowOverLimit,
+        List<@Valid CustomerCategoryApprovalMemberRequest> approvers,
+        List<@Valid CustomerCategoryApprovalMemberRequest> ccUsers,
         Integer sortOrder,
         @Pattern(regexp = "active|disabled", message = "客户分类状态只能是active或disabled")
         String status,

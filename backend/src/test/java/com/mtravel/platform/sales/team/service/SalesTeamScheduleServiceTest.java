@@ -104,6 +104,8 @@ class SalesTeamScheduleServiceTest {
         );
 
         verify(teamMapper, org.mockito.Mockito.times(2)).insert(teamCaptor.capture());
+        verify(teamMapper).lockTeamNoGeneration(1L, "CS-SP-BK-260701");
+        verify(teamMapper).lockTeamNoGeneration(1L, "CS-SP-BK-260702");
         assertThat(teamCaptor.getAllValues()).extracting(SalesTeamEntity::getTeamNo)
                 .containsExactly("CS-SP-BK-260701B", "CS-SP-BK-260702A");
         assertThat(teamCaptor.getAllValues()).allSatisfy(team -> {

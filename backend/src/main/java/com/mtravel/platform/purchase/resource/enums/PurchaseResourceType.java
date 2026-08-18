@@ -5,8 +5,8 @@ import java.util.Set;
 /**
  * 资源总览支持的资源类型。
  *
- * <p>资源总览按当前业务口径只维护景区、酒店、餐厅和购物四类资源。车辆、地接、导游等资料
- * 由独立模块维护，避免资源总览承载过多职责。</p>
+ * <p>资源总览维护后续产品估价可复用的采购资源主档。导游、自费项目和一次性费用不进入这里，
+ * 需要结账的可复用采购对象才作为资源维护。</p>
  */
 public enum PurchaseResourceType {
     /** 景区资源。 */
@@ -19,9 +19,30 @@ public enum PurchaseResourceType {
     RESTAURANT("restaurant"),
 
     /** 购物资源。 */
-    SHOPPING("shopping");
+    SHOPPING("shopping"),
 
-    private static final Set<String> VALUES = Set.of("scenic", "hotel", "restaurant", "shopping");
+    /** 用车资源，代表标准车辆规格，例如 33 座旅游大巴。 */
+    VEHICLE("vehicle"),
+
+    /** 大交通服务，代表高铁、飞机、轮船等标准票务规格。 */
+    TRAFFIC("traffic"),
+
+    /** 地接资源，代表目的地地接服务套餐或能力。 */
+    GROUND_AGENT("ground_agent"),
+
+    /** 其它需要供应商报价和结账的可复用资源。 */
+    OTHER("other");
+
+    private static final Set<String> VALUES = Set.of(
+            "scenic",
+            "hotel",
+            "restaurant",
+            "shopping",
+            "vehicle",
+            "traffic",
+            "ground_agent",
+            "other"
+    );
 
     private final String value;
 

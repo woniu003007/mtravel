@@ -75,6 +75,25 @@ class SupplierResourcePriceServiceTest {
         verify(mapper, never()).insert(any(SupplierResourcePriceEntity.class));
     }
 
+    @Test
+    void createShouldRejectClassifiedPriceLineForUnifiedRelation() {
+        SupplierResourcePriceMapper mapper = mock(SupplierResourcePriceMapper.class);
+        PurchaseRelationMapper relationMapper = mock(PurchaseRelationMapper.class);
+        EnterpriseExpenseItemMapper expenseItemMapper = mock(EnterpriseExpenseItemMapper.class);
+        SupplierResourcePriceService service = new SupplierResourcePriceService(mapper, relationMapper, expenseItemMapper);
+        PurchaseRelationEntity relation = relation(8L, "scenic");
+        relation.setPriceMode("unified");
+        relation.setUnifiedPrice(new BigDecimal("200.00"));
+        when(relationMapper.selectOne(any(Wrapper.class))).thenReturn(relation);
+
+        assertThatThrownBy(() -> service.create(request(8L, 20L), 1L, "admin"))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("统一报价请到资源页编辑");
+
+        verify(expenseItemMapper, never()).selectOne(any(Wrapper.class));
+        verify(mapper, never()).insert(any(SupplierResourcePriceEntity.class));
+    }
+
     private SupplierResourcePriceSaveRequest request(Long relationId, Long projectId) {
         return new SupplierResourcePriceSaveRequest(
                 relationId,
@@ -95,6 +114,7 @@ class SupplierResourcePriceServiceTest {
         entity.setResourceType(resourceType);
         entity.setResourceName("苏州园林");
         entity.setSupplierId(66L);
+        entity.setPriceMode("classified");
         return entity;
     }
 

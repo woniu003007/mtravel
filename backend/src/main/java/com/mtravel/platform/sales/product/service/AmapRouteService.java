@@ -1,7 +1,8 @@
 package com.mtravel.platform.sales.product.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mtravel.platform.common.BizException;
+import com.mtravel.platform.common.map.service.AmapMapService;
+import com.mtravel.platform.common.map.service.AmapWebServiceClient;
 import com.mtravel.platform.sales.product.dto.AmapRouteCalculateRequest;
 import com.mtravel.platform.sales.product.dto.AmapRouteCalculateResponse;
 import com.mtravel.platform.sales.product.dto.AmapRoutePointRequest;
@@ -9,52 +10,34 @@ import com.mtravel.platform.sales.product.dto.AmapRouteSegmentResponse;
 import com.mtravel.platform.sales.product.dto.AmapJsConfigResponse;
 import com.mtravel.platform.sales.product.dto.AmapStaticMapRequest;
 import com.mtravel.platform.sales.product.dto.AmapTipResponse;
-import com.mtravel.platform.system.config.entity.SystemConfigEntity;
-import com.mtravel.platform.system.config.mapper.SystemConfigMapper;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.stereotype.Service;
-import org.springframework.http.ResponseEntity;
-import org.springframework.util.StringUtils;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.web.util.UriComponentsBuilder;
 
 /**
- * 高德地图 Web 服务代理。
+ * 销售产品高德路线服务。
  *
- * <p>前端不直接持有 Web 服务 Key。后端从租户系统配置或环境变量读取 Key，统一代理地点搜索和驾车路线计算。</p>
+ * <p>路线计算和静态图属于销售产品业务；地点搜索、JS 配置、租户 Key 和请求节流委托给公共地图服务。
+ * 原销售接口继续调用本类，从而保持既有接口路径和返回结构兼容。</p>
  */
 @Service
 public class AmapRouteService {
 
-    public static final String AMAP_WEB_SERVICE_KEY = "map.amap.web_service_key";
-    public static final String AMAP_JS_KEY = "map.amap.js_key";
-    public static final String AMAP_JS_SECURITY_CODE = "map.amap.js_security_code";
+    private static final String DRIVING_ENDPOINT = "https://restapi.amap.com/v3/direction/driving";
+    private static final String STATIC_MAP_ENDPOINT = "https://restapi.amap.com/v3/staticmap";
     private static final long CACHE_TTL_MILLIS = 10 * 60 * 1000L;
-    private static final long MIN_REQUEST_INTERVAL_MILLIS = 250L;
 
-    private final RestTemplate restTemplate;
-    private final SystemConfigMapper configMapper;
-    private final String envWebServiceKey;
-    private final Map<String, CacheEntry<List<AmapTipResponse>>> tipsCache = new ConcurrentHashMap<>();
+    private final AmapMapService mapService;
+    private final AmapWebServiceClient amapClient;
     private final Map<String, CacheEntry<AmapRouteSegmentResponse>> segmentCache = new ConcurrentHashMap<>();
-    private final Object amapRateLimitLock = new Object();
-    private long lastAmapRequestAt = 0L;
 
-    public AmapRouteService(
-            RestTemplateBuilder restTemplateBuilder,
-            SystemConfigMapper configMapper,
-            @Value("${AMAP_WEB_SERVICE_KEY:}") String envWebServiceKey
-    ) {
-        this.restTemplate = restTemplateBuilder.build();
-        this.configMapper = configMapper;
-        this.envWebServiceKey = envWebServiceKey;
+    public AmapRouteService(AmapMapService mapService, AmapWebServiceClient amapClient) {
+        this.mapService = mapService;
+        this.amapClient = amapClient;
     }
 
     /**
@@ -66,38 +49,15 @@ public class AmapRouteService {
      * @return 地点候选列表
      */
     public List<AmapTipResponse> searchTips(Long tenantId, String keywords, String city) {
-        if (!StringUtils.hasText(keywords)) {
-            return List.of();
-        }
-        String normalizedKeywords = keywords.trim();
-        String normalizedCity = city == null ? "" : city.trim();
-        String cacheKey = "tips:%s:%s:%s".formatted(tenantId, normalizedCity, normalizedKeywords);
-        List<AmapTipResponse> cached = cachedValue(tipsCache, cacheKey);
-        if (cached != null) {
-            return cached;
-        }
-        String url = UriComponentsBuilder
-                .fromUriString("https://restapi.amap.com/v3/assistant/inputtips")
-                .queryParam("key", webServiceKey(tenantId))
-                .queryParam("keywords", normalizedKeywords)
-                .queryParam("city", normalizedCity)
-                .queryParam("citylimit", false)
-                .build()
-                .toUriString();
-        Map<?, ?> response = getForMap(url);
-        ensureAmapSuccess(response);
-        Object tipsObject = response.get("tips");
-        if (!(tipsObject instanceof List<?> tips)) {
-            return List.of();
-        }
-        List<AmapTipResponse> result = tips.stream()
-                .filter(Map.class::isInstance)
-                .map(item -> tipFromMap((Map<?, ?>) item))
-                .filter(item -> StringUtils.hasText(item.name()) && StringUtils.hasText(item.longitude()))
-                .limit(20)
+        return mapService.searchTips(tenantId, keywords, city).stream()
+                .map(item -> new AmapTipResponse(
+                        item.name(),
+                        item.address(),
+                        item.district(),
+                        item.longitude(),
+                        item.latitude()
+                ))
                 .toList();
-        tipsCache.put(cacheKey, new CacheEntry<>(result, System.currentTimeMillis() + CACHE_TTL_MILLIS));
-        return result;
     }
 
     /**
@@ -107,12 +67,8 @@ public class AmapRouteService {
      * 要求写入 window._AMapSecurityConfig。正式环境建议单独配置 Web 端 JS API Key。</p>
      */
     public AmapJsConfigResponse jsConfig(Long tenantId) {
-        String jsKey = configValue(tenantId, AMAP_JS_KEY);
-        if (!StringUtils.hasText(jsKey)) {
-            jsKey = webServiceKey(tenantId);
-        }
-        String securityCode = configValue(tenantId, AMAP_JS_SECURITY_CODE);
-        return new AmapJsConfigResponse(jsKey.trim(), securityCode == null ? null : securityCode.trim());
+        var config = mapService.jsConfig(tenantId);
+        return new AmapJsConfigResponse(config.key(), config.securityJsCode());
     }
 
     /**
@@ -152,15 +108,12 @@ public class AmapRouteService {
         if (cached != null) {
             return cached;
         }
-        UriComponentsBuilder builder = UriComponentsBuilder
-                .fromUriString("https://restapi.amap.com/v3/direction/driving")
-                .queryParam("key", webServiceKey(tenantId))
-                .queryParam("origin", location(originPoint))
-                .queryParam("destination", location(destinationPoint))
-                .queryParam("extensions", "base")
-                .queryParam("strategy", 0);
-        Map<?, ?> response = getForMap(builder.build().toUriString());
-        ensureAmapSuccess(response);
+        Map<?, ?> response = amapClient.getJson(tenantId, DRIVING_ENDPOINT, Map.of(
+                "origin", location(originPoint),
+                "destination", location(destinationPoint),
+                "extensions", "base",
+                "strategy", 0
+        ));
         Map<?, ?> route = mapValue(response.get("route"));
         List<?> paths = listValue(route.get("paths"));
         if (paths.isEmpty()) {
@@ -187,78 +140,15 @@ public class AmapRouteService {
      */
     public String staticMapImage(Long tenantId, AmapStaticMapRequest request) {
         List<AmapRoutePointRequest> points = request.points();
-        UriComponentsBuilder builder = UriComponentsBuilder
-                .fromUriString("https://restapi.amap.com/v3/staticmap")
-                .queryParam("key", webServiceKey(tenantId))
-                .queryParam("size", "700*360")
-                .queryParam("scale", 2)
-                .queryParam("markers", markerParam(points));
+        Map<String, Object> queryParams = new LinkedHashMap<>();
+        queryParams.put("size", "700*360");
+        queryParams.put("scale", 2);
+        queryParams.put("markers", markerParam(points));
         if (points.size() >= 2) {
-            builder.queryParam("paths", pathParam(points));
+            queryParams.put("paths", pathParam(points));
         }
-        try {
-            ResponseEntity<byte[]> response = restTemplate.getForEntity(builder.build().toUriString(), byte[].class);
-            byte[] image = response.getBody();
-            if (image == null || image.length == 0) {
-                throw new BizException("高德地图预览为空");
-            }
-            return "data:image/png;base64," + Base64.getEncoder().encodeToString(image);
-        } catch (RestClientException ex) {
-            throw new BizException("高德地图预览暂时不可用");
-        }
-    }
-
-    /** 从系统配置读取 Web 服务 Key，读取不到时回退到环境变量。 */
-    private String webServiceKey(Long tenantId) {
-        String key = configValue(tenantId, AMAP_WEB_SERVICE_KEY);
-        if (!StringUtils.hasText(key)) {
-            key = envWebServiceKey;
-        }
-        if (!StringUtils.hasText(key)) {
-            throw new BizException("未配置高德地图 Web服务 Key");
-        }
-        return key.trim();
-    }
-
-    private String configValue(Long tenantId, String key) {
-        SystemConfigEntity entity = configMapper.selectOne(new LambdaQueryWrapper<SystemConfigEntity>()
-                .eq(SystemConfigEntity::getTenantId, tenantId)
-                .eq(SystemConfigEntity::getConfigKey, key));
-        return entity == null ? null : entity.getConfigValue();
-    }
-
-    private Map<?, ?> getForMap(String url) {
-        try {
-            waitForAmapRequestSlot();
-            Map<?, ?> response = restTemplate.getForObject(url, Map.class);
-            return response == null ? Map.of() : response;
-        } catch (RestClientException ex) {
-            throw new BizException("高德地图服务暂时不可用");
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            throw new BizException("高德地图请求被中断");
-        }
-    }
-
-    private void ensureAmapSuccess(Map<?, ?> response) {
-        if (!"1".equals(String.valueOf(response.get("status")))) {
-            Object info = response.get("info");
-            if ("CUQPS_HAS_EXCEEDED_THE_LIMIT".equals(String.valueOf(info))) {
-                throw new BizException("高德地图调用过于频繁，请稍后再试");
-            }
-            throw new BizException("高德地图调用失败：" + (info == null ? "未知错误" : info));
-        }
-    }
-
-    private void waitForAmapRequestSlot() throws InterruptedException {
-        synchronized (amapRateLimitLock) {
-            long now = System.currentTimeMillis();
-            long waitMillis = MIN_REQUEST_INTERVAL_MILLIS - (now - lastAmapRequestAt);
-            if (waitMillis > 0) {
-                Thread.sleep(waitMillis);
-            }
-            lastAmapRequestAt = System.currentTimeMillis();
-        }
+        byte[] image = amapClient.getBytes(tenantId, STATIC_MAP_ENDPOINT, queryParams);
+        return "data:image/png;base64," + Base64.getEncoder().encodeToString(image);
     }
 
     private <T> T cachedValue(Map<String, CacheEntry<T>> cache, String key) {
@@ -274,24 +164,6 @@ public class AmapRouteService {
     }
 
     private record CacheEntry<T>(T value, long expiresAt) {
-    }
-
-    private AmapTipResponse tipFromMap(Map<?, ?> item) {
-        String location = stringValue(item.get("location"));
-        String longitude = null;
-        String latitude = null;
-        if (StringUtils.hasText(location) && location.contains(",")) {
-            String[] parts = location.split(",", 2);
-            longitude = parts[0];
-            latitude = parts[1];
-        }
-        return new AmapTipResponse(
-                stringValue(item.get("name")),
-                stringValue(item.get("address")),
-                stringValue(item.get("district")),
-                longitude,
-                latitude
-        );
     }
 
     private String location(AmapRoutePointRequest point) {
@@ -325,11 +197,4 @@ public class AmapRouteService {
         }
     }
 
-    private String stringValue(Object value) {
-        if (value == null) {
-            return null;
-        }
-        String text = String.valueOf(value);
-        return StringUtils.hasText(text) && !"[]".equals(text) ? text : null;
-    }
 }

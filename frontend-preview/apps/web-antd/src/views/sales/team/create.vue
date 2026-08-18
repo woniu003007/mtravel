@@ -2,11 +2,15 @@
 import type { EnterpriseProductDictionaryApi } from '#/api/enterprise/product-dictionary';
 import type { SalesProductApi } from '#/api/sales/product';
 import type { SalesTeamApi } from '#/api/sales/team';
+import type { TeamDocumentImportApi } from '#/api/sales/team-document-import';
 import type { RegionPath } from '#/utils/region';
+import type { TableColumnsType, UploadProps } from 'ant-design-vue';
 
 import { Page } from '@vben/common-ui';
+import { IconifyIcon } from '@vben/icons';
 
 import {
+  Alert,
   Button,
   Card,
   Cascader,
@@ -19,15 +23,25 @@ import {
   Select,
   Space,
   Spin,
+  Table,
   Tag,
   Textarea,
+  Tooltip,
+  Upload,
   message,
 } from 'ant-design-vue';
-import { computed, nextTick, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { getProductDictionaryAll } from '#/api/enterprise/product-dictionary';
+import type { CustomerUnitApi } from '#/api/customer/unit';
+import { getCustomerUnitPage } from '#/api/customer/unit';
 import { getHotelResourcePage } from '#/api/purchase/hotel';
+import type { PurchaseResourceApi } from '#/api/purchase/resource';
+import {
+  getPurchaseResourceBindings,
+  getPurchaseResourcePage,
+} from '#/api/purchase/resource';
 import {
   calculateRoadbookRoute,
   getAmapJsConfig,
@@ -38,6 +52,14 @@ import {
   getSalesTeamEditDetail,
   updateSalesTeam,
 } from '#/api/sales/team';
+import {
+  applyTeamDocumentImportTask,
+  createTeamDocumentImportTask,
+  getTeamDocumentImportTask,
+  retryTeamDocumentImportTask,
+  updateTeamDocumentImportDraft,
+} from '#/api/sales/team-document-import';
+import { uploadAttachment } from '#/api/common/attachment';
 import BusinessPillTabs from '#/components/business/BusinessPillTabs.vue';
 import { buildRegionOptions, buildRegionPath, splitRegionPath } from '#/utils/region';
 
@@ -46,6 +68,7 @@ import {
   createDefaultItineraryDay,
   syncItineraryDaysWithTravelDays,
 } from '../product/product-form-utils';
+import { buildDocumentImportResourceGroups } from './document-import-resource-groups';
 
 type DictItem = EnterpriseProductDictionaryApi.Item;
 type SelectOption = { label: string; value: string };
@@ -85,6 +108,19 @@ const dictionaryLoading = ref(false);
 const relatedHotelLoading = ref(false);
 const roadbookCalculating = ref(false);
 const saving = ref(false);
+const documentImportDrawerOpen = ref(false);
+const documentImportUploading = ref(false);
+const documentImportSavingDraft = ref(false);
+const documentImportTask = ref<TeamDocumentImportApi.Task>();
+const documentImportFileName = ref('');
+const documentImportTaskIdToApply = ref<number>();
+const documentImportCustomerLoading = ref(false);
+const documentImportCustomerKeyword = ref('');
+const documentImportCustomerOptions = ref<CustomerUnitApi.CustomerUnit[]>([]);
+const documentImportCustomerNotice = ref('');
+const documentImportResourceLoading = reactive<Record<string, boolean>>({});
+const applyImportedGuests = ref(true);
+const applyImportedArrangements = ref(true);
 const activeEditTab = ref('basic');
 const formRegionPath = ref<RegionPath>([]);
 const businessTypes = ref<DictItem[]>([]);
@@ -105,7 +141,63 @@ let amapPolyline: any;
 let amapGeocoder: any;
 let amapLoaderPromise: Promise<any> | undefined;
 let roadbookSearchTimer: number | undefined;
+let documentImportPollTimer: number | undefined;
+let documentImportCustomerSearchTimer: number | undefined;
+let documentImportPreparedCustomerTaskId: number | undefined;
+const documentImportResourceSearchTimers = new Map<string, number>();
+const documentImportResourceSearchVersions = new Map<string, number>();
 const amapMarkers: any[] = [];
+
+const documentImportProcessing = computed(() => (
+  ['pending', 'extracting', 'recognizing', 'matching'].includes(documentImportTask.value?.status || '')
+));
+const documentImportDraft = computed(() => documentImportTask.value?.draft);
+const documentImportSelectedArrangementCount = computed(() => (
+  (documentImportDraft.value?.resources || []).filter((item) => item.selectedResourceId && !item.requiresConfirmation).length
+));
+const documentImportCustomerSelectOptions = computed(() => documentImportCustomerOptions.value.map((item) => ({
+  label: item.customerCode ? `${item.customerName}（${item.customerCode}）` : item.customerName,
+  value: item.id,
+})));
+
+const documentImportResourceGroups = computed(() => buildDocumentImportResourceGroups(documentImportDraft.value?.resources));
+
+const documentTypeLabels: Record<TeamDocumentImportApi.DocumentType, string> = {
+  ground_confirmation: '地接确认单',
+  guest_list: '游客名单',
+  mixed: '综合文档',
+  product_itinerary: '产品行程单',
+  quotation: '报价单',
+};
+
+const arrangementTypeLabels: Record<TeamDocumentImportApi.ArrangementType, string> = {
+  extra_fee: '杂费',
+  ground_agent: '地接服务',
+  hotel: '酒店',
+  meal: '餐饮',
+  optional: '自费项目',
+  other: '其他资源',
+  scenic: '景区',
+  shopping: '购物',
+  traffic: '大交通',
+  vehicle: '用车服务',
+};
+
+function documentTypeLabel(value?: TeamDocumentImportApi.DocumentType) {
+  return value ? documentTypeLabels[value] || '综合文档' : '综合文档';
+}
+
+function arrangementTypeLabel(value: TeamDocumentImportApi.ArrangementType) {
+  return arrangementTypeLabels[value] || '其他资源';
+}
+const documentImportGuestColumns: TableColumnsType<TeamDocumentImportApi.GuestDraft> = [
+  { dataIndex: 'indexNo', key: 'indexNo', title: '序号', width: 64 },
+  { dataIndex: 'guestName', key: 'guestName', title: '姓名', width: 110 },
+  { dataIndex: 'certificateNo', key: 'certificateNo', title: '证件号', width: 190 },
+  { dataIndex: 'phone', key: 'phone', title: '联系电话', width: 136 },
+  { dataIndex: 'roomGroup', key: 'roomGroup', title: '分房', width: 116 },
+  { dataIndex: 'leaderFlag', key: 'leaderFlag', title: '领队', width: 76 },
+];
 
 const roadbookPointTypeOptions = [
   { label: '出发', value: 'departure' },
@@ -644,6 +736,488 @@ function handleTravelDaysChange() {
   syncItineraryDays();
 }
 
+/** 打开团队 Word 智能代录抽屉；再次打开时刷新未应用草稿，带回兼容补抽取后的字段。 */
+async function openDocumentImportDrawer() {
+  documentImportDrawerOpen.value = true;
+  const taskId = documentImportTask.value?.id;
+  if (!taskId) return;
+  try {
+    const task = await getTeamDocumentImportTask(taskId);
+    documentImportTask.value = task;
+    if (task.status === 'reviewing') {
+      await prepareDocumentImportCustomerSelection(task);
+    }
+  } catch {
+    message.warning('导入草稿刷新失败，当前内容仍可继续编辑');
+  }
+}
+
+function clearDocumentImportPoll() {
+  if (documentImportPollTimer !== undefined) {
+    window.clearTimeout(documentImportPollTimer);
+    documentImportPollTimer = undefined;
+  }
+}
+
+function clearDocumentImportCustomerSearch() {
+  if (documentImportCustomerSearchTimer !== undefined) {
+    window.clearTimeout(documentImportCustomerSearchTimer);
+    documentImportCustomerSearchTimer = undefined;
+  }
+}
+
+/** 清理按资源行创建的延迟搜索，抽屉关闭后不再发起过期请求。 */
+function clearDocumentImportResourceSearches() {
+  for (const timer of documentImportResourceSearchTimers.values()) {
+    window.clearTimeout(timer);
+  }
+  documentImportResourceSearchTimers.clear();
+  documentImportResourceSearchVersions.clear();
+}
+
+function handleDocumentImportDrawerClose() {
+  clearDocumentImportPoll();
+  clearDocumentImportCustomerSearch();
+  clearDocumentImportResourceSearches();
+}
+
+function resetDocumentImportCustomerSelection() {
+  clearDocumentImportCustomerSearch();
+  documentImportCustomerKeyword.value = '';
+  documentImportCustomerOptions.value = [];
+  documentImportCustomerNotice.value = '';
+  documentImportPreparedCustomerTaskId = undefined;
+}
+
+function normalizeDocumentImportCustomerName(value?: string) {
+  return value?.replace(/\s+/g, '').trim() || '';
+}
+
+async function loadDocumentImportCustomerOptions(keyword = '') {
+  documentImportCustomerLoading.value = true;
+  try {
+    const result = await getCustomerUnitPage({
+      keyword: keyword || undefined,
+      page: 1,
+      pageSize: 50,
+      status: 'active',
+    });
+    const selectedCustomerId = documentImportDraft.value?.order?.customerId;
+    const currentSelected = documentImportCustomerOptions.value.find((item) => item.id === selectedCustomerId);
+    documentImportCustomerOptions.value = currentSelected && !result.items.some((item) => item.id === currentSelected.id)
+      ? [currentSelected, ...result.items]
+      : result.items;
+    return documentImportCustomerOptions.value;
+  } finally {
+    documentImportCustomerLoading.value = false;
+  }
+}
+
+function selectDocumentImportCustomer(customerId?: number) {
+  const order = documentImportDraft.value?.order;
+  if (!order) return;
+  const customer = documentImportCustomerOptions.value.find((item) => item.id === customerId);
+  if (!customer) {
+    order.customerId = undefined;
+    order.customerName = undefined;
+    return;
+  }
+  order.customerId = customer.id;
+  order.customerName = customer.customerName;
+  documentImportCustomerNotice.value = '';
+}
+
+function handleDocumentImportCustomerDropdown(open: boolean) {
+  if (open) {
+    void loadDocumentImportCustomerOptions(documentImportCustomerKeyword.value).catch(() => {
+      message.warning('系统客户查询失败，请稍后重试');
+    });
+  }
+}
+
+function handleDocumentImportCustomerSearch(value: string) {
+  documentImportCustomerKeyword.value = value;
+  clearDocumentImportCustomerSearch();
+  documentImportCustomerSearchTimer = window.setTimeout(() => {
+    void loadDocumentImportCustomerOptions(value).catch(() => {
+      message.warning('系统客户查询失败，请稍后重试');
+    });
+  }, 400);
+}
+
+/**
+ * AI 只提供客户名称线索，订单只能保存系统客户档案中存在的 customerId。
+ * 名称无法唯一匹配时清空草稿写入值，避免把未建档客户直接写成订单客户。
+ */
+async function prepareDocumentImportCustomerSelection(task: TeamDocumentImportApi.Task) {
+  if (documentImportPreparedCustomerTaskId === task.id) return;
+  documentImportPreparedCustomerTaskId = task.id;
+  const order = documentImportTask.value?.id === task.id
+    ? documentImportTask.value.draft?.order
+    : undefined;
+  const recognizedName = order?.customerName?.trim();
+  if (!order || !recognizedName) return;
+
+  documentImportCustomerKeyword.value = recognizedName;
+  try {
+    const customers = await loadDocumentImportCustomerOptions(recognizedName);
+    if (documentImportTask.value?.id !== task.id) return;
+    const normalizedName = normalizeDocumentImportCustomerName(recognizedName);
+    const exactMatches = customers.filter((item) => (
+      normalizeDocumentImportCustomerName(item.customerName) === normalizedName
+    ));
+    const [exactMatch] = exactMatches;
+    if (exactMatch && exactMatches.length === 1) {
+      selectDocumentImportCustomer(exactMatch.id);
+      return;
+    }
+
+    order.customerId = undefined;
+    order.customerName = undefined;
+    documentImportCustomerNotice.value = exactMatches.length > 1
+      ? `识别到“${recognizedName}”，但系统客户档案中存在多个同名客户，请手工选择后再填入团队。`
+      : `识别到的客户单位“${recognizedName}”未在系统客户档案中找到，请先新增客户或选择已有客户。`;
+  } catch {
+    if (documentImportTask.value?.id !== task.id) return;
+    order.customerId = undefined;
+    order.customerName = undefined;
+    documentImportCustomerNotice.value = `识别到“${recognizedName}”，但客户档案查询失败，不能写入订单。请稍后搜索并选择系统客户。`;
+  }
+}
+
+/** 识别任务只轮询自身状态，避免为长耗时 AI 调用占住上传请求。 */
+async function pollDocumentImportTask(taskId: number) {
+  clearDocumentImportPoll();
+  try {
+    const task = await getTeamDocumentImportTask(taskId);
+    documentImportTask.value = task;
+    if (['pending', 'extracting', 'recognizing', 'matching'].includes(task.status)) {
+      documentImportPollTimer = window.setTimeout(() => {
+        pollDocumentImportTask(taskId);
+      }, 1200);
+    } else if (task.status === 'reviewing') {
+      await prepareDocumentImportCustomerSelection(task);
+      message.success('文档识别完成，请核对草稿后填入团队');
+    } else if (task.status === 'failed') {
+      message.error(task.errorMessage || '文档识别失败，可重试或继续手工录入');
+    }
+  } catch {
+    message.error('导入任务状态读取失败，请稍后重试');
+  }
+}
+
+const beforeUploadDocumentImport: UploadProps['beforeUpload'] = async (file) => {
+  const extension = fileExtension(file.name);
+  if (!['doc', 'docx'].includes(extension)) {
+    message.warning('团队智能导入当前只支持 Word 格式（.doc、.docx）');
+    return false;
+  }
+  documentImportUploading.value = true;
+  try {
+    resetDocumentImportCustomerSelection();
+    const formData = new FormData();
+    formData.append('file', file as File);
+    formData.append('businessModule', '销售团队');
+    formData.append('businessType', '团队 Word 智能代录');
+    const attachment = await uploadAttachment(formData);
+    documentImportFileName.value = file.name;
+    documentImportTask.value = await createTeamDocumentImportTask({
+      attachmentId: attachment.id,
+      targetTeamId: isEditMode.value ? editTeamId.value : undefined,
+    });
+    pollDocumentImportTask(documentImportTask.value.id);
+  } catch {
+    message.error('Word 上传或识别任务创建失败，请检查文件后重试');
+  } finally {
+    documentImportUploading.value = false;
+  }
+  return false;
+};
+
+function fileExtension(fileName?: string) {
+  const value = fileName || '';
+  const index = value.lastIndexOf('.');
+  return index >= 0 ? value.slice(index + 1).toLowerCase() : '';
+}
+
+async function retryDocumentImport() {
+  if (!documentImportTask.value) return;
+  try {
+    resetDocumentImportCustomerSelection();
+    documentImportTask.value = await retryTeamDocumentImportTask(documentImportTask.value.id);
+    pollDocumentImportTask(documentImportTask.value.id);
+  } catch {
+    message.error('任务重试失败，请稍后再试');
+  }
+}
+
+function documentImportPurchaseResourceType(
+  arrangementType: TeamDocumentImportApi.ArrangementType,
+): PurchaseResourceApi.ResourceType | undefined {
+  const resourceTypes: Partial<Record<TeamDocumentImportApi.ArrangementType, PurchaseResourceApi.ResourceType>> = {
+    extra_fee: 'other',
+    ground_agent: 'ground_agent',
+    hotel: 'hotel',
+    meal: 'restaurant',
+    optional: 'scenic',
+    other: 'other',
+    scenic: 'scenic',
+    shopping: 'shopping',
+    vehicle: 'vehicle',
+  };
+  return resourceTypes[arrangementType];
+}
+
+function documentImportResourceCandidateLabel(candidate: TeamDocumentImportApi.ResourceCandidate) {
+  return [
+    candidate.resourceName,
+    candidate.city,
+    candidate.supplierName,
+    candidate.defaultSupplier ? '默认供应商' : '',
+  ].filter(Boolean).join(' / ');
+}
+
+function documentImportResourceSelectOptions(resource: TeamDocumentImportApi.ResourceDraft) {
+  return (resource.candidates || []).map((candidate) => ({
+    label: documentImportResourceCandidateLabel(candidate),
+    value: candidate.resourceId,
+  }));
+}
+
+function mergeDocumentImportResourceCandidates(
+  resource: TeamDocumentImportApi.ResourceDraft,
+  candidates: TeamDocumentImportApi.ResourceCandidate[],
+) {
+  const merged = new Map<number, TeamDocumentImportApi.ResourceCandidate>();
+  for (const candidate of resource.candidates || []) {
+    merged.set(candidate.resourceId, candidate);
+  }
+  for (const candidate of candidates) {
+    const current = merged.get(candidate.resourceId);
+    merged.set(candidate.resourceId, {
+      ...candidate,
+      defaultSupplier: candidate.defaultSupplier || current?.defaultSupplier,
+      supplierId: candidate.supplierId || current?.supplierId,
+      supplierName: candidate.supplierName || current?.supplierName,
+    });
+  }
+  resource.candidates = [...merged.values()];
+}
+
+/** 下拉按需查询资源主档，避免打开导入抽屉就加载全量资源。 */
+async function loadDocumentImportResourceOptions(
+  resource: TeamDocumentImportApi.ResourceDraft,
+  keyword = '',
+) {
+  const resourceType = documentImportPurchaseResourceType(resource.arrangementType);
+  if (!resourceType) return;
+  const version = (documentImportResourceSearchVersions.get(resource.itemKey) || 0) + 1;
+  documentImportResourceSearchVersions.set(resource.itemKey, version);
+  documentImportResourceLoading[resource.itemKey] = true;
+  try {
+    const result = await getPurchaseResourcePage({
+      keyword: keyword.trim() || undefined,
+      page: 1,
+      pageSize: 50,
+      procurementMode: 'required',
+      resourceType,
+      status: 'active',
+    });
+    // 输入更晚的关键字时，忽略先返回的旧请求，避免下拉内容回跳。
+    if (documentImportResourceSearchVersions.get(resource.itemKey) !== version) return;
+    mergeDocumentImportResourceCandidates(resource, result.items.map((item) => ({
+      city: item.city,
+      defaultSupplier: false,
+      exactMatch: false,
+      resourceId: item.id,
+      resourceName: item.resourceName,
+      resourceType: item.resourceType,
+    })));
+  } catch {
+    if (documentImportResourceSearchVersions.get(resource.itemKey) === version) {
+      message.warning('系统资源查询失败，请稍后重试');
+    }
+  } finally {
+    if (documentImportResourceSearchVersions.get(resource.itemKey) === version) {
+      documentImportResourceLoading[resource.itemKey] = false;
+    }
+  }
+}
+
+function handleDocumentImportResourceDropdown(resource: TeamDocumentImportApi.ResourceDraft, open: boolean) {
+  if (!open) return;
+  void loadDocumentImportResourceOptions(resource);
+}
+
+function handleDocumentImportResourceSearch(resource: TeamDocumentImportApi.ResourceDraft, value: string) {
+  const currentTimer = documentImportResourceSearchTimers.get(resource.itemKey);
+  if (currentTimer !== undefined) window.clearTimeout(currentTimer);
+  const timer = window.setTimeout(() => {
+    documentImportResourceSearchTimers.delete(resource.itemKey);
+    void loadDocumentImportResourceOptions(resource, value);
+  }, 350);
+  documentImportResourceSearchTimers.set(resource.itemKey, timer);
+}
+
+function documentImportResourceStatus(resource: TeamDocumentImportApi.ResourceDraft) {
+  if (resource.arrangementType === 'vehicle' && resource.requiresConfirmation) {
+    return { color: 'blue', label: '已预填 / 待补供应商' };
+  }
+  if (resource.selectedResourceId && !resource.selectedSupplierId) {
+    return { color: 'blue', label: '已选资源 / 待补供应商' };
+  }
+  return resource.requiresConfirmation
+    ? { color: 'orange', label: '待选择' }
+    : { color: 'green', label: '已确认' };
+}
+
+async function selectDocumentImportResource(
+  resource: TeamDocumentImportApi.ResourceDraft,
+  candidateId?: number,
+) {
+  const candidate = (resource.candidates || []).find((item) => item.resourceId === candidateId);
+  resource.selectedResourceId = candidate?.resourceId;
+  resource.selectedResourceName = candidate?.resourceName;
+  resource.selectedSupplierId = candidate?.supplierId;
+  resource.selectedSupplierName = candidate?.supplierName;
+  resource.requiresConfirmation = !candidate;
+  if (!candidate || candidate.supplierId) return;
+
+  try {
+    const bindings = await getPurchaseResourceBindings(candidate.resourceId);
+    // 手工选择资源后，只有启用的默认供应商可以自动带入；没有默认供应商时保留资源选择，交给计调后续补充。
+    const defaultBinding = bindings.find((item) => item.status === 'active' && item.isDefault);
+    if (resource.selectedResourceId !== candidate.resourceId) return;
+    resource.selectedSupplierId = defaultBinding?.supplierId;
+    resource.selectedSupplierName = defaultBinding?.supplierName;
+    if (defaultBinding) {
+      candidate.defaultSupplier = true;
+      candidate.supplierId = defaultBinding.supplierId;
+      candidate.supplierName = defaultBinding.supplierName;
+    }
+  } catch {
+    if (resource.selectedResourceId === candidate.resourceId) {
+      message.warning('资源已选择，但默认供应商查询失败，可在团队安排中补充供应商');
+    }
+  }
+}
+
+/** 从当前导入草稿移除一条误识别或不需要录入的资源，不影响资源主档。 */
+function removeDocumentImportResource(resource: TeamDocumentImportApi.ResourceDraft) {
+  const resources = documentImportTask.value?.draft?.resources;
+  if (!resources) return;
+  const index = resources.findIndex((item) => item.itemKey === resource.itemKey);
+  if (index < 0) return;
+  resources.splice(index, 1);
+  message.success(`已移除${resource.sourceName || '这条资源'}`);
+}
+
+/** 持久化计调在预览中修改过的资源候选、游客和订单草稿。 */
+async function saveDocumentImportDraft() {
+  const task = documentImportTask.value;
+  const draft = task?.draft;
+  if (!task || !draft) return false;
+  documentImportSavingDraft.value = true;
+  try {
+    documentImportTask.value = await updateTeamDocumentImportDraft(task.id, draft);
+    return true;
+  } catch {
+    message.error('导入草稿保存失败，请检查后重试');
+    return false;
+  } finally {
+    documentImportSavingDraft.value = false;
+  }
+}
+
+/**
+ * 将审核后的文档草稿填入当前团队编辑表单。
+ * 修改团队时不会覆盖已填写内容，避免一份确认单意外替换人工维护的信息。
+ */
+async function fillDocumentImportToTeam() {
+  const task = documentImportTask.value;
+  const draft = task?.draft;
+  if (!task || !draft?.team) {
+    message.warning('请等待识别完成后再填入团队');
+    return;
+  }
+  if (!draft.order?.customerId) {
+    message.warning('请先从系统客户主档选择客户单位，再填入团队');
+    return;
+  }
+  if (!(await saveDocumentImportDraft())) return;
+
+  const team = draft.team;
+  const mayOverwrite = !isEditMode.value;
+  formState.teamName = mayOverwrite ? team.teamName || formState.teamName : formState.teamName || team.teamName || '';
+  formState.departureDate = mayOverwrite ? team.departureDate || formState.departureDate : formState.departureDate || team.departureDate || '';
+  formState.travelDays = mayOverwrite ? team.travelDays || formState.travelDays : formState.travelDays || team.travelDays || 1;
+  formState.totalSeats = Number(mayOverwrite ? team.totalSeats || formState.totalSeats : formState.totalSeats || team.totalSeats || 0);
+  formState.businessType = mayOverwrite ? team.businessType || formState.businessType : formState.businessType || team.businessType;
+  formState.domesticInternational = mayOverwrite
+    ? team.domesticInternational || formState.domesticInternational
+    : formState.domesticInternational || team.domesticInternational || 'domestic';
+  formState.receptionStandard = mayOverwrite ? team.receptionStandard || formState.receptionStandard : formState.receptionStandard || team.receptionStandard;
+  formState.remark = mayOverwrite ? team.remark || formState.remark : formState.remark || team.remark;
+
+  const productDescription = draft.productDescription;
+  if (productDescription) {
+    // 编辑既有团队时只补空字段，避免一份新确认单覆盖计调已维护的产品说明。
+    const importedText = (value?: string, current?: string) => (
+      mayOverwrite ? value || current : current || value
+    );
+    formState.productDescription = importedText(productDescription.content, formState.productDescription);
+    formState.feeIncluded = importedText(productDescription.feeIncluded, formState.feeIncluded);
+    formState.feeExcluded = importedText(productDescription.feeExcluded, formState.feeExcluded);
+    formState.childPolicy = importedText(productDescription.childPolicy, formState.childPolicy);
+    formState.shoppingArrangement = importedText(productDescription.shoppingArrangement, formState.shoppingArrangement);
+    formState.optionalItems = importedText(productDescription.optionalItems, formState.optionalItems);
+    formState.giftItems = importedText(productDescription.giftItems, formState.giftItems);
+    formState.attentionItems = importedText(productDescription.attentionItems, formState.attentionItems);
+    formState.warmReminder = importedText(productDescription.warmReminder, formState.warmReminder);
+  }
+
+  if (draft.itineraryDays?.length && (!isEditMode.value || !(formState.itineraryDays || []).some((item) => item.itineraryContent?.trim()))) {
+    formState.itineraryDays = draft.itineraryDays
+      .sort((left, right) => Number(left.dayNo || 0) - Number(right.dayNo || 0))
+      .map((item, index) => ({
+        ...createDefaultItineraryDay(item.dayNo || index + 1),
+        accommodationNote: item.accommodationNote,
+        breakfastIncluded: Boolean(item.breakfastIncluded),
+        dayNo: item.dayNo || index + 1,
+        dayTitle: item.dayTitle,
+        dinnerIncluded: Boolean(item.dinnerIncluded),
+        itineraryContent: item.itineraryContent,
+        lunchIncluded: Boolean(item.lunchIncluded),
+      }));
+    formState.travelDays = Math.max(Number(formState.travelDays || 1), draft.itineraryDays.length);
+  }
+  syncItineraryDays();
+  documentImportTaskIdToApply.value = task.id;
+  documentImportDrawerOpen.value = false;
+  message.success('草稿已填入团队；保存团队后将按勾选项生成订单、游客和团队安排');
+}
+
+async function applyDocumentImportAfterTeamSave(teamId: number) {
+  const taskId = documentImportTaskIdToApply.value;
+  if (!taskId) return;
+  try {
+    const result = await applyTeamDocumentImportTask(taskId, {
+      applyArrangements: applyImportedArrangements.value,
+      applyGuests: applyImportedGuests.value,
+      teamId,
+    });
+    const details = [
+      `订单 ${result.orderId}`,
+      applyImportedGuests.value ? `${result.guestCount} 名游客` : '',
+      applyImportedArrangements.value ? `${result.arrangementIds.length} 条团队安排` : '',
+    ].filter(Boolean).join('、');
+    message.success(result.alreadyApplied ? '该导入任务已处理过，本次未重复生成数据' : `文档代录已生成：${details}`);
+  } catch {
+    // 团队已经成功保存，保留任务ID即可让计调后续安全重试，不把部分成功误报为全部成功。
+    message.warning('团队已保存，但订单、游客或团队安排尚未完成写入；可再次保存团队以继续处理');
+  }
+}
+
 function toggleSeasonalSurcharge(day: SalesProductApi.ItineraryDay, checked: boolean) {
   day.seasonalSurcharge = checked ? Math.max(Number(day.seasonalSurcharge || 0), 1) : 0;
 }
@@ -735,6 +1309,10 @@ async function saveTeam(options: { openArrangement?: boolean } = {}) {
     const result = isEditMode.value
       ? await updateSalesTeam(editTeamId.value, payload)
       : await createSalesTeam(payload);
+    const teamId = isEditMode.value ? editTeamId.value : result.id;
+    if (teamId) {
+      await applyDocumentImportAfterTeamSave(teamId);
+    }
     message.success(isEditMode.value ? '团队修改成功' : `${teamTypeLabel(formState.teamType)}创建成功`);
     if (options.openArrangement && isEditMode.value) {
       router.push(`/sales/team/arrangement/${editTeamId.value}`);
@@ -761,6 +1339,10 @@ function goBack() {
 onMounted(async () => {
   await Promise.all([loadDictionaries(), loadRelatedHotelOptions(), loadEditDetail()]);
 });
+
+onUnmounted(() => {
+  handleDocumentImportDrawerClose();
+});
 </script>
 
 <template>
@@ -770,6 +1352,7 @@ onMounted(async () => {
         <div class="form-header">
           <div class="form-title">添加/修改团队</div>
           <Space>
+            <Button @click="openDocumentImportDrawer">智能导入</Button>
             <Button @click="goBack">返回列表</Button>
             <Button type="primary" :loading="saving" @click="saveTeam()">保存团队</Button>
           </Space>
@@ -1208,6 +1791,219 @@ onMounted(async () => {
         </div>
       </div>
     </Drawer>
+
+    <Drawer
+      v-model:open="documentImportDrawerOpen"
+      class="team-document-import-drawer"
+      destroy-on-close
+      placement="right"
+      title="团队 Word 智能代录"
+      width="960"
+      @close="handleDocumentImportDrawerClose"
+    >
+      <div class="document-import-layout">
+        <Alert
+          show-icon
+          type="info"
+          message="识别结果仅用于计调代录。填写团队后仍可继续修改；保存团队时才生成订单、游客和已确认团队安排。"
+        />
+
+        <section class="document-import-source">
+          <div class="document-import-section-heading">
+            <div>
+              <div class="section-title">导入 Word</div>
+              <div class="muted">支持 .doc、.docx；文档中的身份证号和手机号会先脱敏后再发送给识别服务。</div>
+            </div>
+            <Upload accept=".doc,.docx" :show-upload-list="false" :before-upload="beforeUploadDocumentImport">
+              <Button type="primary" :loading="documentImportUploading">上传 Word</Button>
+            </Upload>
+          </div>
+          <div v-if="documentImportFileName" class="document-import-file">
+            <span>{{ documentImportFileName }}</span>
+            <Tag v-if="documentImportTask" :color="documentImportTask.status === 'failed' ? 'red' : documentImportTask.status === 'reviewing' ? 'green' : 'blue'">
+              {{ documentImportTask.status === 'reviewing' ? '待确认' : documentImportTask.status === 'failed' ? '识别失败' : `处理中 ${documentImportTask.progressPercent}%` }}
+            </Tag>
+          </div>
+        </section>
+
+        <Spin :spinning="documentImportProcessing">
+          <template v-if="documentImportTask?.status === 'failed'">
+            <Alert show-icon type="error" :message="documentImportTask.errorMessage || '文档识别失败'">
+              <template #action>
+                <Button size="small" @click="retryDocumentImport">重新识别</Button>
+              </template>
+            </Alert>
+          </template>
+
+          <template v-else-if="documentImportDraft">
+            <Alert
+              v-if="documentImportDraft.warnings?.length"
+              show-icon
+              type="warning"
+              :message="documentImportDraft.warnings.join('；')"
+            />
+
+            <div class="document-import-summary">
+              <span>识别类型：{{ documentTypeLabel(documentImportTask?.documentType || documentImportDraft.documentType) }}</span>
+              <span>游客：{{ documentImportDraft.guests?.length || 0 }} 名</span>
+              <span>行程：{{ documentImportDraft.itineraryDays?.length || 0 }} 天</span>
+              <span>已确认资源：{{ documentImportSelectedArrangementCount }} 条</span>
+            </div>
+
+            <div class="document-import-section">
+              <div class="document-import-section-heading compact">
+                <div>
+                  <div class="section-title">团队与订单</div>
+                  <div class="muted">订单不会在此时创建，保存团队后才生成。</div>
+                </div>
+              </div>
+              <div class="document-import-field-grid">
+                <label>
+                  <span>团队名称</span>
+                  <Input v-model:value="documentImportDraft.team!.teamName" allow-clear />
+                </label>
+                <label>
+                  <span>发团日期</span>
+                  <Input v-model:value="documentImportDraft.team!.departureDate" allow-clear placeholder="YYYY-MM-DD" />
+                </label>
+                <label>
+                  <span>客户单位</span>
+                  <Select
+                    allow-clear
+                    :filter-option="false"
+                    :loading="documentImportCustomerLoading"
+                    :options="documentImportCustomerSelectOptions"
+                    :value="documentImportDraft.order!.customerId"
+                    placeholder="搜索并选择系统客户"
+                    show-search
+                    @change="(value) => selectDocumentImportCustomer(value ? Number(value) : undefined)"
+                    @dropdown-visible-change="handleDocumentImportCustomerDropdown"
+                    @search="handleDocumentImportCustomerSearch"
+                  />
+                </label>
+                <label>
+                  <span>联系人</span>
+                  <Input v-model:value="documentImportDraft.order!.contactName" allow-clear placeholder="联系人" />
+                </label>
+                <label>
+                  <span>联系电话</span>
+                  <Input v-model:value="documentImportDraft.order!.contactPhone" allow-clear placeholder="联系电话" />
+                </label>
+              </div>
+              <Alert
+                v-if="documentImportCustomerNotice"
+                class="document-import-customer-notice"
+                show-icon
+                type="warning"
+                :message="documentImportCustomerNotice"
+              />
+            </div>
+
+            <div class="document-import-section">
+              <div class="document-import-section-heading compact">
+                <div>
+                  <div class="section-title">游客名单</div>
+                  <div class="muted">可在此校正姓名、证件、电话和分房；保存团队后按勾选项写入订单。</div>
+                </div>
+                <Checkbox v-model:checked="applyImportedGuests">保存游客</Checkbox>
+              </div>
+              <Table
+                :columns="documentImportGuestColumns"
+                :data-source="documentImportDraft.guests || []"
+                :pagination="false"
+                row-key="indexNo"
+                size="small"
+                :scroll="{ x: 720 }"
+              >
+                <template #bodyCell="{ column, record }">
+                  <template v-if="column.key === 'guestName'">
+                    <Input v-model:value="record.guestName" size="small" />
+                  </template>
+                  <template v-else-if="column.key === 'certificateNo'">
+                    <Input v-model:value="record.certificateNo" size="small" />
+                  </template>
+                  <template v-else-if="column.key === 'phone'">
+                    <Input v-model:value="record.phone" size="small" />
+                  </template>
+                  <template v-else-if="column.key === 'roomGroup'">
+                    <Input v-model:value="record.roomGroup" size="small" />
+                  </template>
+                  <template v-else-if="column.key === 'leaderFlag'">
+                    <Checkbox v-model:checked="record.leaderFlag" />
+                  </template>
+                </template>
+              </Table>
+            </div>
+
+            <div class="document-import-section">
+              <div class="document-import-section-heading compact">
+                <div>
+                  <div class="section-title">资源与供应商候选</div>
+                  <div class="muted">可搜索并重新选择系统资源；没有默认供应商时仍可确认资源，后续在团队安排中补充供应商。</div>
+                </div>
+                <Checkbox v-model:checked="applyImportedArrangements">保存已确认安排</Checkbox>
+              </div>
+              <div v-if="!(documentImportDraft.resources || []).length" class="document-import-empty">未识别到可匹配资源，可填入团队后在团队安排中继续维护。</div>
+              <div v-else class="document-import-resource-list">
+                <div v-for="dayGroup in documentImportResourceGroups" :key="dayGroup.key" class="document-import-resource-day-group">
+                  <div class="document-import-resource-day-heading">
+                    <strong>{{ dayGroup.label }}</strong>
+                    <span>{{ dayGroup.totalCount }} 项资源</span>
+                  </div>
+                  <div v-for="typeGroup in dayGroup.typeGroups" :key="typeGroup.arrangementType" class="document-import-resource-type-group">
+                    <div class="document-import-resource-type-heading">
+                      <Tag color="blue">{{ arrangementTypeLabel(typeGroup.arrangementType) }}</Tag>
+                      <span>{{ typeGroup.resources.length }} 项</span>
+                    </div>
+                    <div v-for="resource in typeGroup.resources" :key="resource.itemKey" class="document-import-resource-row">
+                      <div class="document-import-resource-source">
+                        <strong>{{ resource.sourceName }}</strong>
+                        <span>{{ resource.city || '未标注城市' }}</span>
+                      </div>
+                      <Select
+                        allow-clear
+                        class="document-import-resource-select"
+                        :filter-option="false"
+                        :loading="documentImportResourceLoading[resource.itemKey]"
+                        :not-found-content="'未找到可用资源，请输入名称搜索'"
+                        :options="documentImportResourceSelectOptions(resource)"
+                        :value="resource.selectedResourceId"
+                        :placeholder="resource.arrangementType === 'vehicle' ? '搜索或选择系统资源（不选也会预填安排）' : '搜索或选择系统资源'"
+                        show-search
+                        @change="(value) => void selectDocumentImportResource(resource, value as number | undefined)"
+                        @dropdown-visible-change="(open) => handleDocumentImportResourceDropdown(resource, open)"
+                        @search="(value) => handleDocumentImportResourceSearch(resource, value)"
+                      />
+                      <Tag :color="documentImportResourceStatus(resource).color">
+                        {{ documentImportResourceStatus(resource).label }}
+                      </Tag>
+                      <Tooltip title="移除这条导入资源">
+                        <Button
+                          aria-label="移除这条导入资源"
+                          danger
+                          size="small"
+                          type="link"
+                          @click="removeDocumentImportResource(resource)"
+                        >
+                          <IconifyIcon icon="lucide:trash-2" />
+                        </Button>
+                      </Tooltip>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="document-import-actions">
+              <Button :loading="documentImportSavingDraft" @click="saveDocumentImportDraft">保存草稿</Button>
+              <Button type="primary" :loading="documentImportSavingDraft" @click="fillDocumentImportToTeam">填入团队</Button>
+            </div>
+          </template>
+
+          <div v-else class="document-import-empty">上传 Word 后，系统会依次提取文字、识别行程并匹配资源。</div>
+        </Spin>
+      </div>
+    </Drawer>
   </Page>
 </template>
 
@@ -1228,6 +2024,176 @@ onMounted(async () => {
   color: #172033;
   font-size: 18px;
   font-weight: 700;
+}
+
+.document-import-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.document-import-source,
+.document-import-section {
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #e5eaf2;
+  border-radius: 8px;
+}
+
+.document-import-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.document-import-section-heading.compact {
+  margin-bottom: 12px;
+}
+
+.document-import-file,
+.document-import-summary,
+.document-import-resource-source,
+.document-import-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.document-import-file {
+  justify-content: space-between;
+  margin-top: 12px;
+  padding-top: 12px;
+  color: #475569;
+  border-top: 1px solid #edf1f7;
+}
+
+.document-import-file > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-import-summary {
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  color: #475569;
+  font-size: 13px;
+  background: #f8fafc;
+  border: 1px solid #e5eaf2;
+  border-radius: 6px;
+}
+
+.document-import-field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px 16px;
+}
+
+.document-import-field-grid label {
+  display: grid;
+  gap: 6px;
+  color: #526070;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.document-import-customer-notice {
+  margin-top: 12px;
+}
+
+.document-import-resource-list {
+  display: grid;
+  gap: 8px;
+}
+
+.document-import-resource-day-group {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.document-import-resource-day-group + .document-import-resource-day-group {
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid #e5eaf2;
+}
+
+.document-import-resource-day-heading,
+.document-import-resource-type-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.document-import-resource-day-heading {
+  justify-content: space-between;
+  padding: 8px 10px;
+  color: #1e293b;
+  background: #f8fafc;
+  border: 1px solid #e5eaf2;
+  border-radius: 6px;
+}
+
+.document-import-resource-day-heading span,
+.document-import-resource-type-heading span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.document-import-resource-type-group {
+  display: grid;
+  gap: 8px;
+}
+
+.document-import-resource-type-heading {
+  min-height: 26px;
+}
+
+.document-import-resource-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.9fr) minmax(280px, 1.4fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid #edf1f7;
+  border-radius: 6px;
+}
+
+.document-import-resource-source {
+  min-width: 0;
+}
+
+.document-import-resource-source strong,
+.document-import-resource-source span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-import-resource-source span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.document-import-resource-select {
+  width: 100%;
+}
+
+.document-import-empty {
+  padding: 24px 16px;
+  color: #64748b;
+  text-align: center;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 6px;
+}
+
+.document-import-actions {
+  justify-content: flex-end;
 }
 
 .muted {
@@ -1825,6 +2791,21 @@ onMounted(async () => {
     position: static;
     width: auto;
     max-height: none;
+  }
+
+  .document-import-field-grid,
+  .document-import-resource-row {
+    grid-template-columns: 1fr;
+  }
+
+  .document-import-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .document-import-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
   }
 }
 </style>

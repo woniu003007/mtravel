@@ -16,6 +16,7 @@ public record SupplierSaveRequest(
         @Size(max = 80) String city,
         @Size(max = 80) String district,
         @Size(max = 100) String settlementMethod,
+        @Size(max = 4000, message = "基础信息不能超过4000个字符") String basicInfo,
         @Size(max = 80) String contactName,
         @Size(max = 40) String contactPhone,
         @Size(max = 40) String faxNumber,

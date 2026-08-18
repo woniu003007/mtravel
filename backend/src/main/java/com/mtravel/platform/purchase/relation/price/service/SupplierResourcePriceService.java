@@ -61,6 +61,7 @@ public class SupplierResourcePriceService extends BusinessCrudService<SupplierRe
             String operator
     ) {
         PurchaseRelationEntity relation = relation(tenantId, request.relationId());
+        assertClassifiedPriceMode(relation);
         EnterpriseExpenseItemEntity project = project(tenantId, request.resourceProjectId());
         assertProjectMatchesRelation(relation, project);
         assertUnique(tenantId, request.relationId(), request.resourceProjectId(), null);
@@ -81,6 +82,7 @@ public class SupplierResourcePriceService extends BusinessCrudService<SupplierRe
             Long tenantId
     ) {
         PurchaseRelationEntity relation = relation(tenantId, request.relationId());
+        assertClassifiedPriceMode(relation);
         EnterpriseExpenseItemEntity project = project(tenantId, request.resourceProjectId());
         assertProjectMatchesRelation(relation, project);
         assertUnique(tenantId, request.relationId(), request.resourceProjectId(), id);
@@ -104,6 +106,13 @@ public class SupplierResourcePriceService extends BusinessCrudService<SupplierRe
             throw new BizException("采购关系不存在或已删除");
         }
         return entity;
+    }
+
+    /** 统一报价不能再追加分类明细，避免同一关系出现两套金额口径。 */
+    private void assertClassifiedPriceMode(PurchaseRelationEntity relation) {
+        if ("unified".equals(relation.getPriceMode())) {
+            throw new BizException("统一报价请到资源页编辑，不能追加分类价格明细");
+        }
     }
 
     /** 查询同租户未删除费用项目。 */

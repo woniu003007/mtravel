@@ -13,6 +13,7 @@ import java.time.LocalDate;
 @TableName("customer_product_authorizations")
 public class CustomerProductAuthorizationEntity extends TenantSoftDeleteEntity {
     @TableField("customer_id") private Long customerId;
+    @TableField("product_id") private Long productId;
     @TableField("product_code") private String productCode;
     @TableField("product_name") private String productName;
     @TableField("authorized_start_date") private LocalDate authorizedStartDate;
@@ -20,6 +21,7 @@ public class CustomerProductAuthorizationEntity extends TenantSoftDeleteEntity {
     @TableField("authorization_status") private String authorizationStatus;
     @TableField("sale_scope") private String saleScope;
     public Long getCustomerId(){return customerId;} public void setCustomerId(Long customerId){this.customerId=customerId;}
+    public Long getProductId(){return productId;} public void setProductId(Long productId){this.productId=productId;}
     public String getProductCode(){return productCode;} public void setProductCode(String productCode){this.productCode=productCode;}
     public String getProductName(){return productName;} public void setProductName(String productName){this.productName=productName;}
     public LocalDate getAuthorizedStartDate(){return authorizedStartDate;} public void setAuthorizedStartDate(LocalDate authorizedStartDate){this.authorizedStartDate=authorizedStartDate;}

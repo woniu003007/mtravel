@@ -1,6 +1,7 @@
 package com.mtravel.platform.sales.booking.aiimport.service;
 
 import com.mtravel.platform.common.attachment.service.CommonAttachmentService;
+import com.mtravel.platform.common.knowledge.service.AliyunOcrClient;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -22,6 +23,7 @@ class BookingAiImportServiceWiringTest {
                 .withBean(LocalBookingImportParser.class, () -> new LocalBookingImportParser(new IdCardValidator()))
                 .withBean(AiModelClient.class, () -> (tenantId, sourceText) -> Optional.empty())
                 .withBean(CommonAttachmentService.class, () -> mock(CommonAttachmentService.class))
+                .withBean(AliyunOcrClient.class, () -> mock(AliyunOcrClient.class))
                 .withBean(BookingImportAttachmentTextExtractor.class)
                 .withBean(BookingAiImportService.class)
                 .run(context -> assertThat(context).hasSingleBean(BookingAiImportService.class));

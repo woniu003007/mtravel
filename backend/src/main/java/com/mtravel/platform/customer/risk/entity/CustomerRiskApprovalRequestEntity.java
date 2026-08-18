@@ -72,6 +72,22 @@ public class CustomerRiskApprovalRequestEntity extends TenantSoftDeleteEntity {
     @TableField("over_limit_amount")
     private BigDecimal overLimitAmount;
 
+    /** 申请时的客户等级 ID 快照。 */
+    @TableField("category_id")
+    private Long categoryId;
+
+    /** 申请时的客户等级名称快照。 */
+    @TableField("category_name")
+    private String categoryName;
+
+    /** 申请时的账期天数快照。 */
+    @TableField("credit_term_days")
+    private Integer creditTermDays;
+
+    /** 当前等待处理的审批步骤序号。 */
+    @TableField("current_approval_step")
+    private Integer currentApprovalStep;
+
     /** 审批状态：pending、approved、rejected、cancelled。 */
     @TableField("status")
     private String status;
@@ -79,6 +95,10 @@ public class CustomerRiskApprovalRequestEntity extends TenantSoftDeleteEntity {
     /** 申请人。 */
     @TableField("applicant")
     private String applicant;
+
+    /** 发起审批的系统用户 ID。 */
+    @TableField("applicant_user_id")
+    private Long applicantUserId;
 
     /** 同意审批人。 */
     @TableField("approved_by")
@@ -128,10 +148,20 @@ public class CustomerRiskApprovalRequestEntity extends TenantSoftDeleteEntity {
     public void setAvailableAmount(BigDecimal availableAmount) { this.availableAmount = availableAmount; }
     public BigDecimal getOverLimitAmount() { return overLimitAmount; }
     public void setOverLimitAmount(BigDecimal overLimitAmount) { this.overLimitAmount = overLimitAmount; }
+    public Long getCategoryId() { return categoryId; }
+    public void setCategoryId(Long categoryId) { this.categoryId = categoryId; }
+    public String getCategoryName() { return categoryName; }
+    public void setCategoryName(String categoryName) { this.categoryName = categoryName; }
+    public Integer getCreditTermDays() { return creditTermDays; }
+    public void setCreditTermDays(Integer creditTermDays) { this.creditTermDays = creditTermDays; }
+    public Integer getCurrentApprovalStep() { return currentApprovalStep; }
+    public void setCurrentApprovalStep(Integer currentApprovalStep) { this.currentApprovalStep = currentApprovalStep; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public String getApplicant() { return applicant; }
     public void setApplicant(String applicant) { this.applicant = applicant; }
+    public Long getApplicantUserId() { return applicantUserId; }
+    public void setApplicantUserId(Long applicantUserId) { this.applicantUserId = applicantUserId; }
     public String getApprovedBy() { return approvedBy; }
     public void setApprovedBy(String approvedBy) { this.approvedBy = approvedBy; }
     public OffsetDateTime getApprovedAt() { return approvedAt; }

@@ -228,7 +228,7 @@ public class FinanceGuideImprestService {
 
         FinanceGuideImprestEntity entity = new FinanceGuideImprestEntity();
         entity.setTenantId(tenantId);
-        entity.setRequestNo(nextRequestNo());
+        entity.setRequestNo(nextRequestNo(tenantId));
         fillTeamSnapshot(entity, team);
         fillGuideSnapshot(entity, guide);
         entity.setGuestCount(guestCount);
@@ -365,7 +365,7 @@ public class FinanceGuideImprestService {
         payment.setTenantId(tenantId);
         payment.setImprestId(id);
         payment.setTeamId(current.getTeamId());
-        payment.setPaymentNo(nextPaymentNo());
+        payment.setPaymentNo(nextPaymentNo(tenantId));
         payment.setPaymentDate(request.paymentDate());
         payment.setPaymentMethod(clean(request.paymentMethod()));
         payment.setPaymentAccountName(clean(request.paymentAccountName()));
@@ -941,20 +941,28 @@ public class FinanceGuideImprestService {
         }
     }
 
-    private String nextRequestNo() {
+    private String nextRequestNo(Long tenantId) {
         String datePart = LocalDate.now(clock).format(REQUEST_NO_DATE);
-        long suffix = Math.abs(System.nanoTime() % 100_000);
-        return "GI-%s-%05d".formatted(datePart, suffix);
+        String prefix = "GI-%s-".formatted(datePart);
+        imprestMapper.lockRequestNoGeneration(tenantId, prefix);
+        int nextSuffix = number(imprestMapper.maxRequestNoSuffix(tenantId, prefix)) + 1;
+        return prefix + "%05d".formatted(nextSuffix);
     }
 
-    private String nextPaymentNo() {
+    private String nextPaymentNo(Long tenantId) {
         String datePart = LocalDate.now(clock).format(REQUEST_NO_DATE);
-        long suffix = Math.abs(System.nanoTime() % 100_000);
-        return "GIP-%s-%05d".formatted(datePart, suffix);
+        String prefix = "GIP-%s-".formatted(datePart);
+        paymentMapper.lockPaymentNoGeneration(tenantId, prefix);
+        int nextSuffix = number(paymentMapper.maxPaymentNoSuffix(tenantId, prefix)) + 1;
+        return prefix + "%05d".formatted(nextSuffix);
     }
 
     private BigDecimal money(BigDecimal value) {
         return (value == null ? BigDecimal.ZERO : value).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private int number(Integer value) {
+        return value == null ? 0 : value;
     }
 
     private BigDecimal resolveCompanyMarkupRate(Long tenantId, BigDecimal override) {

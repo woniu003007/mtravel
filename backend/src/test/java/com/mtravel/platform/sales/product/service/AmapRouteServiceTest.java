@@ -1,7 +1,10 @@
 package com.mtravel.platform.sales.product.service;
 
+import com.mtravel.platform.common.map.service.AmapMapService;
+import com.mtravel.platform.common.map.service.AmapWebServiceClient;
 import com.mtravel.platform.sales.product.dto.AmapRouteCalculateRequest;
 import com.mtravel.platform.sales.product.dto.AmapRoutePointRequest;
+import com.mtravel.platform.sales.product.dto.AmapStaticMapRequest;
 import com.mtravel.platform.system.config.entity.SystemConfigEntity;
 import com.mtravel.platform.system.config.mapper.SystemConfigMapper;
 import java.util.List;
@@ -101,6 +104,35 @@ class AmapRouteServiceTest {
         server.verify();
     }
 
+    @Test
+    void jsConfigShouldKeepLegacySalesResponseShape() {
+        AmapRouteService service = service(new RestTemplate());
+
+        var response = service.jsConfig(1L);
+
+        assertThat(response.key()).isEqualTo("test-key");
+        assertThat(response.securityJsCode()).isEqualTo("test-key");
+    }
+
+    @Test
+    void staticMapShouldKeepReturningBase64DataUrl() {
+        RestTemplate restTemplate = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
+        AmapRouteService service = service(restTemplate);
+
+        server.expect(requestTo(containsString("/v3/staticmap")))
+                .andExpect(requestTo(containsString("size=700*360")))
+                .andExpect(method(org.springframework.http.HttpMethod.GET))
+                .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
+
+        String response = service.staticMapImage(1L, new AmapStaticMapRequest(
+                List.of(new AmapRoutePointRequest("120.1", "30.1"))
+        ));
+
+        assertThat(response).isEqualTo("data:image/png;base64,AQID");
+        server.verify();
+    }
+
     private AmapRouteService service(RestTemplate restTemplate) {
         RestTemplateBuilder builder = mock(RestTemplateBuilder.class);
         SystemConfigMapper configMapper = mock(SystemConfigMapper.class);
@@ -108,7 +140,8 @@ class AmapRouteServiceTest {
         config.setConfigValue("test-key");
         when(builder.build()).thenReturn(restTemplate);
         when(configMapper.selectOne(any())).thenReturn(config);
-        return new AmapRouteService(builder, configMapper, "");
+        AmapWebServiceClient client = new AmapWebServiceClient(builder, configMapper, "");
+        return new AmapRouteService(new AmapMapService(client), client);
     }
 
     private String routeResponse(int distance, int duration) {

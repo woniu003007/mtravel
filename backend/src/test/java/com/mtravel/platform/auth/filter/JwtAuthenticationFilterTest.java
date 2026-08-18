@@ -24,6 +24,31 @@ import static org.mockito.Mockito.when;
 class JwtAuthenticationFilterTest {
 
     @Test
+    void agentApiShouldNotBeParsedAsExistingUserJwt() throws Exception {
+        JwtService jwtService = mock(JwtService.class);
+        TokenBlacklistService tokenBlacklistService = mock(TokenBlacklistService.class);
+        JwtAuthenticationFilter filter = new JwtAuthenticationFilter(
+                jwtService,
+                tokenBlacklistService,
+                new SecurityProperties(),
+                new TenantProperties(),
+                mock(OperationLogService.class),
+                mock(AuthSessionService.class),
+                mock(AuthConfigService.class)
+        );
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/agent/v1/products/32");
+        request.addHeader("Authorization", "Bearer agent-service-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, filterChain);
+
+        verify(jwtService, never()).parse("agent-service-token");
+        verify(tokenBlacklistService, never()).isBlacklisted("agent-service-token");
+        verify(filterChain).doFilter(request, response);
+    }
+
+    @Test
     void blacklistedTokenShouldReturnUnauthorized() throws Exception {
         JwtService jwtService = mock(JwtService.class);
         TokenBlacklistService tokenBlacklistService = mock(TokenBlacklistService.class);

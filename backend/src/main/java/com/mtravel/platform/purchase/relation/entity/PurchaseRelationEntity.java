@@ -9,8 +9,8 @@ import java.time.LocalDate;
 /**
  * 采购关系实体，对应 purchase_relations 表。
  *
- * <p>当前业务口径下，采购关系只表达资源与供应商的绑定和成团数量。历史价格字段仍保留在表中，
- * 但具体门市、同行、团队价格由 supplier_resource_prices 表维护。</p>
+ * <p>采购关系表达资源与供应商的绑定、成团数量和统一报价。分类报价的具体门市、同行、
+ * 团队价格由 supplier_resource_prices 表维护。</p>
  */
 @TableName("purchase_relations")
 public class PurchaseRelationEntity extends TenantSoftDeleteEntity {
@@ -58,6 +58,22 @@ public class PurchaseRelationEntity extends TenantSoftDeleteEntity {
     @TableField("priority_level")
     private Integer priorityLevel;
 
+    /** 是否为当前资源的默认供应商，用于景区资源页和后续业务默认带出。 */
+    @TableField("is_default")
+    private Boolean isDefault;
+
+    /** 报价模式：unified 统一报价，classified 分类报价。历史关系为空时由资源页按明细兼容展示。 */
+    @TableField("price_mode")
+    private String priceMode;
+
+    /** 统一报价金额，仅 price_mode=unified 时使用。 */
+    @TableField("unified_price")
+    private BigDecimal unifiedPrice;
+
+    /** 统一报价的适用条件或补充说明。 */
+    @TableField("price_remark")
+    private String priceRemark;
+
     /** 状态：active 有效，disabled 停用，expired 兼容历史过期状态。 */
     @TableField("status")
     private String status;
@@ -84,6 +100,14 @@ public class PurchaseRelationEntity extends TenantSoftDeleteEntity {
     public void setValidTo(LocalDate validTo) { this.validTo = validTo; }
     public Integer getPriorityLevel() { return priorityLevel; }
     public void setPriorityLevel(Integer priorityLevel) { this.priorityLevel = priorityLevel; }
+    public Boolean getIsDefault() { return isDefault; }
+    public void setIsDefault(Boolean isDefault) { this.isDefault = isDefault; }
+    public String getPriceMode() { return priceMode; }
+    public void setPriceMode(String priceMode) { this.priceMode = priceMode; }
+    public BigDecimal getUnifiedPrice() { return unifiedPrice; }
+    public void setUnifiedPrice(BigDecimal unifiedPrice) { this.unifiedPrice = unifiedPrice; }
+    public String getPriceRemark() { return priceRemark; }
+    public void setPriceRemark(String priceRemark) { this.priceRemark = priceRemark; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
 }

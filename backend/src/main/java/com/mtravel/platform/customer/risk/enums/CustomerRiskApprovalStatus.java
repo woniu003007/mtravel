@@ -3,7 +3,7 @@ package com.mtravel.platform.customer.risk.enums;
 /**
  * 客户风控审批状态枚举。
  *
- * <p>审批单用于客户合同到期、授信超限时的总经理授权，状态只表达审批流转结果。</p>
+ * <p>审批单用于客户合同到期、授信超限时的客户等级指定审批人授权，状态只表达审批流转结果。</p>
  */
 public enum CustomerRiskApprovalStatus {
     /** 待审批，申请已提交但未处理。 */
