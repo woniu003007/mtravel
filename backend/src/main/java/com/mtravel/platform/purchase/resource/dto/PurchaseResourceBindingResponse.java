@@ -21,6 +21,7 @@ public record PurchaseResourceBindingResponse(
         String priceMode,
         BigDecimal unifiedPrice,
         List<ResourceSupplierPriceLineResponse> priceLines,
+        List<ResourceSupplierOptionalItemResponse> optionalItems,
         String priceRemark
 ) {
     /** 将采购关系和供应商名称组装为资源绑定行。 */
@@ -34,7 +35,18 @@ public record PurchaseResourceBindingResponse(
             String supplierName,
             List<ResourceSupplierPriceLineResponse> priceLines
     ) {
+        return fromEntity(entity, supplierName, priceLines, List.of());
+    }
+
+    /** 将采购关系、普通报价和自费项目报价组装为资源绑定行。 */
+    public static PurchaseResourceBindingResponse fromEntity(
+            PurchaseRelationEntity entity,
+            String supplierName,
+            List<ResourceSupplierPriceLineResponse> priceLines,
+            List<ResourceSupplierOptionalItemResponse> optionalItems
+    ) {
         List<ResourceSupplierPriceLineResponse> lines = priceLines == null ? List.of() : List.copyOf(priceLines);
+        List<ResourceSupplierOptionalItemResponse> optional = optionalItems == null ? List.of() : List.copyOf(optionalItems);
         String mode = entity.getPriceMode();
         if (mode == null || mode.isBlank()) {
             mode = inferPriceMode(lines);
@@ -59,6 +71,7 @@ public record PurchaseResourceBindingResponse(
                 mode,
                 unifiedPrice,
                 lines,
+                optional,
                 priceRemark
         );
     }

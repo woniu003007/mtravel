@@ -1,8 +1,11 @@
 <script lang="ts" setup>
 import type { TablePaginationConfig, UploadProps } from 'ant-design-vue';
 import type { Dayjs } from 'dayjs';
+import type { Sortable } from '@vben/hooks';
 
 import { Page } from '@vben/common-ui';
+import { useSortable } from '@vben/hooks';
+import { IconifyIcon } from '@vben/icons';
 
 import {
   AutoComplete,
@@ -17,6 +20,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Radio,
   Select,
   Space,
   Spin,
@@ -44,7 +48,8 @@ import { useRoute } from 'vue-router';
 import BusinessSearchForm from '#/components/business/BusinessSearchForm.vue';
 import { uploadAttachment, type AttachmentApi } from '#/api/common/attachment';
 import { getExpenseItemAll, type EnterpriseExpenseItemApi } from '#/api/enterprise/expense-item';
-import { createPurchaseRelation } from '#/api/purchase/relation';
+import { getProductDictionaryAll } from '#/api/enterprise/product-dictionary';
+import { createPurchaseRelation, deletePurchaseRelation } from '#/api/purchase/relation';
 import type { PurchaseRelationApi } from '#/api/purchase/relation';
 import {
   deleteRelationTicketTemplate,
@@ -70,16 +75,20 @@ import {
   getPurchaseResourceDetail,
   getPurchaseResourceDocuments,
   getPurchaseResourceImages,
+  getPurchaseResourceIntroductionImages,
   getPurchaseResourceIntroductions,
+  getPurchaseResourceOptionalItems,
   getPurchaseResourcePage,
   publishPurchaseResourceDocument,
   publishPurchaseResourceIntroduction,
   retryPurchaseResourceDocument,
   retryPurchaseResourceIntroduction,
+  reorderPurchaseResourceIntroductions,
   reverseGeocodeCommonAmap,
   downloadPurchaseResourceDocument,
   searchCommonAmapTips,
   setPurchaseResourceImageCover,
+  savePurchaseResourceIntroductionImages,
   updatePurchaseResourceImage,
   updatePurchaseResourceIntroduction,
   uploadPurchaseResourceImages,
@@ -98,7 +107,7 @@ import {
   buildRegionPath,
   splitRegionPath,
 } from '#/utils/region';
-import type { RegionPath } from '#/utils/region';
+import type { RegionOption, RegionPath } from '#/utils/region';
 
 type ResourceRow = PurchaseResourceApi.Item;
 type BindingRow = PurchaseResourceApi.Binding;
@@ -108,6 +117,12 @@ type ResourceType = PurchaseResourceApi.ResourceType;
 interface MapTipOption {
   label: string;
   meta: PurchaseResourceApi.AmapTip;
+  value: string;
+}
+
+interface QueryLocationOption {
+  label: string;
+  path: RegionPath;
   value: string;
 }
 
@@ -154,14 +169,7 @@ const siteVisitStatusOptions = [
   { label: '已踩点', value: 'visited' },
 ];
 
-const starLevelOptions = [
-  { label: '未评级', value: 'unrated' },
-  { label: '一星', value: '1star' },
-  { label: '二星', value: '2star' },
-  { label: '三星', value: '3star' },
-  { label: '四星', value: '4star' },
-  { label: '五星', value: '5star' },
-];
+const starLevelOptions = ref<{ label: string; value: string }[]>([]);
 
 const billingModeOptions = [
   { label: '按天计费', value: 'daily' },
@@ -228,7 +236,7 @@ const modalOpen = ref(false);
 const editingId = ref<number>();
 const bindingDrawerOpen = ref(false);
 const documentDrawerOpen = ref(false);
-const materialTab = ref<'introductions' | 'images' | 'files'>('files');
+const materialTab = ref<'introductions' | 'images' | 'files'>('introductions');
 const materialServiceUnavailable = ref(false);
 const templateDrawerOpen = ref(false);
 const bindingLoading = ref(false);
@@ -242,6 +250,8 @@ const uploadingDocuments = ref(false);
 const uploadingImages = ref(false);
 const introductionSaving = ref(false);
 const introductionPublishing = ref(false);
+const introductionImageSelectionLoading = ref(false);
+const optionalItemMasterLoading = ref(false);
 const imageEditorOpen = ref(false);
 const imageSaving = ref(false);
 const previewOpen = ref(false);
@@ -255,12 +265,20 @@ const documents = ref<PurchaseResourceApi.ResourceDocumentItem[]>([]);
 const introductions = ref<PurchaseResourceApi.ResourceIntroductionItem[]>([]);
 const images = ref<PurchaseResourceApi.ResourceImageItem[]>([]);
 const activeIntroductionId = ref<number>();
+const introductionSortableContainerRef = ref<HTMLElement>();
+const introductionReordering = ref(false);
+const introductionImageIds = ref<number[]>([]);
+const introductionImageLoadedIntroductionId = ref<number>();
+const introductionImagePickerOpen = ref(false);
 const introductionLoadedResourceId = ref<number>();
 const imageLoadedResourceId = ref<number>();
 const documentLoadedResourceId = ref<number>();
 const imagePreviewUrls = reactive<Record<number, string>>({});
 const supplierOptions = ref<{ label: string; value: number }[]>([]);
+/** 快速绑定框的搜索词，支持键盘输入名称直接定位已有供应商。 */
+const supplierSearchKeyword = ref('');
 const resourcePriceProjects = ref<EnterpriseExpenseItemApi.Item[]>([]);
+const resourceOptionalItems = ref<PurchaseResourceApi.ResourceOptionalItem[]>([]);
 const resourceSupplierPriceValues = reactive<Record<number, number | undefined>>({});
 const systemFieldOptions = ref<{ label: string; value: string }[]>([]);
 const fillModeOptions = ref<{ label: string; value: string }[]>([]);
@@ -270,6 +288,7 @@ const editingScenicSupplierRelationId = ref<number>();
 const routeBindingOpened = ref(false);
 const routeTemplateOpened = ref(false);
 const queryRegionPath = ref<RegionPath>([]);
+const queryLocationKeyword = ref('');
 const formRegionPath = ref<RegionPath>([]);
 const scenicSupplierRegionPath = ref<RegionPath>([]);
 const formCategoryTags = ref<string[]>([]);
@@ -286,10 +305,21 @@ let scenicMapInstance: any;
 let scenicMapMarker: any;
 let scenicMapSearchTimer: number | undefined;
 let scenicMapAutoLocateTimer: number | undefined;
+let introductionSortableInstance: Sortable | undefined;
+let introductionSortableVersion = 0;
 
 const query = reactive<PurchaseResourceApi.QueryParams>({
   page: 1,
   pageSize: 10,
+});
+
+const queryLocationEntries = buildQueryLocationEntries(regionOptions);
+const queryLocationOptions = computed(() => {
+  const keyword = queryLocationKeyword.value.trim();
+  if (!keyword) return queryLocationEntries.slice(0, 80);
+  return queryLocationEntries
+    .filter((item) => item.label.includes(keyword) || item.path.some((part) => part.includes(keyword)))
+    .slice(0, 80);
 });
 
 const formState = reactive<PurchaseResourceApi.SaveParams>({
@@ -338,9 +368,13 @@ const templateForm = reactive<RelationTicketTemplateApi.SaveParams>({
 });
 const introductionForm = reactive<PurchaseResourceApi.ResourceIntroductionSaveParams>({
   content: '',
+  extensionBlocks: [],
+  isOptionalItem: false,
   noticeContent: '',
   tags: [],
   title: '',
+  visitDuration: '',
+  warmTipContent: '',
 });
 const imageEditForm = reactive<PurchaseResourceApi.ResourceImageUpdateParams>({
   sortOrder: 0,
@@ -360,7 +394,22 @@ const previewTitle = computed(
 const activeIntroduction = computed(() =>
   introductions.value.find((item) => item.id === activeIntroductionId.value),
 );
+/** 保持当前介绍素材内的图片排序，不把资源图库中未选择的图片显示成已归属。 */
+const selectedIntroductionImages = computed(() =>
+  introductionImageIds.value.flatMap((id) => {
+    const image = images.value.find((item) => item.id === id);
+    return image ? [image] : [];
+  }),
+);
 const isEditingScenicSupplier = computed(() => Boolean(editingScenicSupplierId.value));
+const resourceOptionalItemOptions = computed(() =>
+  resourceOptionalItems.value
+    .filter((item) => item.status === 'active')
+    .map((item) => ({
+      label: `${item.projectName}（${optionalItemTypeLabel(item.optionalItemType)}）`,
+      value: item.id,
+    })),
+);
 const isScenicList = computed(() => query.resourceType === 'scenic');
 const isPlaceList = computed(() => Boolean(query.resourceType && isPlaceResource(query.resourceType)));
 const isScenicForm = computed(() => formState.resourceType === 'scenic');
@@ -416,6 +465,10 @@ function typeColor(value?: string) {
   return colors[value || ''] || 'default';
 }
 
+function optionalItemTypeLabel(value?: string) {
+  return value === 'scenic_transport' ? '景区小交通' : '推荐自费';
+}
+
 function statusLabel(value?: string) {
   return (
     statusOptions.find((item) => item.value === value)?.label || value || '-'
@@ -447,6 +500,7 @@ function isPlaceResource(resourceType?: string) {
 function supportsStarLevel(resourceType?: string) {
   return ['hotel', 'restaurant'].includes(resourceType || '');
 }
+
 
 function supportsCategoryTags(resourceType?: string) {
   return ['other', 'restaurant', 'shopping', 'traffic'].includes(resourceType || '');
@@ -564,6 +618,65 @@ function clean(value?: string) {
   return value?.trim() || undefined;
 }
 
+/** 将三级行政区拍平成可检索项，查询时允许停在任一级。 */
+function buildQueryLocationEntries(options: RegionOption[]) {
+  const entries: QueryLocationOption[] = [];
+  options.forEach((province) => {
+    entries.push({ label: province.label, path: [province.value], value: province.label });
+    province.children?.forEach((city) => {
+      const cityPath = [province.value, city.value];
+      entries.push({ label: cityPath.join(' / '), path: cityPath, value: cityPath.join(' / ') });
+      city.children?.forEach((district) => {
+        const districtPath = [...cityPath, district.value];
+        entries.push({ label: districtPath.join(' / '), path: districtPath, value: districtPath.join(' / ') });
+      });
+    });
+  });
+  return entries;
+}
+
+function setQueryLocation(entry: QueryLocationOption) {
+  queryRegionPath.value = [...entry.path];
+  queryLocationKeyword.value = entry.label;
+}
+
+function syncQueryLocationKeyword() {
+  const keyword = clean(queryLocationKeyword.value);
+  if (!keyword) {
+    queryRegionPath.value = [];
+    return true;
+  }
+  const currentPath = queryRegionPath.value;
+  const currentEntry = queryLocationEntries.find((entry) => entry.path.join('|') === currentPath.join('|'));
+  if (currentEntry?.label === keyword) return true;
+  const matches = queryLocationEntries.filter(
+    (entry) => entry.label === keyword || entry.path.at(-1) === keyword,
+  );
+  if (matches.length !== 1) {
+    message.warning(matches.length ? '存在同名区县，请从下拉候选中选择完整所在地' : '请选择省、市或区县所在地');
+    return false;
+  }
+  setQueryLocation(matches[0]!);
+  return true;
+}
+
+function selectQueryLocation(value: unknown, option: unknown) {
+  const selected = option as QueryLocationOption | undefined;
+  if (selected?.path) {
+    setQueryLocation(selected);
+    return;
+  }
+  const label = typeof value === 'object' && value && 'value' in value
+    ? String((value as { value: unknown }).value)
+    : String(value || '');
+  const fallback = queryLocationEntries.find((entry) => entry.value === label);
+  if (fallback) setQueryLocation(fallback);
+}
+
+function applyQueryLocationKeyword() {
+  if (syncQueryLocationKeyword()) handleSearch();
+}
+
 function isNil(value: unknown): value is null | undefined {
   return value === null || value === undefined;
 }
@@ -595,6 +708,7 @@ function areaText(record: Record<string, any>) {
 }
 
 function handleSearch() {
+  if (!syncQueryLocationKeyword()) return;
   const regionFields = splitRegionPath(queryRegionPath.value);
   query.province = regionFields.province;
   query.city = regionFields.city;
@@ -611,12 +725,6 @@ function handleQueryResourceTypeChange(value: unknown) {
   }
 }
 
-function handleProcurementModeChange(value: unknown) {
-  if (value === 'not_required') {
-    formState.autoCreateSupplier = false;
-  }
-}
-
 async function loadData() {
   loading.value = true;
   try {
@@ -630,8 +738,22 @@ async function loadData() {
   }
 }
 
+async function loadReceptionStandards() {
+  try {
+    const items = await getProductDictionaryAll('reception_standard');
+    starLevelOptions.value = items
+      .filter((item) => item.status === 'active')
+      .sort((left, right) => left.sortOrder - right.sortOrder)
+      .map((item) => ({ label: item.dictName, value: item.dictName }));
+  } catch {
+    starLevelOptions.value = [];
+    message.warning('接待标准字典加载失败，请稍后重试');
+  }
+}
+
 function resetQuery() {
   queryRegionPath.value = [];
+  queryLocationKeyword.value = '';
   query.keyword = undefined;
   query.resourceType = undefined;
   query.province = undefined;
@@ -650,6 +772,7 @@ function resetForm() {
   editingId.value = undefined;
   formRegionPath.value = [];
   formState.resourceType = 'scenic';
+  formState.autoCreateSupplier = false;
   formState.procurementMode = 'required';
   formState.resourceName = '';
   formState.province = undefined;
@@ -668,7 +791,7 @@ function resetForm() {
   formState.longitude = undefined;
   formState.openingTime = undefined;
   formState.scenicLevel = 'unrated';
-  formState.starLevel = 'unrated';
+  formState.starLevel = undefined;
   formState.categoryTags = undefined;
   formState.siteVisitNote = undefined;
   formState.siteVisitStatus = 'unmaintained';
@@ -684,7 +807,6 @@ function resetForm() {
   formState.excludedItems = undefined;
   formState.resourceUnit = undefined;
   formState.status = 'active';
-  formState.autoCreateSupplier = false;
   formState.remark = undefined;
   scenicMapKeyword.value = undefined;
   scenicMapTipOptions.value = [];
@@ -709,6 +831,7 @@ function resetScenicSupplierForm(resource?: ResourceRow) {
   scenicSupplierForm.isDefault = false;
   scenicSupplierForm.priceMode = 'unified';
   scenicSupplierForm.unifiedPrice = undefined;
+  scenicSupplierForm.optionalItems = [];
   scenicSupplierForm.priceLines = [];
   scenicSupplierForm.priceRemark = undefined;
   scenicSupplierForm.remark = undefined;
@@ -914,6 +1037,7 @@ async function openBindingsFromRoute() {
     loadSuppliers(resource.resourceType),
     loadBindings(resource.id),
     loadResourcePriceProjects(resource.resourceType),
+    loadResourceOptionalItems(resource),
   ]);
 
   const relationId = Number(route.query.relationId || route.query.templateRelationId || 0);
@@ -945,6 +1069,8 @@ function openEditModal(record: Record<string, any>) {
   editingId.value = row.id;
   formRegionPath.value = buildRegionPath(row.province, row.city, row.district);
   formState.resourceType = row.resourceType;
+  // 自动生成供应商只属于新增动作，编辑旧资源不能重复触发。
+  formState.autoCreateSupplier = false;
   formState.procurementMode = row.procurementMode || 'required';
   formState.resourceName = row.resourceName;
   formState.province = row.province;
@@ -980,7 +1106,6 @@ function openEditModal(record: Record<string, any>) {
   formState.excludedItems = row.excludedItems;
   formState.resourceUnit = row.resourceUnit;
   formState.status = row.status;
-  formState.autoCreateSupplier = false;
   formState.remark = row.remark;
   scenicMapKeyword.value = undefined;
   scenicMapTipOptions.value = [];
@@ -992,9 +1117,7 @@ function buildPayload(): PurchaseResourceApi.SaveParams {
   const regionFields = splitRegionPath(formRegionPath.value);
   const payload: PurchaseResourceApi.SaveParams = {
     address: clean(formState.address),
-    autoCreateSupplier: formState.procurementMode === 'not_required'
-      ? false
-      : Boolean(formState.autoCreateSupplier),
+    autoCreateSupplier: !editingId.value && Boolean(formState.autoCreateSupplier),
     city: regionFields.city,
     contactName: clean(formState.contactName),
     district: regionFields.district,
@@ -1196,6 +1319,40 @@ function applyScenicMapPosition(
   renderScenicMapMarker();
 }
 
+function applyScenicMapReverseGeocodeResult(
+  result: PurchaseResourceApi.AmapRegeoResult,
+) {
+  const province = clean(result.province);
+  const city = clean(result.city || result.province);
+  const district = clean(result.district);
+  if (province || city || district) {
+    formState.province = province;
+    formState.city = city;
+    formState.district = district;
+    formRegionPath.value = buildRegionPath(province, city, district);
+  }
+  if (result.address?.trim()) {
+    formState.address = result.address.trim();
+  }
+}
+
+async function reverseGeocodeScenicMapPosition(
+  longitude: number,
+  latitude: number,
+  showWarning = false,
+) {
+  try {
+    const result = await reverseGeocodeCommonAmap({ latitude, longitude });
+    applyScenicMapReverseGeocodeResult(result);
+    return true;
+  } catch {
+    if (showWarning) {
+      message.warning('地址解析失败，请手工填写详细地址和所在地');
+    }
+    return false;
+  }
+}
+
 function syncScenicMapFromCoordinates() {
   renderScenicMapMarker();
 }
@@ -1235,6 +1392,7 @@ async function locateScenicMapByKeyword(
       [firstTip.district, firstTip.name].filter(Boolean).join(' ');
     if (applyToForm) {
       applyScenicMapPosition(longitude, latitude, address);
+      await reverseGeocodeScenicMapPosition(longitude, latitude);
     } else {
       scenicMapInstance?.setZoomAndCenter(13, [longitude, latitude]);
     }
@@ -1363,14 +1521,7 @@ async function handleScenicMapClick(event: any) {
   const longitude = Number(event.lnglat.getLng());
   const latitude = Number(event.lnglat.getLat());
   applyScenicMapPosition(longitude, latitude);
-  try {
-    const result = await reverseGeocodeCommonAmap({ latitude, longitude });
-    if (result.address?.trim()) {
-      formState.address = result.address.trim();
-    }
-  } catch {
-    message.warning('地址解析失败，请手工填写详细地址');
-  }
+  await reverseGeocodeScenicMapPosition(longitude, latitude, true);
 }
 
 function clearScenicMapSearchTimer() {
@@ -1440,7 +1591,7 @@ async function doScenicMapSearch(value: string) {
   }
 }
 
-function handleScenicMapSelect(value: unknown) {
+async function handleScenicMapSelect(value: unknown) {
   if (typeof value !== 'string') {
     return;
   }
@@ -1454,6 +1605,7 @@ function handleScenicMapSelect(value: unknown) {
     option.meta.address ||
     [option.meta.district, option.meta.name].filter(Boolean).join(' ');
   applyScenicMapPosition(longitude, latitude, address);
+  await reverseGeocodeScenicMapPosition(longitude, latitude);
 }
 
 async function saveRecord() {
@@ -1511,6 +1663,7 @@ async function openBindingDrawer(record: Record<string, any>) {
     loadSuppliers(row.resourceType),
     loadBindings(row.id),
     loadResourcePriceProjects(row.resourceType),
+    loadResourceOptionalItems(row),
   ]);
 }
 
@@ -1525,6 +1678,20 @@ async function loadSuppliers(category: SupplierApi.Category) {
 async function loadResourcePriceProjects(resourceType: ResourceType) {
   const result = await getExpenseItemAll(resourceType as EnterpriseExpenseItemApi.ResourceType);
   resourcePriceProjects.value = result;
+}
+
+async function loadResourceOptionalItems(resource?: ResourceRow) {
+  const target = resource || currentResource.value;
+  if (!target || target.resourceType !== 'scenic') {
+    resourceOptionalItems.value = [];
+    return;
+  }
+  optionalItemMasterLoading.value = true;
+  try {
+    resourceOptionalItems.value = await getPurchaseResourceOptionalItems(target.id);
+  } finally {
+    optionalItemMasterLoading.value = false;
+  }
 }
 
 async function loadBindings(resourceId: number) {
@@ -1552,8 +1719,60 @@ async function bindSupplier() {
   await Promise.all([loadBindings(currentResource.value.id), loadData()]);
 }
 
+/** 解除当前资源与供应商的关系，不删除供应商主档，其他资源仍可继续使用该供应商。 */
+function confirmUnbindSupplier(binding: PurchaseResourceApi.Binding) {
+  if (!currentResource.value) return;
+  Modal.confirm({
+    cancelText: '取消',
+    content: `解除后「${binding.supplierName}」不会再作为「${currentResource.value.resourceName}」的供应商，供应商档案不会被删除。`,
+    okText: '解除绑定',
+    okType: 'danger',
+    title: '确认解除供应商绑定？',
+    async onOk() {
+      await deletePurchaseRelation(binding.relationId);
+      if (editingScenicSupplierRelationId.value === binding.relationId) {
+        resetScenicSupplierForm(currentResource.value);
+      }
+      message.success('供应商绑定已解除');
+      await Promise.all([loadBindings(currentResource.value!.id), loadData()]);
+    },
+  });
+}
+
+/** 输入全名或仅剩一个匹配项时，按 Enter 直接选中已有供应商。 */
+function selectSupplierFromTypedName() {
+  const supplierName = supplierSearchKeyword.value.trim();
+  if (!supplierName) {
+    return;
+  }
+  const normalized = supplierName.toLocaleLowerCase();
+  const matched = supplierOptions.value.filter((item) =>
+    item.label.trim().toLocaleLowerCase().includes(normalized),
+  );
+  const existing = supplierOptions.value.find((item) =>
+    item.label.trim().toLocaleLowerCase() === normalized,
+  );
+  if (existing) {
+    bindForm.supplierId = existing.value;
+    return;
+  }
+  const [onlyMatch] = matched;
+  if (onlyMatch) {
+    bindForm.supplierId = onlyMatch.value;
+    return;
+  }
+  if (!matched.length) message.warning('未找到匹配的已有供应商，请检查名称');
+}
+
 function hasClassifiedPrice() {
   return Object.values(resourceSupplierPriceValues).some((value) => !isNil(value));
+}
+
+/** 景区可仅维护自费项目：没有门票时，以至少一条完整的自费报价作为保存条件。 */
+function hasOptionalItemQuote() {
+  return (scenicSupplierForm.optionalItems || []).some(
+    (item) => Boolean(item.projectName?.trim()) && !isNil(item.costPrice),
+  );
 }
 
 function validateScenicSupplierForm() {
@@ -1569,20 +1788,47 @@ function validateScenicSupplierForm() {
     message.warning('默认供应商必须是合作中状态');
     return false;
   }
+  if (!validateOptionalItems()) {
+    return false;
+  }
   if (scenicSupplierForm.priceMode === 'unified') {
-    if (isNil(scenicSupplierForm.unifiedPrice)) {
-      message.warning('请填写统一报价');
+    if (isNil(scenicSupplierForm.unifiedPrice) && !hasOptionalItemQuote()) {
+      message.warning('请填写门票统一报价，或至少维护一条自费项目报价');
       return false;
     }
     return true;
   }
   if (resourcePriceProjects.value.length === 0) {
+    if (hasOptionalItemQuote()) return true;
     message.warning('当前资源类型还没有维护报价项目，请先到费用项目中维护');
     return false;
   }
-  if (!hasClassifiedPrice()) {
-    message.warning('分类报价至少填写一种');
+  if (!hasClassifiedPrice() && !hasOptionalItemQuote()) {
+    message.warning('分类门票报价至少填写一种，或至少维护一条自费项目报价');
     return false;
+  }
+  return true;
+}
+
+function validateOptionalItems() {
+  if (currentResource.value?.resourceType !== 'scenic') {
+    return true;
+  }
+  const items = scenicSupplierForm.optionalItems || [];
+  for (const item of items) {
+    const hasName = Boolean(item.projectName?.trim());
+    const hasPrice = !isNil(item.costPrice);
+    if (!hasName && !hasPrice && !item.priceDescription?.trim()) {
+      continue;
+    }
+    if (!hasName) {
+      message.warning('请填写自费项目名称');
+      return false;
+    }
+    if (!hasPrice) {
+      message.warning(`请填写「${item.projectName.trim()}」的供应商成本价`);
+      return false;
+    }
   }
   return true;
 }
@@ -1596,6 +1842,18 @@ function buildScenicSupplierPayload(): PurchaseResourceApi.ResourceSupplierCreat
     contactPhone: clean(scenicSupplierForm.contactPhone),
     district: supplierRegion.district,
     isDefault: Boolean(scenicSupplierForm.isDefault),
+    optionalItems:
+      currentResource.value?.resourceType === 'scenic'
+        ? (scenicSupplierForm.optionalItems || [])
+            .filter((item) => item.projectName?.trim() && !isNil(item.costPrice))
+            .map((item) => ({
+              costPrice: item.costPrice,
+              priceDescription: clean(item.priceDescription),
+              projectName: item.projectName.trim(),
+              status: item.status || 'active',
+              suggestedSalePrice: item.suggestedSalePrice,
+            }))
+        : undefined,
     priceMode: scenicSupplierForm.priceMode,
     priceRemark: clean(scenicSupplierForm.priceRemark),
     province: supplierRegion.province,
@@ -1638,6 +1896,14 @@ async function editBoundSupplier(record: PurchaseResourceApi.Binding) {
     resourceProjectId: line.resourceProjectId,
     teamPrice: line.teamPrice,
   }));
+  scenicSupplierForm.optionalItems = (record.optionalItems || []).map((item) => ({
+    costPrice: item.costPrice,
+    priceDescription: item.priceDescription,
+    projectName: item.projectName,
+    resourceOptionalItemId: item.resourceOptionalItemId,
+    status: item.status || 'active',
+    suggestedSalePrice: item.suggestedSalePrice,
+  }));
   Object.keys(resourceSupplierPriceValues).forEach((key) => {
     delete resourceSupplierPriceValues[Number(key)];
   });
@@ -1646,6 +1912,24 @@ async function editBoundSupplier(record: PurchaseResourceApi.Binding) {
   });
   scenicSupplierForm.priceRemark = record.priceRemark;
   scenicSupplierForm.remark = supplier.remark;
+}
+
+function addOptionalItem() {
+  if (!scenicSupplierForm.optionalItems) {
+    scenicSupplierForm.optionalItems = [];
+  }
+  scenicSupplierForm.optionalItems.push({
+    costPrice: undefined,
+    priceDescription: '',
+    projectName: '',
+    resourceOptionalItemId: undefined,
+    status: 'active',
+    suggestedSalePrice: undefined,
+  });
+}
+
+function removeOptionalItem(index: number) {
+  scenicSupplierForm.optionalItems?.splice(index, 1);
 }
 
 async function createScenicSupplier() {
@@ -1665,7 +1949,6 @@ async function createScenicSupplier() {
         buildScenicSupplierPayload(),
       );
       message.success('供应商资料和报价已更新');
-      resetScenicSupplierForm(currentResource.value);
       await Promise.all([
         loadSuppliers(currentResource.value.resourceType),
         loadBindings(currentResource.value.id),
@@ -1673,12 +1956,14 @@ async function createScenicSupplier() {
       ]);
       return;
     }
-    await createResourceSupplierForResource(
+    const created = await createResourceSupplierForResource(
       currentResource.value.id,
       buildScenicSupplierPayload(),
     );
-    message.success('供应商已新增并绑定');
-    resetScenicSupplierForm();
+    // 新增后保留当前录入内容，并切换为编辑状态，避免再次点击时重复创建同名供应商。
+    editingScenicSupplierId.value = created.supplierId;
+    editingScenicSupplierRelationId.value = created.relationId;
+    message.success('供应商已新增并绑定，可继续编辑');
     await Promise.all([
       loadSuppliers(currentResource.value.resourceType),
       loadBindings(currentResource.value.id),
@@ -1691,20 +1976,27 @@ async function createScenicSupplier() {
 
 async function openDocumentDrawer(record: Record<string, any>) {
   const row = record as ResourceRow;
+  destroyIntroductionSortable();
   currentResource.value = row;
-  materialTab.value = 'files';
+  materialTab.value = 'introductions';
   materialServiceUnavailable.value = false;
   introductions.value = [];
   images.value = [];
   documents.value = [];
   activeIntroductionId.value = undefined;
+  introductionImageIds.value = [];
+  introductionImageLoadedIntroductionId.value = undefined;
   introductionLoadedResourceId.value = undefined;
   imageLoadedResourceId.value = undefined;
   documentLoadedResourceId.value = undefined;
   resetIntroductionForm();
   revokeImagePreviewUrls();
   documentDrawerOpen.value = true;
-  await loadResourceDocuments(row);
+  await Promise.all([
+    loadResourceIntroductions(row),
+    loadResourceImages(row),
+    loadResourceOptionalItems(row),
+  ]);
 }
 
 function isMissingMaterialService(error: unknown) {
@@ -1733,17 +2025,196 @@ async function loadResourceDocuments(record: ResourceRow) {
 
 function resetIntroductionForm() {
   introductionForm.content = '';
+  introductionForm.extensionBlocks = [];
+  introductionForm.isOptionalItem = false;
   introductionForm.noticeContent = '';
+  introductionForm.resourceOptionalItemId = undefined;
   introductionForm.tags = [];
   introductionForm.title = '';
+  introductionForm.visitDuration = '';
+  introductionForm.warmTipContent = '';
+  introductionImageIds.value = [];
+  introductionImageLoadedIntroductionId.value = undefined;
+  introductionImagePickerOpen.value = false;
 }
 
 function selectIntroduction(record?: PurchaseResourceApi.ResourceIntroductionItem) {
   activeIntroductionId.value = record?.id;
   introductionForm.content = record?.content || '';
+  introductionForm.extensionBlocks = (record?.extensionBlocks || []).map((block) => ({
+    ...block,
+    // 旧版“分条输入”数据在打开时合并成换行文本，避免历史素材内容丢失。
+    content: block.contentMode === 'multiline'
+      ? (block.content || '')
+      : (block.items || []).join('\n'),
+    contentMode: 'multiline',
+    items: [],
+    titleColor: block.titleColor
+      || (block.type === 'photo_recommendation' ? '#d97706' : block.type === 'warm_tip' ? '#0070c0' : '#000000'),
+    type: 'generic',
+  }));
+  introductionForm.isOptionalItem = Boolean(record?.isOptionalItem);
   introductionForm.noticeContent = record?.noticeContent || '';
+  introductionForm.resourceOptionalItemId = record?.resourceOptionalItemId;
   introductionForm.tags = [...(record?.tags || [])];
   introductionForm.title = record?.title || '';
+  introductionForm.visitDuration = record?.visitDuration || '';
+  introductionForm.warmTipContent = record?.warmTipContent || '';
+  introductionImageIds.value = [];
+  introductionImageLoadedIntroductionId.value = undefined;
+  introductionImagePickerOpen.value = false;
+  if (record && currentResource.value) {
+    void loadIntroductionImageIds(currentResource.value.id, record.id);
+  }
+}
+
+async function loadIntroductionImageIds(resourceId: number, introductionId: number) {
+  introductionImageSelectionLoading.value = true;
+  try {
+    const ids = await getPurchaseResourceIntroductionImages(resourceId, introductionId);
+    if (activeIntroductionId.value === introductionId && currentResource.value?.id === resourceId) {
+      introductionImageIds.value = ids;
+      introductionImageLoadedIntroductionId.value = introductionId;
+    }
+  } finally {
+    introductionImageSelectionLoading.value = false;
+  }
+}
+
+function handleIntroductionTypeChange(isOptionalItem: boolean) {
+  if (!isOptionalItem) {
+    introductionForm.resourceOptionalItemId = undefined;
+  }
+}
+
+/** 当前素材的图片顺序就是产品 Word 内该素材配图的输出顺序。 */
+function toggleIntroductionImage(imageId: number, checked: boolean) {
+  if (checked) {
+    if (!introductionImageIds.value.includes(imageId)) {
+      introductionImageIds.value = [...introductionImageIds.value, imageId];
+    }
+    return;
+  }
+  introductionImageIds.value = introductionImageIds.value.filter((id) => id !== imageId);
+}
+
+function moveIntroductionImage(index: number, offset: number) {
+  const targetIndex = index + offset;
+  if (targetIndex < 0 || targetIndex >= introductionImageIds.value.length) {
+    return;
+  }
+  const nextIds = [...introductionImageIds.value];
+  const [moved] = nextIds.splice(index, 1);
+  if (moved == null) {
+    return;
+  }
+  nextIds.splice(targetIndex, 0, moved);
+  introductionImageIds.value = nextIds;
+}
+
+function openImageMaterialLibrary() {
+  materialTab.value = 'images';
+  if (currentResource.value && imageLoadedResourceId.value !== currentResource.value.id) {
+    void loadResourceImages(currentResource.value);
+  }
+}
+
+function toggleIntroductionImagePicker() {
+  introductionImagePickerOpen.value = !introductionImagePickerOpen.value;
+}
+
+/** 销毁当前抽屉的排序实例，避免抽屉重开后留下重复的拖拽事件。 */
+function destroyIntroductionSortable() {
+  introductionSortableVersion += 1;
+  introductionSortableInstance?.destroy();
+  introductionSortableInstance = undefined;
+}
+
+/** 介绍素材只允许通过左侧拖拽手柄调整默认输出顺序。 */
+async function initializeIntroductionSortable() {
+  destroyIntroductionSortable();
+  await nextTick();
+  const container = introductionSortableContainerRef.value;
+  if (
+    !container
+    || !documentDrawerOpen.value
+    || materialTab.value !== 'introductions'
+    || introductions.value.length < 2
+  ) {
+    return;
+  }
+
+  const version = ++introductionSortableVersion;
+  const { initializeSortable } = useSortable(container, {
+    animation: 160,
+    draggable: '.resource-material-intro-row',
+    dragClass: 'resource-material-intro-sort-dragging',
+    ghostClass: 'resource-material-intro-sort-ghost',
+    handle: '.resource-material-intro-drag-handle',
+    chosenClass: 'resource-material-intro-sort-chosen',
+    onEnd: handleIntroductionSortableEnd,
+  });
+  const sortable = await initializeSortable();
+  if (
+    version !== introductionSortableVersion
+    || !documentDrawerOpen.value
+    || materialTab.value !== 'introductions'
+    || container !== introductionSortableContainerRef.value
+  ) {
+    sortable.destroy();
+    return;
+  }
+  introductionSortableInstance = sortable;
+}
+
+/** 乐观调整左侧列表，再整体提交资源默认介绍顺序；失败时以服务端顺序为准恢复。 */
+async function handleIntroductionSortableEnd(event: {
+  newIndex?: number;
+  oldIndex?: number;
+}) {
+  const { newIndex, oldIndex } = event;
+  const resource = currentResource.value;
+  if (
+    introductionReordering.value
+    || !resource
+    || newIndex === undefined
+    || oldIndex === undefined
+    || newIndex === oldIndex
+    || newIndex < 0
+    || oldIndex < 0
+  ) {
+    return;
+  }
+
+  const previousItems = [...introductions.value];
+  const nextItems = [...previousItems];
+  const [moved] = nextItems.splice(oldIndex, 1);
+  if (!moved) {
+    return;
+  }
+  nextItems.splice(newIndex, 0, moved);
+  introductions.value = nextItems;
+  introductionReordering.value = true;
+  introductionSortableInstance?.option('disabled', true);
+  try {
+    await reorderPurchaseResourceIntroductions(resource.id, {
+      introductionIds: nextItems.map((item) => item.id),
+    });
+    message.success('介绍素材顺序已保存');
+  } catch {
+    try {
+      if (currentResource.value?.id === resource.id) {
+        await loadResourceIntroductions(resource);
+      }
+      message.error('排序保存失败，已恢复服务端最新顺序');
+    } catch {
+      introductions.value = previousItems;
+      message.error('排序保存失败，暂时无法读取最新顺序，请刷新后重试');
+    }
+  } finally {
+    introductionReordering.value = false;
+    introductionSortableInstance?.option('disabled', false);
+  }
 }
 
 async function loadResourceIntroductions(record: ResourceRow) {
@@ -1762,6 +2233,9 @@ async function loadResourceIntroductions(record: ResourceRow) {
     throw error;
   } finally {
     introductionLoading.value = false;
+    if (documentDrawerOpen.value && materialTab.value === 'introductions') {
+      void initializeIntroductionSortable();
+    }
   }
 }
 
@@ -1820,6 +2294,9 @@ async function loadResourceImages(record: ResourceRow) {
 async function handleMaterialTabChange(key: string | number) {
   const tab = key as 'introductions' | 'images' | 'files';
   materialTab.value = tab;
+  if (tab !== 'introductions') {
+    destroyIntroductionSortable();
+  }
   const resource = currentResource.value;
   if (!resource) {
     return;
@@ -1837,6 +2314,9 @@ async function handleMaterialTabChange(key: string | number) {
   if (tab === 'files' && documentLoadedResourceId.value !== resource.id) {
     await loadResourceDocuments(resource);
   }
+  if (tab === 'introductions' && introductionLoadedResourceId.value === resource.id) {
+    void initializeIntroductionSortable();
+  }
 }
 
 function validateIntroductionForm() {
@@ -1848,16 +2328,74 @@ function validateIntroductionForm() {
     message.warning('请填写介绍正文');
     return false;
   }
+  if (introductionForm.isOptionalItem && !introductionForm.resourceOptionalItemId) {
+    message.warning('自费项目介绍必须关联一个自费项目');
+    return false;
+  }
+  const blocks = introductionForm.extensionBlocks || [];
+  if (blocks.some((block) => !block.title.trim() || !block.content?.trim())) {
+    message.warning('扩展内容模块请填写标题和至少一条内容');
+    return false;
+  }
   return true;
+}
+
+/** 游览时间统一只保存分钟数字，输入时过滤掉文字和单位。 */
+function handleVisitDurationInput(value: unknown) {
+  const raw = typeof value === 'string'
+    ? value
+    : String((value as { target?: { value?: unknown } } | undefined)?.target?.value ?? '');
+  introductionForm.visitDuration = raw.replace(/\D/g, '');
+}
+
+function addIntroductionExtensionBlock() {
+  const blocks = introductionForm.extensionBlocks || (introductionForm.extensionBlocks = []);
+  if (blocks.length >= 10) {
+    message.warning('一份介绍素材最多10个扩展内容模块');
+    return;
+  }
+  blocks.push({
+    content: '',
+    contentMode: 'multiline',
+    items: [],
+    title: '',
+    titleColor: '#000000',
+    type: 'generic',
+  });
+}
+
+function removeIntroductionExtensionBlock(index: number) {
+  introductionForm.extensionBlocks?.splice(index, 1);
+}
+
+function moveIntroductionExtensionBlock(index: number, direction: -1 | 1) {
+  const blocks = introductionForm.extensionBlocks || [];
+  const target = index + direction;
+  if (target < 0 || target >= blocks.length) return;
+  [blocks[index], blocks[target]] = [blocks[target]!, blocks[index]!];
 }
 
 function introductionPayload(): PurchaseResourceApi.ResourceIntroductionSaveParams {
   return {
     content: introductionForm.content.trim(),
-    // 传空字符串才能让用户在编辑时清空已保存的注意事项。
+    extensionBlocks: (introductionForm.extensionBlocks || []).map((block) => ({
+      content: block.content?.trim(),
+      contentMode: 'multiline',
+      items: [],
+      title: block.title.trim(),
+      titleColor: block.titleColor,
+      type: 'generic',
+    })),
+    isOptionalItem: Boolean(introductionForm.isOptionalItem),
+    // 传空字符串才能让用户在编辑时清空已保存的温馨提示、注意事项和游览时间。
     noticeContent: (introductionForm.noticeContent || '').trim(),
+    resourceOptionalItemId: introductionForm.isOptionalItem
+      ? introductionForm.resourceOptionalItemId
+      : undefined,
     tags: introductionForm.tags?.map((tag) => tag.trim()).filter(Boolean),
     title: introductionForm.title.trim(),
+    visitDuration: (introductionForm.visitDuration || '').trim(),
+    warmTipContent: (introductionForm.warmTipContent || '').trim(),
   };
 }
 
@@ -1865,19 +2403,30 @@ async function saveIntroduction(showMessage = true) {
   if (!currentResource.value || !validateIntroductionForm()) {
     return undefined;
   }
+  const resourceId = currentResource.value.id;
+  if (
+    activeIntroductionId.value
+    && introductionImageLoadedIntroductionId.value !== activeIntroductionId.value
+  ) {
+    await loadIntroductionImageIds(resourceId, activeIntroductionId.value);
+  }
   introductionSaving.value = true;
   try {
     const item = activeIntroductionId.value
       ? await updatePurchaseResourceIntroduction(
-          currentResource.value.id,
+          resourceId,
           activeIntroductionId.value,
           introductionPayload(),
         )
       : await createPurchaseResourceIntroduction(
-          currentResource.value.id,
+          resourceId,
           introductionPayload(),
         );
+    await savePurchaseResourceIntroductionImages(resourceId, item.id, {
+      imageIds: [...introductionImageIds.value],
+    });
     activeIntroductionId.value = item.id;
+    introductionImageLoadedIntroductionId.value = item.id;
     await loadResourceIntroductions(currentResource.value);
     selectIntroduction(introductions.value.find((value) => value.id === item.id));
     if (showMessage) {
@@ -1893,20 +2442,44 @@ function startNewIntroduction() {
   selectIntroduction();
 }
 
+/** 发布接口先返回，向量切片在后台完成后再刷新一次，避免页面一直显示旧的待处理状态。 */
+async function refreshIntroductionIndexStatus(resourceId: number, introductionId: number) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 800));
+    if (currentResource.value?.id !== resourceId) {
+      return;
+    }
+    try {
+      await loadResourceIntroductions(currentResource.value);
+      const refreshed = introductions.value.find((item) => item.id === introductionId);
+      if (refreshed) {
+        selectIntroduction(refreshed);
+      }
+      if (refreshed?.indexStatus !== 'pending') {
+        return;
+      }
+    } catch {
+      return;
+    }
+  }
+}
+
 async function handlePublishIntroduction() {
   if (!currentResource.value) {
     return;
   }
+  const resourceId = currentResource.value.id;
   introductionPublishing.value = true;
   try {
     const saved = await saveIntroduction(false);
     if (!saved) {
       return;
     }
-    await publishPurchaseResourceIntroduction(currentResource.value.id, saved.id);
+    await publishPurchaseResourceIntroduction(resourceId, saved.id);
     message.success('介绍已发布，正在写入产品文案资料库');
     await loadResourceIntroductions(currentResource.value);
     selectIntroduction(introductions.value.find((item) => item.id === saved.id));
+    void refreshIntroductionIndexStatus(resourceId, saved.id);
   } finally {
     introductionPublishing.value = false;
   }
@@ -1965,6 +2538,35 @@ const beforeUploadImage: UploadProps['beforeUpload'] = async (file) => {
     await uploadPurchaseResourceImages(currentResource.value.id, [file as File]);
     message.success('图片素材已上传');
     await loadResourceImages(currentResource.value);
+  } finally {
+    uploadingImages.value = false;
+  }
+  return false;
+};
+
+/** 在介绍编辑区上传的新图片先进入资源图片素材库，再自动勾选到当前介绍。 */
+const beforeUploadIntroductionImage: UploadProps['beforeUpload'] = async (file) => {
+  if (!currentResource.value) {
+    message.warning('请先选择资源');
+    return false;
+  }
+  const isImage = /\.(jpe?g|png|webp)$/i.test(file.name);
+  if (!isImage) {
+    message.warning('仅支持 JPG、PNG、WEBP 图片');
+    return false;
+  }
+  if (file.size > 20 * 1024 * 1024) {
+    message.warning('单张图片不能超过 20MB');
+    return false;
+  }
+  uploadingImages.value = true;
+  try {
+    const uploaded = await uploadPurchaseResourceImages(currentResource.value.id, [file as File]);
+    introductionImageIds.value = [
+      ...new Set([...introductionImageIds.value, ...uploaded.map((item) => item.id)]),
+    ];
+    await loadResourceImages(currentResource.value);
+    message.success('图片已上传到素材库，并选入当前介绍');
   } finally {
     uploadingImages.value = false;
   }
@@ -2179,6 +2781,26 @@ watch(
   },
 );
 
+watch(documentDrawerOpen, (open) => {
+  if (!open) {
+    destroyIntroductionSortable();
+    return;
+  }
+  if (materialTab.value === 'introductions' && introductions.value.length > 1) {
+    void initializeIntroductionSortable();
+  }
+});
+
+watch(materialTab, (tab) => {
+  if (tab !== 'introductions') {
+    destroyIntroductionSortable();
+    return;
+  }
+  if (documentDrawerOpen.value && introductions.value.length > 1) {
+    void initializeIntroductionSortable();
+  }
+});
+
 watch(
   () => [route.query.resourceId, route.query.relationId, route.query.editPrice],
   async (nextRoute, previousRoute) => {
@@ -2192,6 +2814,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  destroyIntroductionSortable();
   clearScenicMapSearchTimer();
   clearScenicMapAutoLocateTimer();
   destroyScenicMap();
@@ -2202,7 +2825,7 @@ onBeforeUnmount(() => {
 });
 
 onMounted(async () => {
-  await loadData();
+  await Promise.all([loadData(), loadReceptionStandards()]);
   await openBindingsFromRoute();
 });
 </script>
@@ -2231,13 +2854,14 @@ onMounted(async () => {
           />
         </Form.Item>
         <Form.Item label="所在地">
-          <Cascader
-            v-model:value="queryRegionPath"
+          <AutoComplete
+            v-model:value="queryLocationKeyword"
             allow-clear
-            change-on-select
-            :options="regionOptions"
-            placeholder="可选择省 / 市 / 区县"
-            show-search
+            :filter-option="false"
+            :options="queryLocationOptions"
+            placeholder="输入省 / 市 / 区县搜索"
+            @press-enter="applyQueryLocationKeyword"
+            @select="selectQueryLocation"
           />
         </Form.Item>
         <Form.Item label="资源名称">
@@ -2433,12 +3057,19 @@ onMounted(async () => {
             <Select
               v-model:value="formState.procurementMode"
               :options="procurementModeOptions"
-              @change="handleProcurementModeChange"
             />
+          </Form.Item>
+          <Form.Item v-if="!editingId" label="供应商">
+            <Checkbox v-model:checked="formState.autoCreateSupplier">
+              同时生成默认供应商
+            </Checkbox>
+            <div class="muted">
+              供应商名称默认使用资源名称，暂不生成报价，保存后可继续补充成本价。
+            </div>
           </Form.Item>
         </div>
         <div v-if="supportsStarLevel(formState.resourceType) || supportsCategoryTags(formState.resourceType)" class="modal-grid">
-          <Form.Item v-if="supportsStarLevel(formState.resourceType)" label="星级">
+          <Form.Item v-if="supportsStarLevel(formState.resourceType)" label="星级/接待标准">
             <Select v-model:value="formState.starLevel" :options="starLevelOptions" />
           </Form.Item>
           <Form.Item v-if="supportsCategoryTags(formState.resourceType)" label="分类">
@@ -2654,11 +3285,6 @@ onMounted(async () => {
         <Form.Item label="备注">
           <Textarea v-model:value="formState.remark" :rows="2" />
         </Form.Item>
-        <Form.Item v-if="!editingId && formState.procurementMode !== 'not_required'">
-          <Checkbox v-model:checked="formState.autoCreateSupplier">
-            自动创建同名供应商并建立对应关系
-          </Checkbox>
-        </Form.Item>
       </Form>
     </Modal>
 
@@ -2694,8 +3320,17 @@ onMounted(async () => {
                 show-search
                 :filter-option="true"
                 :options="supplierOptions"
-                placeholder="选择供应商"
-              />
+                placeholder="直接输入供应商名称搜索"
+                @search="(value) => supplierSearchKeyword = value"
+                @keyup.enter="selectSupplierFromTypedName"
+              >
+                <template #notFoundContent>
+                  <span class="muted">没有匹配的已有供应商</span>
+                </template>
+              </Select>
+              <div class="supplier-manual-entry">
+                输入名称即可筛选；名称完全匹配或仅一条结果时，按 Enter 可直接选中。
+              </div>
             </Form.Item>
             <Form.Item label="默认供应商">
               <Checkbox v-model:checked="bindForm.isDefault">
@@ -2785,8 +3420,7 @@ onMounted(async () => {
           </Form.Item>
           <Form.Item
             v-if="scenicSupplierForm.priceMode === 'unified'"
-            label="统一报价"
-            required
+            label="门票统一报价（无门票可留空）"
           >
             <InputNumber
               v-model:value="scenicSupplierForm.unifiedPrice"
@@ -2815,6 +3449,80 @@ onMounted(async () => {
             </Form.Item>
             <div v-if="resourcePriceProjects.length === 0" class="drawer-card-hint">
               当前资源类型还没有报价项目，请先到费用项目中维护。
+            </div>
+          </div>
+          <div v-if="currentResource?.resourceType === 'scenic'" class="drawer-card-hint ticket-price-optional-hint">
+            仅有自费项目、不含门票的景区：门票报价可留空，但至少要维护一条自费项目报价。
+          </div>
+          <div
+            v-if="currentResource?.resourceType === 'scenic'"
+            class="optional-items-section"
+          >
+            <div class="optional-items-header">
+              <div>
+                <div class="section-title">自费项目报价</div>
+                <div class="drawer-card-hint">
+                  成本价仅供内部核算；建议对外价会作为产品设计的默认值，最终 Word 价格以具体产品为准，计价单位固定为元/人。
+                </div>
+              </div>
+              <Button type="dashed" @click="addOptionalItem">新增报价</Button>
+            </div>
+            <div
+              v-if="scenicSupplierForm.optionalItems?.length"
+              class="optional-item-list"
+            >
+              <div class="optional-item-row optional-item-row-header">
+                <span>项目名称</span>
+                <span>供应商成本价</span>
+                <span>建议对外自费价</span>
+                <span>价格说明</span>
+                <span>状态</span>
+                <span>操作</span>
+              </div>
+              <div
+                v-for="(item, index) in scenicSupplierForm.optionalItems"
+                :key="`optional-item-${index}`"
+                class="optional-item-row"
+              >
+                <Input
+                  v-model:value="item.projectName"
+                  :maxlength="200"
+                  placeholder="直接填写，例如：景区电瓶车"
+                />
+                <InputNumber
+                  v-model:value="item.costPrice"
+                  :addon-after="'元/人'"
+                  class="full-width"
+                  :min="0"
+                  :precision="2"
+                />
+                <InputNumber
+                  v-model:value="item.suggestedSalePrice"
+                  :addon-after="'元/人'"
+                  class="full-width"
+                  :min="0"
+                  :precision="2"
+                  placeholder="产品默认价"
+                />
+                <Input
+                  v-model:value="item.priceDescription"
+                  allow-clear
+                  placeholder="可选，例如：自愿参加"
+                />
+                <Select
+                  v-model:value="item.status"
+                  :options="[
+                    { label: '启用', value: 'active' },
+                    { label: '停用', value: 'disabled' },
+                  ]"
+                />
+                <Button type="link" danger @click="removeOptionalItem(index)">
+                  删除
+                </Button>
+              </div>
+            </div>
+            <div v-else class="drawer-card-hint optional-items-empty">
+              暂未维护自费项目报价。点击“新增报价”后，直接填写项目名称并录入价格。
             </div>
           </div>
           <Form.Item label="报价备注">
@@ -2872,7 +3580,29 @@ onMounted(async () => {
             </Tag>
           </template>
         </Table.Column>
-        <Table.Column title="操作" key="action" width="160">
+        <Table.Column
+          v-if="currentResource?.resourceType === 'scenic'"
+          title="自费项目"
+          key="optionalItems"
+          width="240"
+        >
+          <template #default="{ record }">
+            <Space v-if="record.optionalItems?.length" size="small" wrap>
+              <Tag
+                v-for="item in record.optionalItems"
+                :key="item.id || item.projectName"
+                color="orange"
+              >
+                {{ item.projectName }} 成本 {{ item.costPrice }}元/人
+                <template v-if="item.suggestedSalePrice !== undefined">
+                  · 建议 {{ item.suggestedSalePrice }}元/人
+                </template>
+              </Tag>
+            </Space>
+            <span v-else class="muted">-</span>
+          </template>
+        </Table.Column>
+        <Table.Column title="操作" key="action" width="220">
           <template #default="{ record }">
             <Space size="small">
               <Button type="link" size="small" @click="editBoundSupplier(record)">
@@ -2885,6 +3615,9 @@ onMounted(async () => {
                 @click="openTemplateDrawer(record)"
               >
                 模板配置
+              </Button>
+              <Button danger type="link" size="small" @click="confirmUnbindSupplier(record)">
+                解除绑定
               </Button>
             </Space>
           </template>
@@ -3043,20 +3776,56 @@ onMounted(async () => {
                     </Button>
                   </Space>
                 </div>
-                <div v-if="introductions.length" class="resource-material-intro-items">
-                  <button
+                <div class="resource-material-intro-order-hint" role="note">
+                  <IconifyIcon aria-hidden="true" icon="lucide:grip-vertical" />
+                  <span>按住左侧图标拖拽排序</span>
+                </div>
+                <div
+                  v-if="introductions.length"
+                  ref="introductionSortableContainerRef"
+                  class="resource-material-intro-items"
+                  :class="{ 'is-reordering': introductionReordering }"
+                  :aria-busy="introductionReordering"
+                  role="list"
+                >
+                  <div
                     v-for="item in introductions"
                     :key="item.id"
-                    class="resource-material-intro-item"
-                    :class="{ active: item.id === activeIntroductionId }"
-                    type="button"
-                    @click="selectIntroduction(item)"
+                    class="resource-material-intro-row"
+                    role="listitem"
                   >
-                    <span class="resource-material-intro-title">{{ item.title }}</span>
-                    <Tag :color="reviewStatusColor(item.status)">
-                      {{ reviewStatusLabel(item.status) }}
-                    </Tag>
-                  </button>
+                    <span
+                      class="resource-material-intro-drag-handle"
+                      :aria-label="`拖动「${item.title}」调整介绍顺序`"
+                      role="img"
+                      :title="`拖动「${item.title}」调整介绍顺序`"
+                    >
+                      <IconifyIcon aria-hidden="true" icon="lucide:grip-vertical" />
+                    </span>
+                    <button
+                      class="resource-material-intro-item"
+                      :class="{ active: item.id === activeIntroductionId }"
+                      :aria-current="item.id === activeIntroductionId ? 'true' : undefined"
+                      type="button"
+                      @click="selectIntroduction(item)"
+                    >
+                      <span class="resource-material-intro-title" :title="item.title">
+                        {{ item.title }}
+                      </span>
+                      <span class="resource-material-intro-item-tags">
+                        <Tag
+                          v-if="item.isOptionalItem"
+                          color="orange"
+                          :title="item.resourceOptionalItemName ? `自费项目：${item.resourceOptionalItemName}` : '自费项目'"
+                        >
+                          自费
+                        </Tag>
+                        <Tag :color="reviewStatusColor(item.status)">
+                          {{ reviewStatusLabel(item.status) }}
+                        </Tag>
+                      </span>
+                    </button>
+                  </div>
                 </div>
                 <div v-else class="muted resource-material-empty">
                   还没有介绍素材，可新增不同用途的介绍版本。
@@ -3073,6 +3842,34 @@ onMounted(async () => {
                       show-count
                     />
                   </Form.Item>
+                  <Form.Item label="素材类型">
+                    <Radio.Group
+                      v-model:value="introductionForm.isOptionalItem"
+                      @change="handleIntroductionTypeChange(Boolean(introductionForm.isOptionalItem))"
+                    >
+                      <Radio :value="false">常规介绍</Radio>
+                      <Radio
+                        :disabled="currentResource?.resourceType !== 'scenic'"
+                        :value="true"
+                      >
+                        自费项目介绍
+                      </Radio>
+                    </Radio.Group>
+                  </Form.Item>
+                  <Form.Item
+                    v-if="introductionForm.isOptionalItem"
+                    label="关联自费项目"
+                    required
+                    extra="素材只维护介绍内容，不展示或写入供应商成本。"
+                  >
+                    <Select
+                      v-model:value="introductionForm.resourceOptionalItemId"
+                      :loading="optionalItemMasterLoading"
+                      :options="resourceOptionalItemOptions"
+                      placeholder="请选择当前资源的自费项目"
+                      show-search
+                    />
+                  </Form.Item>
                   <Form.Item label="适用标签">
                     <Select
                       v-model:value="introductionForm.tags"
@@ -3080,6 +3877,142 @@ onMounted(async () => {
                       :max-tag-count="4"
                       placeholder="例如：亲子、深度游、秋季"
                       :token-separators="[',', '，']"
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    label="当前景点图片（选填）"
+                    extra="只显示当前介绍素材已选图片；不同景点的图片分别维护，下方排序即产品 Word 的输出顺序。"
+                  >
+                    <Spin :spinning="introductionImageSelectionLoading">
+                      <div class="resource-material-intro-image-toolbar">
+                        <span>已选 {{ introductionImageIds.length }} 张</span>
+                        <Space size="small" wrap>
+                          <Button size="small" @click="toggleIntroductionImagePicker">
+                            {{ introductionImagePickerOpen ? '收起图库' : '从图库添加' }}
+                          </Button>
+                          <Button size="small" @click="openImageMaterialLibrary">
+                            管理资源图库
+                          </Button>
+                          <Upload
+                            multiple
+                            :before-upload="beforeUploadIntroductionImage"
+                            :show-upload-list="false"
+                          >
+                            <Button size="small" :loading="uploadingImages">
+                              上传并选用
+                            </Button>
+                          </Upload>
+                        </Space>
+                      </div>
+                      <div
+                        v-if="selectedIntroductionImages.length"
+                        class="resource-material-intro-selected-images"
+                      >
+                        <div class="resource-material-intro-image-options">
+                          <div
+                            v-for="(image, index) in selectedIntroductionImages"
+                            :key="image.id"
+                            class="resource-material-intro-image-option selected"
+                          >
+                            <button
+                              class="resource-material-intro-image-preview"
+                              type="button"
+                              @click="previewResourceImage(image)"
+                            >
+                              <img
+                                v-if="imagePreviewUrls[image.id]"
+                                :src="imagePreviewUrls[image.id]"
+                                :alt="image.originalFilename"
+                              />
+                              <span v-else class="resource-material-intro-image-placeholder">暂无预览</span>
+                            </button>
+                            <div class="resource-material-intro-image-label" :title="image.originalFilename">
+                              {{ image.originalFilename }}
+                            </div>
+                            <div class="resource-material-intro-image-order">
+                              <span>第 {{ index + 1 }} 张</span>
+                              <Space :size="0">
+                                <Button
+                                  size="small"
+                                  type="link"
+                                  :disabled="index === 0"
+                                  @click="moveIntroductionImage(index, -1)"
+                                >
+                                  上移
+                                </Button>
+                                <Button
+                                  size="small"
+                                  type="link"
+                                  :disabled="index === selectedIntroductionImages.length - 1"
+                                  @click="moveIntroductionImage(index, 1)"
+                                >
+                                  下移
+                                </Button>
+                                <Button
+                                  danger
+                                  size="small"
+                                  type="link"
+                                  @click="toggleIntroductionImage(image.id, false)"
+                                >
+                                  移除
+                                </Button>
+                              </Space>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div v-else class="resource-material-intro-image-empty">
+                        当前景点还没有图片。可直接“上传并选用”，或从资源图库选择对应景点图片。
+                      </div>
+                      <div v-if="introductionImagePickerOpen" class="resource-material-intro-image-picker">
+                        <div class="resource-material-intro-image-picker-head">
+                          <span>从「{{ currentResource?.resourceName || '当前资源' }}」图片库添加</span>
+                          <span>图片库只是存放原图；勾选后才归属当前景点</span>
+                        </div>
+                        <div v-if="images.length" class="resource-material-intro-image-options">
+                          <div
+                            v-for="image in images"
+                            :key="image.id"
+                            class="resource-material-intro-image-option"
+                            :class="{ selected: introductionImageIds.includes(image.id) }"
+                          >
+                            <Checkbox
+                              :checked="introductionImageIds.includes(image.id)"
+                              @change="toggleIntroductionImage(image.id, $event.target.checked)"
+                            />
+                            <button
+                              class="resource-material-intro-image-preview"
+                              type="button"
+                              @click="previewResourceImage(image)"
+                            >
+                              <img
+                                v-if="imagePreviewUrls[image.id]"
+                                :src="imagePreviewUrls[image.id]"
+                                :alt="image.originalFilename"
+                              />
+                              <span v-else class="resource-material-intro-image-placeholder">暂无预览</span>
+                            </button>
+                            <div class="resource-material-intro-image-label" :title="image.originalFilename">
+                              {{ image.originalFilename }}
+                            </div>
+                          </div>
+                        </div>
+                        <div v-else class="resource-material-intro-image-empty">
+                          资源图库暂时没有图片，可直接上传当前景点图片。
+                        </div>
+                      </div>
+                    </Spin>
+                  </Form.Item>
+                  <Form.Item label="游览时间（分钟）" extra="只填写分钟数字；产品预览会自动转换为“游览约 X 分钟/小时”。">
+                    <Input
+                      v-model:value="introductionForm.visitDuration"
+                      :maxlength="6"
+                      inputmode="numeric"
+                      pattern="[0-9]*"
+                      addon-after="分钟"
+                      placeholder="例如：120"
+                      @input="handleVisitDurationInput"
+                      show-count
                     />
                   </Form.Item>
                   <Form.Item label="介绍正文" required>
@@ -3092,6 +4025,20 @@ onMounted(async () => {
                     />
                   </Form.Item>
                   <Form.Item
+                    class="resource-material-intro-form-item resource-material-intro-warm-tip-item"
+                    label="温馨提示（选填）"
+                    extra="内容在产品预览中固定显示为蓝色；可直接输入多行并按换行保存。"
+                  >
+                    <Textarea
+                      v-model:value="introductionForm.warmTipContent"
+                      :auto-size="{ minRows: 4, maxRows: 10 }"
+                      :maxlength="5000"
+                      placeholder="可直接输入完整温馨提示；换行、①②或1、2等格式按原样保留"
+                      show-count
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    class="resource-material-intro-form-item resource-material-intro-notice-item"
                     label="注意事项（选填）"
                     extra="一行一条，生成产品资料时会以红色强调。"
                   >
@@ -3102,15 +4049,53 @@ onMounted(async () => {
                       placeholder="例如：\n请提前预约\n雨天请备雨具"
                       show-count
                     />
+                    <div
+                      v-if="introductionForm.noticeContent?.trim()"
+                      class="resource-material-intro-notice-preview"
+                      role="note"
+                    >
+                      <div class="resource-material-intro-notice-preview-title">注意事项预览</div>
+                      <div class="resource-material-intro-notice-preview-content">{{ introductionForm.noticeContent }}</div>
+                    </div>
                   </Form.Item>
-                  <div
-                    v-if="introductionForm.noticeContent?.trim()"
-                    class="resource-material-intro-notice-preview"
-                    role="note"
+                  <Form.Item
+                    class="resource-material-intro-form-item resource-material-intro-extension-item"
+                    label="扩展内容模块（选填）"
+                    extra="用于产品介绍正文后的固定样式内容；内容统一使用文本框，可上下调整模块顺序。"
                   >
-                    <strong>注意事项预览</strong>
-                    <div>{{ introductionForm.noticeContent }}</div>
-                  </div>
+                    <div class="introduction-extension-toolbar">
+                      <Button size="small" @click="addIntroductionExtensionBlock">+ 新增扩展模块</Button>
+                    </div>
+                    <div v-if="introductionForm.extensionBlocks?.length" class="introduction-extension-blocks">
+                      <section
+                        v-for="(block, blockIndex) in introductionForm.extensionBlocks"
+                        :key="`${block.type}-${blockIndex}`"
+                        class="introduction-extension-block"
+                      >
+                        <div class="introduction-extension-block-head introduction-extension-block-main">
+                          <span class="introduction-extension-title-label">模块标题</span>
+                          <Input v-model:value="block.title" :maxlength="100" class="introduction-extension-title" placeholder="自定义标题，例如：拍照机位推荐：" />
+                          <label class="introduction-extension-color" title="选择标题颜色">
+                            <span>颜色</span>
+                            <input v-model="block.titleColor" type="color" />
+                          </label>
+                          <Space class="introduction-extension-actions" size="small">
+                            <Button size="small" type="text" :disabled="blockIndex === 0" @click="moveIntroductionExtensionBlock(blockIndex, -1)"><IconifyIcon icon="lucide:chevron-up" /></Button>
+                            <Button size="small" type="text" :disabled="blockIndex === (introductionForm.extensionBlocks?.length || 0) - 1" @click="moveIntroductionExtensionBlock(blockIndex, 1)"><IconifyIcon icon="lucide:chevron-down" /></Button>
+                            <Button danger size="small" type="text" @click="removeIntroductionExtensionBlock(blockIndex)">删除模块</Button>
+                          </Space>
+                        </div>
+                        <Textarea
+                          v-model:value="block.content"
+                          :auto-size="{ minRows: 4, maxRows: 10 }"
+                          :maxlength="20000"
+                          placeholder="按需要输入多行内容；序号和换行由你自己填写"
+                          show-count
+                        />
+                      </section>
+                    </div>
+                    <div v-else class="muted introduction-extension-empty">可按需新增扩展内容；标题颜色和模块顺序可调整，正文在文本框中自行换行。</div>
+                  </Form.Item>
                   <div class="resource-material-intro-footer">
                     <Space>
                       <Button :loading="introductionSaving" @click="() => saveIntroduction()">
@@ -3150,11 +4135,11 @@ onMounted(async () => {
         <Tabs.TabPane
           key="images"
           :disabled="materialServiceUnavailable"
-          :tab="`图片素材 (${images.length})`"
+          :tab="`资源图片库 (${images.length})`"
         >
           <Spin :spinning="imageLoading">
             <div class="resource-material-section-header">
-              <span class="muted">产品配图不进入知识库向量，封面可用于产品和确认单展示。</span>
+              <span class="muted">这里存放当前资源的原始图片；每个介绍素材选择自己的图片，不会自动共用。</span>
               <Upload multiple :before-upload="beforeUploadImage" :show-upload-list="false">
                 <Button type="primary" :loading="uploadingImages">上传图片</Button>
               </Upload>
@@ -3448,9 +4433,74 @@ onMounted(async () => {
   line-height: 1.6;
 }
 
+.supplier-manual-entry {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 24px;
+  margin-top: 5px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.supplier-manual-entry :deep(.ant-btn) {
+  padding-inline: 4px;
+}
+
 .scenic-supplier-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: end;
+}
+
+.optional-items-section {
+  padding: 14px 0 4px;
+  margin-top: 4px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.optional-items-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.optional-item-list {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+}
+
+.optional-item-row {
+  display: grid;
+  grid-template-columns: minmax(210px, 1.3fr) minmax(140px, 0.9fr) minmax(150px, 1fr) minmax(160px, 1.2fr) 96px 48px;
+  align-items: center;
+  gap: 8px;
+}
+
+.resource-material-optional-item-select {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.resource-material-optional-item-select :deep(.ant-select) {
+  flex: 1;
+  min-width: 0;
+}
+
+.optional-item-row-header {
+  padding: 0 8px 2px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.optional-items-empty {
+  padding: 8px 0 2px;
+  margin-bottom: 0;
 }
 
 .template-grid {
@@ -3538,29 +4588,81 @@ onMounted(async () => {
 
 .resource-material-intro-layout {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 272px minmax(0, 1fr);
   gap: 20px;
   min-height: 470px;
 }
 
 .resource-material-intro-list {
-  padding-right: 16px;
+  padding-right: 20px;
   border-right: 1px solid #f0f0f0;
 }
 
 .resource-material-intro-items {
   display: grid;
-  gap: 6px;
-  margin-top: 12px;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.resource-material-intro-order-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 0 2px;
+  color: #595959;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.resource-material-intro-order-hint :deep(svg) {
+  flex: 0 0 auto;
+}
+
+.resource-material-intro-row {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.resource-material-intro-drag-handle {
+  display: inline-flex;
+  flex: 0 0 32px;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  margin-right: 6px;
+  color: #8c8c8c;
+  cursor: grab;
+  background: #fafafa;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  transition:
+    color 0.18s ease,
+    background-color 0.18s ease;
+  touch-action: none;
+  user-select: none;
+}
+
+.resource-material-intro-drag-handle:hover {
+  color: #1677ff;
+  background: #f0f5ff;
+}
+
+.resource-material-intro-drag-handle:active,
+.resource-material-intro-sort-chosen .resource-material-intro-drag-handle {
+  cursor: grabbing;
 }
 
 .resource-material-intro-item {
   display: flex;
+  flex: 1;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
   width: 100%;
-  min-height: 38px;
-  padding: 6px 8px;
+  min-height: 40px;
+  padding: 4px 8px;
   color: #262626;
   text-align: left;
   cursor: pointer;
@@ -3575,34 +4677,285 @@ onMounted(async () => {
   border-color: #d6e4ff;
 }
 
+.resource-material-intro-sort-ghost {
+  opacity: 0.45;
+}
+
+.resource-material-intro-sort-dragging .resource-material-intro-item {
+  background: #f5f9ff;
+  border-color: #91caff;
+}
+
+.resource-material-intro-items.is-reordering .resource-material-intro-drag-handle {
+  cursor: wait;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 .resource-material-intro-title,
 .resource-material-image-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .resource-material-intro-title {
-  padding-right: 6px;
+  flex: 1;
+  width: auto;
+  padding-right: 0;
+  font-weight: 400;
+}
+
+.resource-material-intro-item-tags {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+}
+
+.resource-material-intro-item-tags :deep(.ant-tag) {
+  margin-inline-end: 0;
 }
 
 .resource-material-intro-editor {
   min-width: 0;
 }
 
-.resource-material-intro-notice-preview {
-  padding: 8px 12px;
-  margin: -4px 0 16px;
-  color: #cf1322;
-  line-height: 1.7;
-  white-space: pre-line;
-  background: #fff2f0;
-  border-left: 3px solid #ff4d4f;
+.resource-material-intro-image-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: #595959;
 }
 
-.resource-material-intro-notice-preview strong {
+.resource-material-intro-image-picker {
+  margin-top: 12px;
+  padding: 12px;
+  background: #fafcff;
+  border: 1px solid #e6f0ff;
+  border-radius: 6px;
+}
+
+.resource-material-intro-selected-images {
+  padding: 12px;
+  background: #fafcff;
+  border: 1px solid #e6f0ff;
+  border-radius: 6px;
+}
+
+.resource-material-intro-image-picker-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: #595959;
+  font-size: 12px;
+}
+
+.resource-material-intro-image-picker-head span:first-child {
+  color: #262626;
+  font-size: 13px;
+}
+
+.resource-material-intro-image-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.resource-material-intro-image-option {
+  position: relative;
+  min-width: 0;
+  padding: 7px;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 4px;
+}
+
+.resource-material-intro-image-option.selected {
+  background: #f5f9ff;
+  border-color: #91caff;
+}
+
+.resource-material-intro-image-option > .ant-checkbox-wrapper {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 2px;
+  background: rgb(255 255 255 / 88%);
+  border-radius: 2px;
+}
+
+.resource-material-intro-image-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  padding: 0;
+  overflow: hidden;
+  cursor: zoom-in;
+  background: #fafafa;
+  border: 0;
+  border-radius: 3px;
+}
+
+.resource-material-intro-image-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.resource-material-intro-image-placeholder {
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.resource-material-intro-image-label {
+  margin-top: 6px;
+  overflow: hidden;
+  color: #434343;
+  font-size: 12px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resource-material-intro-image-order {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  margin-top: 2px;
+  color: #1677ff;
+  font-size: 12px;
+}
+
+.resource-material-intro-image-empty {
+  padding: 12px;
+  color: #8c8c8c;
+  line-height: 1.6;
+  background: #fafafa;
+  border: 1px dashed #d9d9d9;
+  border-radius: 4px;
+}
+
+.resource-material-intro-notice-preview {
+  padding: 8px 0 0;
+  margin-top: 10px;
+  color: #b42318;
+  line-height: 1.65;
+  white-space: pre-line;
+  border-top: 1px solid #f0f0f0;
+}
+
+.resource-material-intro-form-item {
+  margin-bottom: 24px;
+}
+
+.resource-material-intro-form-item :deep(.ant-form-item-extra) {
+  margin-top: 7px;
+  color: #8c8c8c;
+  line-height: 1.5;
+}
+
+.introduction-extension-toolbar,
+.introduction-extension-block-head,
+.introduction-extension-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.introduction-extension-toolbar {
+  justify-content: flex-end;
+  min-height: 32px;
+  margin-bottom: 10px;
+}
+
+.introduction-extension-blocks {
+  display: grid;
+  gap: 12px;
+}
+
+.introduction-extension-block {
+  padding: 12px 0 0;
+  border-top: 1px solid #f0f0f0;
+}
+
+.introduction-extension-block-main {
+  flex-wrap: wrap;
+  min-height: 32px;
+}
+
+.introduction-extension-title-label {
+  flex: 0 0 auto;
+  color: #595959;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.introduction-extension-title {
+  flex: 1 1 240px;
+  min-width: 180px;
+}
+
+.introduction-extension-color {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  color: #64748b;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.introduction-extension-color input {
+  width: 28px;
+  height: 28px;
+  padding: 1px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+}
+
+.introduction-extension-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.introduction-extension-block > :deep(.ant-input) {
+  margin-top: 10px;
+}
+
+.introduction-extension-items { display: grid; gap: 7px; margin: 10px 0; }
+.introduction-extension-item { align-items: flex-start; }
+.introduction-extension-item :deep(.ant-input) { flex: 1; }
+.introduction-extension-empty {
+  padding: 10px 12px;
+  color: #8c8c8c;
+  background: #fafafa;
+  border: 1px dashed #d9d9d9;
+  border-radius: 6px;
+}
+
+.resource-material-intro-notice-preview-title {
   display: block;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.resource-material-intro-notice-preview-content {
+  white-space: pre-line;
 }
 
 .resource-material-intro-footer {
@@ -3669,9 +5022,14 @@ onMounted(async () => {
   .coordinate-grid,
   .scenic-supplier-grid,
   .scenic-supplier-price-grid,
+  .optional-item-row,
   .template-grid,
   .scenic-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .optional-item-row-header {
+    display: none;
   }
 
   .scenic-map-shell {
@@ -3691,6 +5049,16 @@ onMounted(async () => {
 
   .resource-material-image-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .resource-material-intro-image-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .resource-material-intro-image-picker-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
   }
 
   .resource-material-intro-footer {

@@ -72,6 +72,7 @@ export namespace PurchaseResourceApi {
     priceMode?: 'classified' | 'unified';
     unifiedPrice?: number;
     priceLines?: ResourceSupplierPriceLine[];
+    optionalItems?: ResourceSupplierOptionalItemResponse[];
     priceRemark?: string;
   }
 
@@ -97,6 +98,7 @@ export namespace PurchaseResourceApi {
 
   export interface SaveParams {
     address?: string;
+    /** 新增资源时是否同时生成一个同名、无报价的默认供应商。 */
     autoCreateSupplier?: boolean;
     businessStatus?: BusinessStatus;
     city?: string;
@@ -150,6 +152,9 @@ export namespace PurchaseResourceApi {
 
   export interface AmapRegeoResult {
     address?: string;
+    province?: string;
+    city?: string;
+    district?: string;
   }
 
   export interface ResourceDocumentItem {
@@ -178,28 +183,84 @@ export namespace PurchaseResourceApi {
   }
 
   /** 可供产品文案引用的资源介绍版本。 */
+  export type ResourceIntroductionExtensionBlockType =
+    | 'generic'
+    | 'photo_recommendation'
+    | 'warm_tip';
+
+  /** 介绍正文后的可排序内容模块，例如拍照机位或温馨提示。 */
+  export interface ResourceIntroductionExtensionBlock {
+    content?: string;
+    contentMode: 'items' | 'multiline';
+    items: string[];
+    title: string;
+    titleColor: string;
+    type: ResourceIntroductionExtensionBlockType;
+  }
+
   export interface ResourceIntroductionItem {
     content: string;
     createdAt?: string;
     createdBy?: string;
     errorMessage?: string;
+    extensionBlocks?: ResourceIntroductionExtensionBlock[];
     id: number;
     indexStatus: 'pending' | 'indexed' | 'failed' | 'deleted';
     indexVersion: number;
+    isOptionalItem: boolean;
+    /** 自费介绍关联的资源级自费项目；常规介绍为空。 */
+    resourceOptionalItemId?: number;
+    /** 关联项目名称，仅供编辑回显。 */
+    resourceOptionalItemName?: string;
     noticeContent?: string;
     publishedAt?: string;
     resourceId: number;
+    /** 当前资源内的介绍素材默认输出顺序，数值越小越靠前。 */
+    sortOrder: number;
     status: 'draft' | 'published' | 'disabled';
     tags: string[];
     title: string;
     updatedAt?: string;
+    /** 游览时长分钟数，前端预览自动转换为小时/分钟。 */
+    visitDuration?: string;
+    warmTipContent?: string;
   }
 
   export interface ResourceIntroductionSaveParams {
     content: string;
+    extensionBlocks?: ResourceIntroductionExtensionBlock[];
+    isOptionalItem?: boolean;
+    resourceOptionalItemId?: number;
     noticeContent?: string;
     tags?: string[];
     title: string;
+    /** 游览时长分钟数字符串，留空表示不设置。 */
+    visitDuration?: string;
+    warmTipContent?: string;
+  }
+
+  /** 整体保存当前资源下介绍素材的默认输出顺序。 */
+  export interface ResourceIntroductionReorderParams {
+    introductionIds: number[];
+  }
+
+  export interface ResourceIntroductionImageSaveParams {
+    imageIds: number[];
+  }
+
+  /** 资源主档下可复用的自费项目，不包含任何供应商成本或对外售价。 */
+  export interface ResourceOptionalItem {
+    id: number;
+    optionalItemType: 'recommended_self_pay' | 'scenic_transport';
+    projectName: string;
+    resourceId: number;
+    status: 'active' | 'disabled';
+  }
+
+  export interface ResourceOptionalItemSaveParams {
+    optionalItemType: 'recommended_self_pay' | 'scenic_transport';
+    projectName: string;
+    status?: 'active' | 'disabled';
   }
 
   /** 资源主档的产品配图，不参与知识库向量化。 */
@@ -234,6 +295,7 @@ export namespace PurchaseResourceApi {
     city?: string;
     district?: string;
     isDefault?: boolean;
+    optionalItems?: ResourceSupplierOptionalItemParams[];
     preferentialPrice?: number;
     priceMode: 'classified' | 'unified';
     priceRemark?: string;
@@ -259,6 +321,29 @@ export namespace PurchaseResourceApi {
     teamPrice?: number;
   }
 
+  /** 供应商针对景区自费项目的成本报价，单位固定为元/人。 */
+  export interface ResourceSupplierOptionalItemParams {
+    costPrice?: number;
+    priceDescription?: string;
+    projectName: string;
+    resourceOptionalItemId?: number;
+    /** 产品设计时的默认对外售价；最终售价仍由具体产品保存。 */
+    suggestedSalePrice?: number;
+    status?: 'active' | 'disabled';
+  }
+
+  /** 资源供应商绑定回显的自费项目报价。 */
+  export interface ResourceSupplierOptionalItemResponse {
+    costPrice: number;
+    id: number;
+    priceDescription?: string;
+    projectName: string;
+    priceUnit: 'yuan_per_person';
+    resourceOptionalItemId?: number;
+    suggestedSalePrice?: number;
+    status?: 'active' | 'disabled';
+  }
+
   export interface ResourceSupplierCreateParams {
     basicInfo?: string;
     city?: string;
@@ -266,6 +351,7 @@ export namespace PurchaseResourceApi {
     contactPhone?: string;
     district?: string;
     isDefault?: boolean;
+    optionalItems?: ResourceSupplierOptionalItemParams[];
     priceLines?: ResourceSupplierPriceLineParams[];
     priceMode: 'classified' | 'unified';
     priceRemark?: string;
@@ -442,6 +528,36 @@ export function getPurchaseResourceIntroductions(resourceId: number) {
   );
 }
 
+/** 保存资源介绍素材的默认输出顺序。 */
+export function reorderPurchaseResourceIntroductions(
+  resourceId: number,
+  data: PurchaseResourceApi.ResourceIntroductionReorderParams,
+) {
+  return requestClient.post<PurchaseResourceApi.ResourceIntroductionItem[]>(
+    `/purchase/resource/${resourceId}/materials/introductions/reorder`,
+    data,
+    { headers: { 'X-Suppress-Error-Message': 'true' } },
+  );
+}
+
+/** 获取当前资源可供供应商报价和介绍素材复用的自费项目。 */
+export function getPurchaseResourceOptionalItems(resourceId: number) {
+  return requestClient.get<PurchaseResourceApi.ResourceOptionalItem[]>(
+    `/purchase/resource/${resourceId}/optional-items`,
+  );
+}
+
+/** 快捷新建当前资源的自费项目主档。 */
+export function createPurchaseResourceOptionalItem(
+  resourceId: number,
+  data: PurchaseResourceApi.ResourceOptionalItemSaveParams,
+) {
+  return requestClient.post<PurchaseResourceApi.ResourceOptionalItem>(
+    `/purchase/resource/${resourceId}/optional-items`,
+    data,
+  );
+}
+
 export function createPurchaseResourceIntroduction(
   resourceId: number,
   data: PurchaseResourceApi.ResourceIntroductionSaveParams,
@@ -490,6 +606,28 @@ export function deletePurchaseResourceIntroduction(
   return requestClient.post<void>(
     `/purchase/resource/${resourceId}/materials/introductions/${introductionId}/delete`,
     {},
+  );
+}
+
+/** 查询一份介绍素材从当前资源图片素材库选用的图片。 */
+export function getPurchaseResourceIntroductionImages(
+  resourceId: number,
+  introductionId: number,
+) {
+  return requestClient.get<number[]>(
+    `/purchase/resource/${resourceId}/materials/introductions/${introductionId}/images`,
+  );
+}
+
+/** 整体保存一份介绍素材选用的图片和顺序；空数组表示清空。 */
+export function savePurchaseResourceIntroductionImages(
+  resourceId: number,
+  introductionId: number,
+  data: PurchaseResourceApi.ResourceIntroductionImageSaveParams,
+) {
+  return requestClient.post<number[]>(
+    `/purchase/resource/${resourceId}/materials/introductions/${introductionId}/images`,
+    data,
   );
 }
 
@@ -552,6 +690,7 @@ export function downloadPurchaseResourceImage(
 ) {
   return requestClient.download<Blob>(
     `/purchase/resource/${resourceId}/materials/images/${imageId}/download`,
+    { headers: { 'X-Suppress-Error-Message': 'true' } },
   );
 }
 

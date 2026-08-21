@@ -78,13 +78,13 @@ class AmapMapServiceTest {
     }
 
     @Test
-    void reverseGeocodeShouldReturnFormattedAddressAndReuseCache() {
+    void reverseGeocodeShouldReturnAddressComponentsAndReuseCache() {
         RestTemplate restTemplate = new RestTemplate();
         MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
         AmapMapService service = service(restTemplate, "test-key");
 
         server.expect(requestTo(containsString("location=120.14353,30.23689")))
-                .andExpect(requestTo(containsString("extensions=base")))
+                .andExpect(requestTo(containsString("extensions=all")))
                 .andExpect(method(org.springframework.http.HttpMethod.GET))
                 .andRespond(withSuccess(regeoResponse(), MediaType.APPLICATION_JSON));
 
@@ -92,6 +92,9 @@ class AmapMapServiceTest {
         var second = service.reverseGeocode(1L, new BigDecimal("120.14353"), new BigDecimal("30.23689"));
 
         assertThat(first.address()).isEqualTo("浙江省杭州市西湖区龙井路1号");
+        assertThat(first.province()).isEqualTo("浙江省");
+        assertThat(first.city()).isEqualTo("杭州市");
+        assertThat(first.district()).isEqualTo("西湖区");
         assertThat(second).isEqualTo(first);
         server.verify();
     }
@@ -173,7 +176,12 @@ class AmapMapServiceTest {
                 {
                   "status": "1",
                   "regeocode": {
-                    "formatted_address": "浙江省杭州市西湖区龙井路1号"
+                    "formatted_address": "浙江省杭州市西湖区龙井路1号",
+                    "addressComponent": {
+                      "province": "浙江省",
+                      "city": "杭州市",
+                      "district": "西湖区"
+                    }
                   }
                 }
                 """;

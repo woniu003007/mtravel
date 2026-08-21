@@ -10,7 +10,8 @@ public record ProductDesignerDocumentVersionResponse(
         Integer versionNo,
         String fileName,
         String generateStatus,
-        String downloadUrl
+        String downloadUrl,
+        String previewUrl
 ) {
     /** 将文档版本实体转换为页面可用的下载记录。 */
     public static ProductDesignerDocumentVersionResponse fromEntity(SalesProductDocumentVersionEntity entity) {
@@ -21,7 +22,8 @@ public record ProductDesignerDocumentVersionResponse(
                 entity.getVersionNo(),
                 entity.getFileNameSnapshot(),
                 entity.getGenerateStatus(),
-                "/sales/product/designer/documents/%d/download".formatted(entity.getId())
+                "/sales/product/designer/documents/%d/download".formatted(entity.getId()),
+                "/sales/product/designer/documents/%d/preview".formatted(entity.getId())
         );
     }
 }

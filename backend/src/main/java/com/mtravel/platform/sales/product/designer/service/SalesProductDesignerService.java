@@ -10,44 +10,72 @@ import com.mtravel.platform.purchase.relation.dto.PurchaseRelationSupplierPriceR
 import com.mtravel.platform.purchase.relation.mapper.PurchaseRelationMapper;
 import com.mtravel.platform.purchase.relation.price.entity.SupplierResourcePriceEntity;
 import com.mtravel.platform.purchase.relation.price.mapper.SupplierResourcePriceMapper;
+import com.mtravel.platform.purchase.relation.optional.entity.PurchaseRelationOptionalItemEntity;
+import com.mtravel.platform.purchase.relation.optional.mapper.PurchaseRelationOptionalItemMapper;
 import com.mtravel.platform.purchase.resource.entity.PurchaseResourceEntity;
 import com.mtravel.platform.purchase.resource.enums.PurchaseResourceProcurementMode;
-import com.mtravel.platform.purchase.resource.enums.ResourceStarLevel;
 import com.mtravel.platform.purchase.resource.enums.ScenicLevel;
 import com.mtravel.platform.purchase.resource.mapper.PurchaseResourceMapper;
 import com.mtravel.platform.purchase.resource.material.entity.PurchaseResourceImageEntity;
 import com.mtravel.platform.purchase.resource.material.entity.PurchaseResourceIntroductionEntity;
+import com.mtravel.platform.purchase.resource.material.entity.PurchaseResourceIntroductionImageEntity;
+import com.mtravel.platform.purchase.resource.material.service.ResourceIntroductionExtensionBlockCodec;
 import com.mtravel.platform.purchase.resource.material.mapper.PurchaseResourceImageMapper;
+import com.mtravel.platform.purchase.resource.material.mapper.PurchaseResourceIntroductionImageMapper;
 import com.mtravel.platform.purchase.resource.material.mapper.PurchaseResourceIntroductionMapper;
+import com.mtravel.platform.purchase.resource.optional.dto.PurchaseResourceOptionalItemResponse;
+import com.mtravel.platform.purchase.resource.optional.entity.PurchaseResourceOptionalItemEntity;
+import com.mtravel.platform.purchase.resource.optional.mapper.PurchaseResourceOptionalItemMapper;
 import com.mtravel.platform.purchase.supplier.entity.SupplierEntity;
 import com.mtravel.platform.purchase.supplier.mapper.SupplierMapper;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerAdultQuoteResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerAdultQuoteSaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayPlanResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayEndImageSelectionRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayEndImageSelectionResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayItineraryResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayItinerarySaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceDeleteRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceReorderRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceSaveRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayItinerarySaveRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayItineraryResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayWordPlanMaterialRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayWordPlanMaterialResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayWordPlanResourceResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayWordPlanResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayWordPlanSaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDetailResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDraftResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDraftSaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerIntroductionResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerIntroductionSaveRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerIntroductionSnapshotResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerMapResourceResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerOptionalItemsSaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerResourceDetailResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerResourceImageResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerSelectedMaterialRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerSelectedMaterialResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerSelectedOptionalItemRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerSupplierPriceLineResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerSupplierResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerSupplierOptionalItemResponse;
 import com.mtravel.platform.sales.product.designer.entity.SalesProductAdultQuoteEntity;
 import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceEntity;
 import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceImageEntity;
+import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceIntroductionEntity;
 import com.mtravel.platform.sales.product.designer.entity.SalesProductDocumentVersionEntity;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductAdultQuoteMapper;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceMapper;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceImageMapper;
+import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceIntroductionMapper;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductDocumentVersionMapper;
 import com.mtravel.platform.sales.product.entity.SalesProductEntity;
+import com.mtravel.platform.sales.product.entity.SalesProductItineraryDayEntity;
 import com.mtravel.platform.sales.product.mapper.SalesProductMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductItineraryDayMapper;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
@@ -60,6 +88,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -80,6 +109,14 @@ public class SalesProductDesignerService {
     private static final String PRICE_MODE_UNIFIED = "unified";
     private static final String QUOTE_STATUS_DRAFT = "draft";
     private static final Set<String> LEVEL_RESOURCE_TYPES = Set.of("hotel", "restaurant");
+    private static final String ARRANGEMENT_ITINERARY = "itinerary";
+    private static final String ARRANGEMENT_ACCOMMODATION = "accommodation";
+    private static final String ARRANGEMENT_BREAKFAST = "breakfast";
+    private static final String ARRANGEMENT_LUNCH = "lunch";
+    private static final String ARRANGEMENT_DINNER = "dinner";
+    private static final String ARRANGEMENT_UNASSIGNED = "unassigned";
+    private static final Set<String> MEAL_ARRANGEMENT_ROLES = Set.of(
+            ARRANGEMENT_BREAKFAST, ARRANGEMENT_LUNCH, ARRANGEMENT_DINNER);
 
     private final SalesProductMapper productMapper;
     private final PurchaseResourceMapper resourceMapper;
@@ -90,8 +127,32 @@ public class SalesProductDesignerService {
     private final PurchaseResourceImageMapper imageMapper;
     private final SalesProductDayResourceMapper dayResourceMapper;
     private final SalesProductDayResourceImageMapper dayResourceImageMapper;
+    private final SalesProductDayResourceIntroductionMapper dayResourceIntroductionMapper;
     private final SalesProductAdultQuoteMapper adultQuoteMapper;
     private final SalesProductDocumentVersionMapper documentVersionMapper;
+    @Autowired(required = false)
+    private PurchaseRelationOptionalItemMapper relationOptionalItemMapper;
+    /** 延迟字段注入避免改变已有构造契约；仅在请求明确带自费项目时写入快照。 */
+    @Autowired(required = false)
+    private SalesProductDesignerOptionalItemService optionalItemService;
+    @Autowired(required = false)
+    private com.mtravel.platform.purchase.resource.optional.service.PurchaseResourceOptionalItemService resourceOptionalItemService;
+    /** 当天 Word 方案批量读取景区自费项目，避免逐个景区调用资源自费项目服务。 */
+    @Autowired(required = false)
+    private PurchaseResourceOptionalItemMapper resourceOptionalItemMapper;
+    /** 介绍素材图片在产品编辑时一次性带出，避免按素材逐条查询。 */
+    @Autowired(required = false)
+    private PurchaseResourceIntroductionImageMapper introductionImageMapper;
+    /** 扩展内容块用于产品预览与快照，保留字段注入以兼容既有构造测试。 */
+    @Autowired(required = false)
+    private ResourceIntroductionExtensionBlockCodec extensionBlockCodec;
+    /** 图片展示方式属于每日行程，字段注入保持现有单元测试构造契约不变。 */
+    @Autowired(required = false)
+    private SalesProductItineraryDayMapper itineraryDayMapper;
+
+    private static final Set<String> WORD_IMAGE_MODES = Set.of("follow_resource", "day_end", "hidden");
+    private static final int WORD_IMAGE_MIN_COUNT = 2;
+    private static final int WORD_IMAGE_MAX_COUNT = 3;
 
     public SalesProductDesignerService(
             SalesProductMapper productMapper,
@@ -103,6 +164,7 @@ public class SalesProductDesignerService {
             PurchaseResourceImageMapper imageMapper,
             SalesProductDayResourceMapper dayResourceMapper,
             SalesProductDayResourceImageMapper dayResourceImageMapper,
+            SalesProductDayResourceIntroductionMapper dayResourceIntroductionMapper,
             SalesProductAdultQuoteMapper adultQuoteMapper,
             SalesProductDocumentVersionMapper documentVersionMapper
     ) {
@@ -115,6 +177,7 @@ public class SalesProductDesignerService {
         this.imageMapper = imageMapper;
         this.dayResourceMapper = dayResourceMapper;
         this.dayResourceImageMapper = dayResourceImageMapper;
+        this.dayResourceIntroductionMapper = dayResourceIntroductionMapper;
         this.adultQuoteMapper = adultQuoteMapper;
         this.documentVersionMapper = documentVersionMapper;
     }
@@ -304,9 +367,40 @@ public class SalesProductDesignerService {
                     Collectors.toList()
                 ));
         Map<Long, List<Long>> selectedImageIds = selectedImageIds(tenantId, productId, resources);
+        Map<Long, List<SalesProductDayResourceIntroductionEntity>> selectedIntroductions =
+                selectedIntroductions(tenantId, productId, resources);
+        Map<Long, List<com.mtravel.platform.sales.product.designer.dto.ProductDesignerSelectedOptionalItemResponse>>
+                selectedOptionalItems = optionalItemService == null
+                ? Map.of()
+                : optionalItemService.listByDayResourceIds(
+                        tenantId,
+                        productId,
+                        resources.stream().map(SalesProductDayResourceEntity::getId).toList()
+                );
+        Map<Integer, SalesProductItineraryDayEntity> itineraryByDay = itineraryDayMapper == null
+                ? Map.of()
+                : itineraryDayMapper.selectList(new QueryWrapper<SalesProductItineraryDayEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .eq("product_id", productId)
+                        .orderByAsc("day_no")
+                        .orderByAsc("id")
+                ).stream().collect(Collectors.toMap(
+                        SalesProductItineraryDayEntity::getDayNo,
+                        Function.identity(),
+                        (left, right) -> left,
+                        LinkedHashMap::new
+                ));
         int daysCount = product.getTravelDays() == null ? 1 : product.getTravelDays();
         List<ProductDesignerDayPlanResponse> days = java.util.stream.IntStream.rangeClosed(1, daysCount)
-                .mapToObj(dayNo -> dayPlan(dayNo, byDay.getOrDefault(dayNo, List.of()), selectedImageIds))
+                .mapToObj(dayNo -> dayPlan(
+                        dayNo,
+                        byDay.getOrDefault(dayNo, List.of()),
+                        selectedImageIds,
+                        selectedIntroductions,
+                        selectedOptionalItems,
+                        itineraryByDay.get(dayNo)
+                ))
                 .toList();
         BigDecimal totalCost = resources.stream()
                 .map(SalesProductDayResourceEntity::getCostAmountSnapshot)
@@ -390,8 +484,8 @@ public class SalesProductDesignerService {
             throw new BizException("景区等级筛选只能用于景区，且筛选值不合法");
         }
         if (StringUtils.hasText(starLevel)
-                && (!LEVEL_RESOURCE_TYPES.contains(resourceType) || !ResourceStarLevel.contains(starLevel))) {
-            throw new BizException("星级筛选只能用于酒店或餐厅，且筛选值不合法");
+                && !LEVEL_RESOURCE_TYPES.contains(resourceType)) {
+            throw new BizException("星级/接待标准筛选只能用于酒店或餐厅");
         }
     }
 
@@ -424,6 +518,9 @@ public class SalesProductDesignerService {
                 .orderByDesc("is_cover")
                 .orderByAsc("sort_order")
                 .orderByAsc("id"));
+        Map<Long, List<Long>> introductionImageIds = introductionImageIdsByIntroduction(
+                tenantId, introductions, images
+        );
         List<ProductDesignerSupplierResponse> suppliers = supplierResponses(tenantId, resource);
         Long defaultSupplierId = suppliers.stream()
                 .filter(item -> Boolean.TRUE.equals(item.isDefault()))
@@ -443,11 +540,445 @@ public class SalesProductDesignerService {
                 resource.getLatitude(),
                 resource.getIntroduction(),
                 resource.getWarmTip(),
-                introductions.stream().map(ProductDesignerIntroductionResponse::fromEntity).toList(),
+                introductions.stream()
+                        .map(item -> ProductDesignerIntroductionResponse.fromEntity(
+                                item, introductionImageIds.getOrDefault(item.getId(), List.of()),
+                                extensionBlocks(item.getExtensionBlocks())
+                        ))
+                        .toList(),
                 images.stream().map(ProductDesignerResourceImageResponse::fromEntity).toList(),
                 suppliers,
-                defaultSupplierId
+                defaultSupplierId,
+                "scenic".equals(resource.getResourceType()) && resourceOptionalItemService != null
+                        ? resourceOptionalItemService.list(tenantId, resourceId) : List.of()
         );
+    }
+
+    /**
+     * 批量组装当天方案所需的资源候选详情。
+     *
+     * <p>当天方案会同时展示多个景区的介绍、图片、供应商和自费项目。这里先按资源集合
+     * 批量读取，再在内存中按资源归组，避免为每个景区重复执行同一组查询。</p>
+     */
+    private Map<Long, ProductDesignerResourceDetailResponse> resourceDetails(
+            Long tenantId,
+            List<Long> resourceIds
+    ) {
+        if (resourceIds == null || resourceIds.isEmpty()) {
+            return Map.of();
+        }
+        List<PurchaseResourceEntity> resources = resourceMapper.selectList(new QueryWrapper<PurchaseResourceEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq("status", STATUS_ACTIVE)
+                .in("id", resourceIds));
+        if (resources.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, PurchaseResourceEntity> resourceById = resources.stream()
+                .collect(Collectors.toMap(PurchaseResourceEntity::getId, Function.identity()));
+        List<PurchaseResourceIntroductionEntity> introductions = introductionMapper.selectList(
+                new QueryWrapper<PurchaseResourceIntroductionEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .eq("status", INTRODUCTION_PUBLISHED)
+                        .in("resource_id", resourceIds)
+                        .orderByDesc("published_at")
+                        .orderByDesc("id")
+        );
+        Map<Long, List<PurchaseResourceIntroductionEntity>> introductionsByResource = introductions.stream()
+                .collect(Collectors.groupingBy(
+                        PurchaseResourceIntroductionEntity::getResourceId,
+                        LinkedHashMap::new,
+                        Collectors.toList()
+                ));
+        List<PurchaseResourceImageEntity> images = imageMapper.selectList(new QueryWrapper<PurchaseResourceImageEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq("status", STATUS_ACTIVE)
+                .in("resource_id", resourceIds)
+                .orderByDesc("is_cover")
+                .orderByAsc("sort_order")
+                .orderByAsc("id"));
+        Map<Long, List<PurchaseResourceImageEntity>> imagesByResource = images.stream()
+                .collect(Collectors.groupingBy(
+                        PurchaseResourceImageEntity::getResourceId,
+                        LinkedHashMap::new,
+                        Collectors.toList()
+                ));
+        Map<Long, List<Long>> introductionImageIds = introductionImageIdsByIntroduction(
+                tenantId, introductions, imagesByResource
+        );
+        Map<Long, List<ProductDesignerSupplierResponse>> suppliersByResource =
+                supplierResponsesByResource(tenantId, resourceIds);
+        Map<Long, List<PurchaseResourceOptionalItemResponse>> optionalItemsByResource =
+                optionalItemsByResource(tenantId, resourceIds);
+
+        Map<Long, ProductDesignerResourceDetailResponse> result = new LinkedHashMap<>();
+        for (Long resourceId : resourceIds) {
+            PurchaseResourceEntity resource = resourceById.get(resourceId);
+            if (resource == null) {
+                continue;
+            }
+            List<PurchaseResourceIntroductionEntity> resourceIntroductions =
+                    introductionsByResource.getOrDefault(resourceId, List.of());
+            List<PurchaseResourceImageEntity> resourceImages = imagesByResource.getOrDefault(resourceId, List.of());
+            List<ProductDesignerSupplierResponse> suppliers = suppliersByResource.getOrDefault(resourceId, List.of());
+            Long defaultSupplierId = suppliers.stream()
+                    .filter(item -> Boolean.TRUE.equals(item.isDefault()))
+                    .map(ProductDesignerSupplierResponse::supplierId)
+                    .findFirst()
+                    .orElse(null);
+            result.put(resourceId, new ProductDesignerResourceDetailResponse(
+                    resource.getId(),
+                    resource.getResourceType(),
+                    resource.getProcurementMode(),
+                    resource.getResourceName(),
+                    resource.getProvince(),
+                    resource.getCity(),
+                    resource.getDistrict(),
+                    resource.getAddress(),
+                    resource.getLongitude(),
+                    resource.getLatitude(),
+                    resource.getIntroduction(),
+                    resource.getWarmTip(),
+                    resourceIntroductions.stream()
+                            .map(item -> ProductDesignerIntroductionResponse.fromEntity(
+                                    item,
+                                    introductionImageIds.getOrDefault(item.getId(), List.of()),
+                                    extensionBlocks(item.getExtensionBlocks())
+                            ))
+                            .toList(),
+                    resourceImages.stream().map(ProductDesignerResourceImageResponse::fromEntity).toList(),
+                    suppliers,
+                    defaultSupplierId,
+                    "scenic".equals(resource.getResourceType())
+                            ? optionalItemsByResource.getOrDefault(resourceId, List.of())
+                            : List.of()
+            ));
+        }
+        return result;
+    }
+
+    /**
+     * 查询当天景区组合的 Word 方案。
+     *
+     * <p>素材以一个有序流返回，允许介绍素材和自费项目跨景区拖动；旧数据仍按景区顺序、景区内素材顺序展开。</p>
+     */
+    public ProductDesignerDayWordPlanResponse dayWordPlan(Long tenantId, Long productId, Integer dayNo) {
+        SalesProductEntity product = loadProduct(tenantId, productId);
+        validateDayNo(product, dayNo);
+        List<SalesProductDayResourceEntity> dayResources = scenicDayResources(tenantId, productId, dayNo);
+        Map<Long, List<Long>> selectedImageIds = selectedImageIds(tenantId, productId, dayResources);
+        Map<Long, List<SalesProductDayResourceIntroductionEntity>> selectedIntroductions =
+                selectedIntroductions(tenantId, productId, dayResources);
+        Map<Long, List<com.mtravel.platform.sales.product.designer.dto.ProductDesignerSelectedOptionalItemResponse>>
+                selectedOptionalItems = optionalItemService == null
+                ? Map.of()
+                : optionalItemService.listByDayResourceIds(
+                        tenantId,
+                        productId,
+                        dayResources.stream().map(SalesProductDayResourceEntity::getId).toList()
+                );
+        Map<Long, ProductDesignerResourceDetailResponse> resourceDetails = resourceDetails(
+                tenantId,
+                dayResources.stream().map(SalesProductDayResourceEntity::getResourceId).distinct().toList()
+        );
+        List<ProductDesignerDayWordPlanResourceResponse> resources = dayResources.stream()
+                .map(dayResource -> new ProductDesignerDayWordPlanResourceResponse(
+                        dayResourceResponse(
+                                dayResource,
+                                selectedImageIds.getOrDefault(dayResource.getId(), List.of()),
+                                selectedIntroductions.getOrDefault(dayResource.getId(), List.of()),
+                                selectedOptionalItems.getOrDefault(dayResource.getId(), List.of())
+                        ),
+                        resourceDetails.get(dayResource.getResourceId())
+                ))
+                .toList();
+        String imageMode = currentWordImageMode(tenantId, productId, dayNo);
+        return new ProductDesignerDayWordPlanResponse(
+                productId,
+                dayNo,
+                resources,
+                wordPlanMaterials(resources),
+                imageMode,
+                "day_end".equals(imageMode)
+                        ? dayEndImageSelections(tenantId, productId, dayResources)
+                        : List.of()
+        );
+    }
+
+    /**
+     * 整组保存当天景区的 Word 素材方案。
+     *
+     * <p>供应商、成本和当天景区排序不在此处改动；任一素材、报价或归属校验失败时整个方案回滚。</p>
+     */
+    @Transactional
+    public ProductDesignerDayWordPlanResponse saveDayWordPlan(
+            Long tenantId,
+            ProductDesignerDayWordPlanSaveRequest request,
+            String operator
+    ) {
+        SalesProductEntity product = loadProduct(tenantId, request.productId());
+        validateDayNo(product, request.dayNo());
+        List<SalesProductDayResourceEntity> dayResources = scenicDayResources(tenantId, request.productId(), request.dayNo());
+        Map<Long, SalesProductDayResourceEntity> dayResourceById = dayResources.stream()
+                .collect(Collectors.toMap(SalesProductDayResourceEntity::getId, Function.identity()));
+        Set<Long> requestedIds = new java.util.LinkedHashSet<>(request.dayResourceIds());
+        if (requestedIds.size() != request.dayResourceIds().size() || !requestedIds.equals(dayResourceById.keySet())) {
+            throw new BizException("景区组合已变更，请刷新后重新保存");
+        }
+        String imageMode = normalizeWordImageMode(request.imageMode());
+        if ("day_end".equals(imageMode)) {
+            saveDayEndImageSelectionsIfProvided(tenantId, request, dayResources, operator);
+        } else if ("follow_resource".equals(imageMode)) {
+            validateWordPlanImageSelections(request, dayResources);
+        }
+        saveWordImageMode(tenantId, request.productId(), request.dayNo(), imageMode);
+
+        record OrderedMaterial(ProductDesignerDayWordPlanMaterialRequest value, int sortOrder) {}
+        List<OrderedMaterial> orderedMaterials = java.util.stream.IntStream
+                .range(0, request.selectedMaterials() == null ? 0 : request.selectedMaterials().size())
+                .mapToObj(index -> new OrderedMaterial(request.selectedMaterials().get(index), index + 1))
+                .toList();
+        Map<Long, List<OrderedMaterial>> materialsByDayResource = orderedMaterials.stream()
+                .peek(item -> {
+                    if (!dayResourceById.containsKey(item.value().dayResourceId())) {
+                        throw new BizException("素材不属于当前景区组合");
+                    }
+                })
+                .collect(Collectors.groupingBy(item -> item.value().dayResourceId(), LinkedHashMap::new, Collectors.toList()));
+
+        for (SalesProductDayResourceEntity dayResource : dayResources) {
+            PurchaseResourceEntity resource = loadActiveResource(tenantId, dayResource.getResourceId());
+            List<OrderedMaterial> selected = materialsByDayResource.getOrDefault(dayResource.getId(), List.of());
+            List<ProductDesignerSelectedMaterialRequest> materials = selected.stream()
+                    .map(item -> new ProductDesignerSelectedMaterialRequest(
+                            item.value().materialType(),
+                            item.value().introductionId(),
+                            item.value().resourceOptionalItemId(),
+                            item.value().supplierOptionalItemId(),
+                            item.value().salePrice()
+                    ))
+                    .toList();
+            List<PurchaseResourceIntroductionEntity> introductions =
+                    standardIntroductionsForMaterials(tenantId, resource.getId(), materials);
+            List<Integer> introductionSortOrders = selected.stream()
+                    .filter(item -> "introduction".equals(item.value().materialType()))
+                    .map(OrderedMaterial::sortOrder)
+                    .toList();
+            saveIntroductionSnapshots(tenantId, dayResource, introductions, introductionSortOrders, operator);
+            if ("follow_resource".equals(imageMode)) {
+                List<Long> explicitImageIds = request.selectedImageIdsByResource() == null
+                        ? null
+                        : request.selectedImageIdsByResource().get(dayResource.getId());
+                if (explicitImageIds != null) {
+                    saveSelectedImages(tenantId, dayResource, resource, explicitImageIds, operator);
+                } else {
+                    saveSelectedImagesForMaterials(tenantId, dayResource, resource, materials, operator);
+                }
+            }
+
+            if (optionalItemService == null) {
+                if (materials.stream().anyMatch(item -> "optional_item".equals(item.materialType()))) {
+                    throw new BizException("自费项目服务未配置");
+                }
+                continue;
+            }
+            List<ProductDesignerSelectedOptionalItemRequest> optionalRows = optionalMaterialRows(materials);
+            List<Integer> optionalSortOrders = selected.stream()
+                    .filter(item -> "optional_item".equals(item.value().materialType()))
+                    .map(OrderedMaterial::sortOrder)
+                    .toList();
+            optionalItemService.saveWithGlobalSortOrders(tenantId,
+                    new ProductDesignerOptionalItemsSaveRequest(request.productId(), dayResource.getId(), optionalRows),
+                    operator, optionalRows, optionalSortOrders);
+        }
+        return dayWordPlan(tenantId, request.productId(), request.dayNo());
+    }
+
+    private String currentWordImageMode(Long tenantId, Long productId, Integer dayNo) {
+        if (itineraryDayMapper == null) return "follow_resource";
+        SalesProductItineraryDayEntity day = itineraryDayMapper.selectOne(new QueryWrapper<SalesProductItineraryDayEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("product_id", productId)
+                .eq("day_no", dayNo)
+                .eq("is_deleted", false)
+                .last("LIMIT 1"));
+        return normalizeWordImageMode(day == null ? null : day.getWordImageMode());
+    }
+
+    private String normalizeWordImageMode(String value) {
+        if (value == null || value.isBlank()) return "follow_resource";
+        if (!WORD_IMAGE_MODES.contains(value)) {
+            throw new BizException("图片展示方式不合法");
+        }
+        return value;
+    }
+
+    /**
+     * 产品 Word 图片以景区为单位排版：允许不选，选择时必须为 2 或 3 张，避免单图或过多图片破坏版面。
+     */
+    private void validateWordPlanImageSelections(
+            ProductDesignerDayWordPlanSaveRequest request,
+            List<SalesProductDayResourceEntity> dayResources
+    ) {
+        if (request.selectedImageIdsByResource() == null) return;
+        Set<Long> currentDayResourceIds = dayResources.stream()
+                .map(SalesProductDayResourceEntity::getId)
+                .collect(Collectors.toSet());
+        if (request.selectedImageIdsByResource().keySet().stream().anyMatch(id -> id == null || !currentDayResourceIds.contains(id))) {
+            throw new BizException("图片不属于当前景区组合");
+        }
+        for (SalesProductDayResourceEntity dayResource : dayResources) {
+            List<Long> imageIds = request.selectedImageIdsByResource().get(dayResource.getId());
+            if (imageIds == null) continue;
+            int count = (int) imageIds.stream().filter(Objects::nonNull).distinct().count();
+            if (count > 0 && count < WORD_IMAGE_MIN_COUNT) {
+                throw new BizException(dayResource.getResourceNameSnapshot() + " 已选 1 张图片，请补充至 2 或 3 张，或清空图片后保存");
+            }
+            if (count > WORD_IMAGE_MAX_COUNT) {
+                throw new BizException(dayResource.getResourceNameSnapshot() + " 最多只能选择 3 张图片");
+            }
+        }
+    }
+
+    /**
+     * day_end 使用当天一组图片，排序可跨景区；未提交任一图片字段时保持历史快照不变。
+     */
+    private void saveDayEndImageSelectionsIfProvided(
+            Long tenantId,
+            ProductDesignerDayWordPlanSaveRequest request,
+            List<SalesProductDayResourceEntity> dayResources,
+            String operator
+    ) {
+        List<ProductDesignerDayEndImageSelectionRequest> selections = request.dayEndImageSelections();
+        if (selections == null && request.selectedImageIdsByResource() == null) {
+            return;
+        }
+        if (selections == null) {
+            selections = legacyDayEndImageSelections(request.selectedImageIdsByResource(), dayResources);
+        }
+        Map<Long, SalesProductDayResourceEntity> resourceById = dayResources.stream()
+                .collect(Collectors.toMap(SalesProductDayResourceEntity::getId, Function.identity()));
+        Set<String> distinct = new java.util.HashSet<>();
+        for (ProductDesignerDayEndImageSelectionRequest selection : selections) {
+            if (selection == null || !resourceById.containsKey(selection.dayResourceId())
+                    || selection.imageId() == null
+                    || !distinct.add(selection.dayResourceId() + ":" + selection.imageId())) {
+                throw new BizException("当天末尾图片不属于当前景区组合或重复选择");
+            }
+        }
+        if (selections.size() == 1 || selections.size() > WORD_IMAGE_MAX_COUNT) {
+            throw new BizException("当天末尾图片只能选择 0、2 或 3 张");
+        }
+        Map<Long, List<Integer>> sortOrdersByResource = new LinkedHashMap<>();
+        Map<Long, List<Long>> imageIdsByResource = new LinkedHashMap<>();
+        for (int index = 0; index < selections.size(); index += 1) {
+            ProductDesignerDayEndImageSelectionRequest selection = selections.get(index);
+            imageIdsByResource.computeIfAbsent(selection.dayResourceId(), ignored -> new java.util.ArrayList<>())
+                    .add(selection.imageId());
+            sortOrdersByResource.computeIfAbsent(selection.dayResourceId(), ignored -> new java.util.ArrayList<>())
+                    .add(index + 1);
+        }
+        for (SalesProductDayResourceEntity dayResource : dayResources) {
+            PurchaseResourceEntity resource = loadActiveResource(tenantId, dayResource.getResourceId());
+            saveSelectedImages(tenantId, dayResource, resource,
+                    imageIdsByResource.getOrDefault(dayResource.getId(), List.of()),
+                    sortOrdersByResource.getOrDefault(dayResource.getId(), List.of()), operator);
+        }
+    }
+
+    private List<ProductDesignerDayEndImageSelectionRequest> legacyDayEndImageSelections(
+            Map<Long, List<Long>> imageIdsByResource,
+            List<SalesProductDayResourceEntity> dayResources
+    ) {
+        List<ProductDesignerDayEndImageSelectionRequest> selections = new java.util.ArrayList<>();
+        for (SalesProductDayResourceEntity resource : dayResources) {
+            for (Long imageId : imageIdsByResource.getOrDefault(resource.getId(), List.of())) {
+                if (imageId != null) {
+                    selections.add(new ProductDesignerDayEndImageSelectionRequest(resource.getId(), imageId));
+                }
+            }
+        }
+        return selections;
+    }
+
+    /** 读取 day_end 的资源-图片对应关系，按跨资源全局排序回显。 */
+    private List<ProductDesignerDayEndImageSelectionResponse> dayEndImageSelections(
+            Long tenantId,
+            Long productId,
+            List<SalesProductDayResourceEntity> dayResources
+    ) {
+        List<Long> dayResourceIds = dayResources.stream().map(SalesProductDayResourceEntity::getId).toList();
+        if (dayResourceIds.isEmpty()) {
+            return List.of();
+        }
+        return dayResourceImageMapper.selectList(new QueryWrapper<SalesProductDayResourceImageEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("product_id", productId)
+                        .eq("is_deleted", false)
+                        .in("day_resource_id", dayResourceIds)
+                        .orderByAsc("sort_order")
+                        .orderByAsc("id"))
+                .stream()
+                .map(item -> new ProductDesignerDayEndImageSelectionResponse(
+                        item.getDayResourceId(), item.getResourceImageId(), item.getSortOrder()))
+                .toList();
+    }
+
+    private void saveWordImageMode(Long tenantId, Long productId, Integer dayNo, String imageMode) {
+        if (itineraryDayMapper == null) return;
+        SalesProductItineraryDayEntity update = new SalesProductItineraryDayEntity();
+        update.setWordImageMode(imageMode);
+        itineraryDayMapper.update(update, new UpdateWrapper<SalesProductItineraryDayEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("product_id", productId)
+                .eq("day_no", dayNo)
+                .eq("is_deleted", false));
+    }
+
+    /** 保存产品设计工作台当天住宿城市和三餐，复用每日行程表供产品 Word 输出。 */
+    @Transactional
+    public ProductDesignerDayItineraryResponse saveDayItinerary(
+            Long tenantId,
+            ProductDesignerDayItinerarySaveRequest request,
+            String operator
+    ) {
+        SalesProductEntity product = loadProduct(tenantId, request.productId());
+        validateDayNo(product, request.dayNo());
+        if (itineraryDayMapper == null) {
+            throw new BizException("每日行程服务未配置");
+        }
+        SalesProductItineraryDayEntity entity = itineraryDayMapper.selectOne(new QueryWrapper<SalesProductItineraryDayEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq("product_id", request.productId())
+                .eq("day_no", request.dayNo())
+                .last("LIMIT 1"));
+        boolean created = entity == null;
+        if (created) {
+            entity = new SalesProductItineraryDayEntity();
+            entity.setTenantId(tenantId);
+            entity.setProductId(request.productId());
+            entity.setDayNo(request.dayNo());
+            entity.setCreatedBy(operator);
+            entity.setIsDeleted(false);
+        }
+        entity.setRelatedHotel(clean(request.accommodationCity()));
+        entity.setBreakfastIncluded(Boolean.TRUE.equals(request.breakfastIncluded()));
+        entity.setLunchIncluded(Boolean.TRUE.equals(request.lunchIncluded()));
+        entity.setDinnerIncluded(Boolean.TRUE.equals(request.dinnerIncluded()));
+        if (created) {
+            itineraryDayMapper.insert(entity);
+        } else {
+            itineraryDayMapper.update(entity, new UpdateWrapper<SalesProductItineraryDayEntity>()
+                    .eq("tenant_id", tenantId)
+                    .eq("is_deleted", false)
+                    .eq("product_id", request.productId())
+                    .eq("day_no", request.dayNo()));
+        }
+        return ProductDesignerDayItineraryResponse.fromEntity(entity, request.dayNo());
     }
 
     /** 新增或修改某天的一条资源，并保存供应商成本和资源介绍快照。 */
@@ -460,19 +991,30 @@ public class SalesProductDesignerService {
         SalesProductEntity product = loadProduct(tenantId, request.productId());
         validateDayNo(product, request.dayNo());
         PurchaseResourceEntity resource = loadActiveResource(tenantId, request.resourceId());
-        assertNotDuplicateDayResource(tenantId, request);
-
         SalesProductDayResourceEntity entity = request.id() == null
                 ? new SalesProductDayResourceEntity()
                 : loadDayResource(tenantId, request.productId(), request.id());
+        String arrangementRole = normalizeArrangementRole(
+                resource, request.arrangementRole(), entity.getArrangementRole());
+        assertNotDuplicateDayResource(tenantId, request, arrangementRole);
         PurchaseRelationEntity relation = relationForSave(tenantId, resource, request.supplierId());
-        PurchaseResourceIntroductionEntity introduction = changedIntroductionForSave(
-                tenantId,
-                resource.getId(),
-                request.selectedIntroductionId(),
-                entity
-        );
-        BigDecimal quantity = request.quantity() == null ? BigDecimal.ONE : request.quantity();
+        List<Long> introductionIds = normalizedIntroductionIds(request);
+        boolean selectedMaterialsProvided = request.selectedMaterials() != null;
+        boolean legacyIntroductionUnchanged = request.introductionIds() == null
+                && request.selectedIntroductionId() != null
+                && Objects.equals(resource.getId(), entity.getResourceId())
+                && Objects.equals(request.selectedIntroductionId(), entity.getSelectedIntroductionId());
+        boolean introductionSelectionProvided = selectedMaterialsProvided || request.introductionIds() != null
+                || (request.selectedIntroductionId() != null && !legacyIntroductionUnchanged)
+                || request.id() == null;
+        List<PurchaseResourceIntroductionEntity> introductions = selectedMaterialsProvided
+                ? standardIntroductionsForMaterials(tenantId, resource.getId(), request.selectedMaterials())
+                : introductionSelectionProvided
+                        ? introductionsForSave(tenantId, resource.getId(), request, introductionIds)
+                        : List.of();
+        BigDecimal quantity = request.quantity() == null
+                ? Objects.requireNonNullElse(entity.getQuantitySnapshot(), BigDecimal.ONE)
+                : request.quantity();
         BigDecimal unitPrice = unitPriceForSave(tenantId, resource, relation);
         BigDecimal costAmount = unitPrice.multiply(quantity).setScale(2, RoundingMode.HALF_UP);
         entity.setTenantId(tenantId);
@@ -481,6 +1023,11 @@ public class SalesProductDesignerService {
         entity.setResourceId(resource.getId());
         entity.setResourceNameSnapshot(resource.getResourceName());
         entity.setResourceTypeSnapshot(resource.getResourceType());
+        entity.setArrangementRole(arrangementRole);
+        entity.setHotelBreakfastIncluded(ARRANGEMENT_ACCOMMODATION.equals(arrangementRole)
+                && Boolean.TRUE.equals(request.hotelBreakfastIncluded() == null
+                ? entity.getHotelBreakfastIncluded()
+                : request.hotelBreakfastIncluded()));
         entity.setProvinceSnapshot(resource.getProvince());
         entity.setCitySnapshot(resource.getCity());
         entity.setDistrictSnapshot(resource.getDistrict());
@@ -499,7 +1046,9 @@ public class SalesProductDesignerService {
         entity.setUnitPriceSnapshot(unitPrice);
         entity.setQuantitySnapshot(quantity);
         entity.setCostAmountSnapshot(costAmount);
-        applyIntroductionSnapshotForSave(entity, resource.getId(), request.selectedIntroductionId(), introduction);
+        if (introductionSelectionProvided) {
+            applyIntroductionSnapshotForSave(entity, resource.getId(), introductions);
+        }
         entity.setRemark(clean(request.remark()));
         if (request.id() == null) {
             entity.setCreatedBy(operator);
@@ -511,21 +1060,60 @@ public class SalesProductDesignerService {
                 throw new BizException("产品每日资源不存在或已删除");
             }
         }
-        saveSelectedImages(tenantId, entity, resource, request.selectedImageIds(), operator);
-        return ProductDesignerDayResourceResponse.fromEntity(entity, selectedImageIdsFor(tenantId, entity.getId()));
+        if (introductionSelectionProvided) {
+            if (selectedMaterialsProvided) {
+                saveIntroductionSnapshots(tenantId, entity, introductions,
+                        standardMaterialSortOrders(request.selectedMaterials()), operator);
+            } else {
+                saveIntroductionSnapshots(tenantId, entity, introductions, operator);
+            }
+        }
+        if (selectedMaterialsProvided) {
+            saveSelectedImagesForMaterials(tenantId, entity, resource, request.selectedMaterials(), operator);
+        } else {
+            saveSelectedImages(tenantId, entity, resource, request.selectedImageIds(), operator);
+        }
+        // null 代表旧客户端未编辑自费项目，空列表代表用户明确清空。
+        if (selectedMaterialsProvided) {
+            if (optionalItemService == null) throw new BizException("自费项目服务未配置");
+            List<ProductDesignerSelectedOptionalItemRequest> optionalRows = optionalMaterialRows(request.selectedMaterials());
+            optionalItemService.saveWithGlobalSortOrders(tenantId, new ProductDesignerOptionalItemsSaveRequest(
+                    request.productId(), entity.getId(), optionalRows), operator, optionalRows,
+                    optionalMaterialSortOrders(request.selectedMaterials()));
+        } else if (request.selectedOptionalItems() != null) {
+            if (optionalItemService == null) throw new BizException("自费项目服务未配置");
+            optionalItemService.save(tenantId, new ProductDesignerOptionalItemsSaveRequest(
+                    request.productId(), entity.getId(), request.selectedOptionalItems()), operator);
+        }
+        return dayResourceResponse(tenantId, entity);
     }
 
     /** 软删除产品某天的一条资源。 */
     @Transactional
     public void deleteDayResource(Long tenantId, ProductDesignerDayResourceDeleteRequest request, String operator) {
+        OffsetDateTime now = OffsetDateTime.now();
         UpdateWrapper<SalesProductDayResourceEntity> wrapper = baseDayResourceUpdate(tenantId, request.productId())
                 .eq("id", request.id())
                 .set("is_deleted", true)
-                .set("deleted_at", OffsetDateTime.now())
+                .set("deleted_at", now)
                 .set("deleted_by", operator);
         int updated = dayResourceMapper.update(null, wrapper);
         if (updated == 0) {
             throw new BizException("产品每日资源不存在或已删除");
+        }
+        SalesProductDayResourceIntroductionEntity deletedIntroduction =
+                new SalesProductDayResourceIntroductionEntity();
+        markDeleted(deletedIntroduction, operator, OffsetDateTime.now());
+        dayResourceIntroductionMapper.update(deletedIntroduction,
+                new UpdateWrapper<SalesProductDayResourceIntroductionEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .eq("product_id", request.productId())
+                        .eq("day_resource_id", request.id()));
+        if (optionalItemService != null) {
+            optionalItemService.softDeleteForDayResource(
+                    tenantId, request.productId(), request.id(), operator, now
+            );
         }
     }
 
@@ -556,14 +1144,13 @@ public class SalesProductDesignerService {
     @Transactional
     public ProductDesignerDayResourceResponse saveIntroduction(Long tenantId, ProductDesignerIntroductionSaveRequest request) {
         SalesProductDayResourceEntity entity = loadDayResource(tenantId, request.productId(), request.dayResourceId());
-        PurchaseResourceIntroductionEntity introduction = introductionForSave(
-                tenantId,
-                entity.getResourceId(),
-                request.selectedIntroductionId()
-        );
-        applyIntroductionSnapshot(entity, introduction);
+        List<Long> introductionIds = normalizedIntroductionIds(request);
+        List<PurchaseResourceIntroductionEntity> introductions =
+                introductionsForSave(tenantId, entity.getResourceId(), request, introductionIds);
+        applyIntroductionSnapshot(entity, introductions);
         dayResourceMapper.update(entity, baseDayResourceUpdate(tenantId, request.productId()).eq("id", request.dayResourceId()));
-        return ProductDesignerDayResourceResponse.fromEntity(entity, selectedImageIdsFor(tenantId, entity.getId()));
+        saveIntroductionSnapshots(tenantId, entity, introductions, null);
+        return dayResourceResponse(tenantId, entity);
     }
 
     /** 保存成人报价草稿；成人成本始终按当前已选资源后端快照重新计算。 */
@@ -624,7 +1211,10 @@ public class SalesProductDesignerService {
     private ProductDesignerDayPlanResponse dayPlan(
             Integer dayNo,
             List<SalesProductDayResourceEntity> resources,
-            Map<Long, List<Long>> selectedImageIds
+            Map<Long, List<Long>> selectedImageIds,
+            Map<Long, List<SalesProductDayResourceIntroductionEntity>> selectedIntroductions,
+            Map<Long, List<com.mtravel.platform.sales.product.designer.dto.ProductDesignerSelectedOptionalItemResponse>> selectedOptionalItems,
+            SalesProductItineraryDayEntity itinerary
     ) {
         BigDecimal dayCost = resources.stream()
                 .map(SalesProductDayResourceEntity::getCostAmountSnapshot)
@@ -634,10 +1224,38 @@ public class SalesProductDesignerService {
                 dayNo,
                 money(dayCost),
                 resources.stream()
-                        .map(item -> ProductDesignerDayResourceResponse.fromEntity(
-                                item, selectedImageIds.getOrDefault(item.getId(), List.of())
-                        ))
-                        .toList()
+                        .map(item -> {
+                            List<SalesProductDayResourceIntroductionEntity> introductions =
+                                    effectiveIntroductionSnapshots(
+                                            item,
+                                            selectedIntroductions.getOrDefault(item.getId(), List.of())
+                                    );
+                            return ProductDesignerDayResourceResponse.fromEntity(
+                                    item,
+                                    selectedImageIds.getOrDefault(item.getId(), List.of()),
+                                    introductions.stream()
+                                            .map(SalesProductDayResourceIntroductionEntity::getResourceIntroductionId)
+                                            .toList(),
+                                    introductions.stream()
+                                            .map(snapshot -> ProductDesignerIntroductionSnapshotResponse.fromEntity(
+                                                    snapshot, extensionBlocks(snapshot.getExtensionBlocksSnapshot())
+                                            ))
+                                            .toList(),
+                                    selectedOptionalItems.getOrDefault(item.getId(), List.of()),
+                                    selectedMaterials(introductions,
+                                            selectedOptionalItems.getOrDefault(item.getId(), List.of()))
+                            );
+                        })
+                        .toList(),
+                resources.stream()
+                        .filter(item -> ARRANGEMENT_ACCOMMODATION.equals(item.getArrangementRole()))
+                        .map(SalesProductDayResourceEntity::getCitySnapshot)
+                        .filter(StringUtils::hasText)
+                        .findFirst()
+                        .orElse(itinerary == null ? null : itinerary.getRelatedHotel()),
+                itinerary != null && Boolean.TRUE.equals(itinerary.getBreakfastIncluded()),
+                itinerary != null && Boolean.TRUE.equals(itinerary.getLunchIncluded()),
+                itinerary != null && Boolean.TRUE.equals(itinerary.getDinnerIncluded())
         );
     }
 
@@ -683,6 +1301,140 @@ public class SalesProductDesignerService {
                 .toList();
     }
 
+    private ProductDesignerDayResourceResponse dayResourceResponse(
+            Long tenantId,
+            SalesProductDayResourceEntity entity
+    ) {
+        List<SalesProductDayResourceIntroductionEntity> introductions =
+                selectedIntroductionsFor(tenantId, entity.getProductId(), entity.getId());
+        List<com.mtravel.platform.sales.product.designer.dto.ProductDesignerSelectedOptionalItemResponse> optionalItems =
+                optionalItemService == null ? List.of() : optionalItemService.list(tenantId, entity.getProductId(), entity.getId());
+        return dayResourceResponse(
+                entity,
+                selectedImageIdsFor(tenantId, entity.getId()),
+                introductions,
+                optionalItems
+        );
+    }
+
+    /** 使用已批量加载的子数据组装当天资源响应。 */
+    private ProductDesignerDayResourceResponse dayResourceResponse(
+            SalesProductDayResourceEntity entity,
+            List<Long> selectedImageIds,
+            List<SalesProductDayResourceIntroductionEntity> selectedIntroductions,
+            List<com.mtravel.platform.sales.product.designer.dto.ProductDesignerSelectedOptionalItemResponse> selectedOptionalItems
+    ) {
+        List<SalesProductDayResourceIntroductionEntity> introductions =
+                effectiveIntroductionSnapshots(entity, selectedIntroductions);
+        List<com.mtravel.platform.sales.product.designer.dto.ProductDesignerSelectedOptionalItemResponse> optionalItems =
+                selectedOptionalItems == null ? List.of() : selectedOptionalItems;
+        return ProductDesignerDayResourceResponse.fromEntity(
+                entity,
+                selectedImageIds == null ? List.of() : selectedImageIds,
+                introductions.stream().map(SalesProductDayResourceIntroductionEntity::getResourceIntroductionId).toList(),
+                introductions.stream().map(item -> ProductDesignerIntroductionSnapshotResponse.fromEntity(
+                        item, extensionBlocks(item.getExtensionBlocksSnapshot())
+                )).toList(),
+                optionalItems,
+                selectedMaterials(introductions, optionalItems)
+        );
+    }
+
+    /** 将两个历史快照表合并为前端拖拽使用的一条有序素材流。 */
+    private List<ProductDesignerSelectedMaterialResponse> selectedMaterials(
+            List<SalesProductDayResourceIntroductionEntity> introductions,
+            List<com.mtravel.platform.sales.product.designer.dto.ProductDesignerSelectedOptionalItemResponse> optionalItems
+    ) {
+        record OrderedMaterial(ProductDesignerSelectedMaterialResponse value, int typeRank) {}
+        List<OrderedMaterial> materials = new java.util.ArrayList<>();
+        for (SalesProductDayResourceIntroductionEntity introduction : introductions) {
+            materials.add(new OrderedMaterial(new ProductDesignerSelectedMaterialResponse(
+                    "introduction", introduction.getResourceIntroductionId(), null, null, null,
+                    introduction.getSortOrder(), introduction.getTitleSnapshot(), introduction.getContentSnapshot(), null), 0));
+        }
+        for (com.mtravel.platform.sales.product.designer.dto.ProductDesignerSelectedOptionalItemResponse optional : optionalItems) {
+            materials.add(new OrderedMaterial(new ProductDesignerSelectedMaterialResponse(
+                    "optional_item", optional.introductionId(), optional.resourceOptionalItemId(),
+                    optional.supplierOptionalItemId(), optional.salePrice(), optional.sortOrder(),
+                    optional.projectName(), optional.introductionContent(), optional.projectName()), 1));
+        }
+        return materials.stream()
+                .sorted(Comparator.comparing((OrderedMaterial item) ->
+                                item.value().sortOrder() == null ? Integer.MAX_VALUE : item.value().sortOrder())
+                        .thenComparing(OrderedMaterial::typeRank))
+                .map(OrderedMaterial::value)
+                .toList();
+    }
+
+    private List<SalesProductDayResourceIntroductionEntity> effectiveIntroductionSnapshots(
+            SalesProductDayResourceEntity resource,
+            List<SalesProductDayResourceIntroductionEntity> snapshots
+    ) {
+        if (snapshots != null && !snapshots.isEmpty()) {
+            return snapshots;
+        }
+        if (resource.getSelectedIntroductionId() == null) {
+            return List.of();
+        }
+        SalesProductDayResourceIntroductionEntity legacy = new SalesProductDayResourceIntroductionEntity();
+        legacy.setResourceIntroductionId(resource.getSelectedIntroductionId());
+        legacy.setIntroductionIndexVersion(resource.getIntroductionIndexVersion());
+        legacy.setTitleSnapshot(resource.getIntroductionTitleSnapshot());
+        legacy.setContentSnapshot(resource.getIntroductionContentSnapshot());
+        legacy.setNoticeSnapshot(resource.getIntroductionNoticeSnapshot());
+        legacy.setWarmTipSnapshot(resource.getIntroductionWarmTipSnapshot());
+        legacy.setVisitDurationSnapshot(resource.getIntroductionVisitDurationSnapshot());
+        legacy.setSortOrder(1);
+        return List.of(legacy);
+    }
+
+    private Map<Long, List<SalesProductDayResourceIntroductionEntity>> selectedIntroductions(
+            Long tenantId,
+            Long productId,
+            List<SalesProductDayResourceEntity> resources
+    ) {
+        List<Long> dayResourceIds = resources.stream()
+                .map(SalesProductDayResourceEntity::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (dayResourceIds.isEmpty()) {
+            return Map.of();
+        }
+        return dayResourceIntroductionMapper.selectList(new QueryWrapper<SalesProductDayResourceIntroductionEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .eq("product_id", productId)
+                        .in("day_resource_id", dayResourceIds)
+                        .orderByAsc("day_resource_id")
+                        .orderByAsc("sort_order")
+                        .orderByAsc("id"))
+                .stream()
+                .collect(Collectors.groupingBy(
+                        SalesProductDayResourceIntroductionEntity::getDayResourceId,
+                        LinkedHashMap::new,
+                        Collectors.toList()
+                ));
+    }
+
+    private List<SalesProductDayResourceIntroductionEntity> selectedIntroductionsFor(
+            Long tenantId,
+            Long productId,
+            Long dayResourceId
+    ) {
+        if (dayResourceId == null) {
+            return List.of();
+        }
+        return dayResourceIntroductionMapper.selectList(new QueryWrapper<SalesProductDayResourceIntroductionEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .eq("product_id", productId)
+                        .eq("day_resource_id", dayResourceId)
+                        .orderByAsc("sort_order")
+                        .orderByAsc("id"))
+                .stream()
+                .toList();
+    }
+
     private void saveSelectedImages(
             Long tenantId,
             SalesProductDayResourceEntity dayResource,
@@ -690,10 +1442,29 @@ public class SalesProductDesignerService {
             List<Long> selectedImageIds,
             String operator
     ) {
+        List<Long> normalizedImageIds = selectedImageIds == null ? null
+                : selectedImageIds.stream().filter(Objects::nonNull).distinct().toList();
+        List<Integer> localSortOrders = normalizedImageIds == null ? List.of()
+                : java.util.stream.IntStream.rangeClosed(1, normalizedImageIds.size()).boxed().toList();
+        saveSelectedImages(tenantId, dayResource, resource, normalizedImageIds, localSortOrders, operator);
+    }
+
+    /** 单条资源图片保存；day_end 可传入跨资源的绝对排序，其他场景使用资源内排序。 */
+    private void saveSelectedImages(
+            Long tenantId,
+            SalesProductDayResourceEntity dayResource,
+            PurchaseResourceEntity resource,
+            List<Long> selectedImageIds,
+            List<Integer> sortOrders,
+            String operator
+    ) {
         if (selectedImageIds == null || dayResource.getId() == null) {
             return;
         }
         List<Long> imageIds = selectedImageIds.stream().filter(Objects::nonNull).distinct().toList();
+        if (imageIds.size() != selectedImageIds.size() || sortOrders == null || sortOrders.size() != imageIds.size()) {
+            throw new BizException("图片选择或排序数据不完整");
+        }
         List<PurchaseResourceImageEntity> images = imageIds.isEmpty()
                 ? List.of()
                 : imageMapper.selectList(new QueryWrapper<PurchaseResourceImageEntity>()
@@ -725,11 +1496,58 @@ public class SalesProductDesignerService {
             selected.setResourceImageId(image.getId());
             selected.setAttachmentId(image.getAttachmentId());
             selected.setOriginalFilenameSnapshot(image.getOriginalFilename());
-            selected.setSortOrder(index + 1);
+            selected.setSortOrder(sortOrders.get(index));
             selected.setCreatedBy(operator);
             selected.setIsDeleted(false);
             dayResourceImageMapper.insert(selected);
         }
+    }
+
+    /**
+     * 新统一素材契约不接受前端手选图片：按素材顺序展开介绍关联图片并写入资源级图片快照。
+     */
+    private void saveSelectedImagesForMaterials(
+            Long tenantId,
+            SalesProductDayResourceEntity dayResource,
+            PurchaseResourceEntity resource,
+            List<ProductDesignerSelectedMaterialRequest> materials,
+            String operator
+    ) {
+        List<Long> introductionIds = materials.stream()
+                .map(ProductDesignerSelectedMaterialRequest::introductionId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (introductionIds.isEmpty()) {
+            saveSelectedImages(tenantId, dayResource, resource, List.of(), operator);
+            return;
+        }
+        if (introductionImageMapper == null) {
+            throw new BizException("介绍素材图片服务未配置");
+        }
+        Map<Long, List<PurchaseResourceIntroductionImageEntity>> byIntroduction = introductionImageMapper.selectList(
+                        new QueryWrapper<PurchaseResourceIntroductionImageEntity>()
+                                .eq("tenant_id", tenantId)
+                                .eq("is_deleted", false)
+                                .in("introduction_id", introductionIds)
+                                .orderByAsc("introduction_id")
+                                .orderByAsc("sort_order")
+                                .orderByAsc("id"))
+                .stream()
+                .collect(Collectors.groupingBy(PurchaseResourceIntroductionImageEntity::getIntroductionId,
+                        LinkedHashMap::new, Collectors.toList()));
+        java.util.LinkedHashSet<Long> imageIds = new java.util.LinkedHashSet<>();
+        for (ProductDesignerSelectedMaterialRequest material : materials) {
+            if (material.introductionId() == null) {
+                continue;
+            }
+            byIntroduction.getOrDefault(material.introductionId(), List.of()).stream()
+                    .map(PurchaseResourceIntroductionImageEntity::getResourceImageId)
+                    .filter(Objects::nonNull)
+                    .forEach(imageIds::add);
+        }
+        // 即使展开后没有图片，也明确清空历史手选图片。
+        saveSelectedImages(tenantId, dayResource, resource, List.copyOf(imageIds), operator);
     }
 
     private SalesProductEntity loadProduct(Long tenantId, Long productId) {
@@ -792,6 +1610,19 @@ public class SalesProductDesignerService {
                 .eq("tenant_id", tenantId)
                 .eq("is_deleted", false)
                 .eq("product_id", draftId));
+
+        SalesProductDayResourceIntroductionEntity deletedIntroduction =
+                new SalesProductDayResourceIntroductionEntity();
+        markDeleted(deletedIntroduction, operator, now);
+        dayResourceIntroductionMapper.update(deletedIntroduction,
+                new UpdateWrapper<SalesProductDayResourceIntroductionEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .eq("product_id", draftId));
+
+        if (optionalItemService != null) {
+            optionalItemService.softDeleteForProduct(tenantId, draftId, operator, now);
+        }
 
         SalesProductDayResourceEntity deletedResource = new SalesProductDayResourceEntity();
         markDeleted(deletedResource, operator, now);
@@ -869,6 +1700,61 @@ public class SalesProductDesignerService {
                 .eq("product_id", productId);
     }
 
+    /**
+     * 查询某天已加入行程的景区，顺序与右侧行程保持一致。
+     *
+     * <p>Word 方案只处理景区，酒店、餐饮等资源仍使用各自的编辑入口。</p>
+     */
+    private List<SalesProductDayResourceEntity> scenicDayResources(
+            Long tenantId,
+            Long productId,
+            Integer dayNo
+    ) {
+        return dayResourceMapper.selectList(baseDayResourceQuery(tenantId, productId)
+                .eq("day_no", dayNo)
+                .eq("resource_type_snapshot", "scenic")
+                .orderByAsc("sort_order")
+                .orderByAsc("id"));
+    }
+
+    /**
+     * 将各景区旧快照展开为一个可跨景区拖动的素材流。
+     *
+     * <p>新数据的 sort_order 是当天景区组内的绝对顺序；历史数据每个景区都会从 1
+     * 开始，因此检测到重复或缺失排序后按“行程顺序 + 景区内部顺序”兼容展开。</p>
+     */
+    private List<ProductDesignerDayWordPlanMaterialResponse> wordPlanMaterials(
+            List<ProductDesignerDayWordPlanResourceResponse> resources
+    ) {
+        record IndexedMaterial(ProductDesignerDayWordPlanMaterialResponse value, int resourceIndex,
+                               int materialIndex, Integer sortOrder) {}
+        List<IndexedMaterial> values = new java.util.ArrayList<>();
+        for (int resourceIndex = 0; resourceIndex < resources.size(); resourceIndex += 1) {
+            ProductDesignerDayWordPlanResourceResponse resource = resources.get(resourceIndex);
+            List<ProductDesignerSelectedMaterialResponse> materials =
+                    Objects.requireNonNullElse(resource.dayResource().selectedMaterials(), List.of());
+            for (int materialIndex = 0; materialIndex < materials.size(); materialIndex += 1) {
+                ProductDesignerSelectedMaterialResponse material = materials.get(materialIndex);
+                values.add(new IndexedMaterial(
+                        new ProductDesignerDayWordPlanMaterialResponse(
+                                resource.dayResource().id(), resource.dayResource().resourceId(),
+                                resource.dayResource().resourceName(), material
+                        ), resourceIndex, materialIndex, material.sortOrder()));
+            }
+        }
+        Set<Integer> sortOrders = values.stream()
+                .map(IndexedMaterial::sortOrder)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        boolean hasGlobalOrder = sortOrders.size() == values.size()
+                && values.stream().allMatch(item -> item.sortOrder() != null);
+        Comparator<IndexedMaterial> comparator = hasGlobalOrder
+                ? Comparator.comparing(IndexedMaterial::sortOrder)
+                : Comparator.comparing(IndexedMaterial::resourceIndex)
+                        .thenComparing(IndexedMaterial::materialIndex);
+        return values.stream().sorted(comparator).map(IndexedMaterial::value).toList();
+    }
+
     private void validateDayNo(SalesProductEntity product, Integer dayNo) {
         int travelDays = product.getTravelDays() == null ? 1 : product.getTravelDays();
         if (dayNo == null || dayNo < 1 || dayNo > travelDays) {
@@ -876,14 +1762,63 @@ public class SalesProductDesignerService {
         }
     }
 
-    private void assertNotDuplicateDayResource(Long tenantId, ProductDesignerDayResourceSaveRequest request) {
+    private void assertNotDuplicateDayResource(
+            Long tenantId,
+            ProductDesignerDayResourceSaveRequest request,
+            String arrangementRole
+    ) {
         Long count = dayResourceMapper.selectCount(baseDayResourceQuery(tenantId, request.productId())
                 .eq("day_no", request.dayNo())
                 .eq("resource_id", request.resourceId())
+                .eq("arrangement_role", arrangementRole)
                 .ne(request.id() != null, "id", request.id()));
         if (count != null && count > 0) {
             throw new BizException("同一天不能重复加入同一个资源");
         }
+        if (!MEAL_ARRANGEMENT_ROLES.contains(arrangementRole)) {
+            return;
+        }
+        Long occupied = dayResourceMapper.selectCount(baseDayResourceQuery(tenantId, request.productId())
+                .eq("day_no", request.dayNo())
+                .eq("arrangement_role", arrangementRole)
+                .ne(request.id() != null, "id", request.id()));
+        if (occupied != null && occupied > 0) {
+            throw new BizException("当天该餐次已安排餐厅，请先更换或删除原餐厅");
+        }
+    }
+
+    /** 将资源类型约束为明确的住宿或餐次位置，避免餐厅仅以普通资源混入行程。 */
+    private String normalizeArrangementRole(
+            PurchaseResourceEntity resource,
+            String requestedRole,
+            String existingRole
+    ) {
+        String role = clean(requestedRole);
+        if (!StringUtils.hasText(role)) {
+            role = StringUtils.hasText(existingRole)
+                    ? existingRole
+                    : "hotel".equals(resource.getResourceType())
+                            ? ARRANGEMENT_ACCOMMODATION
+                            : "restaurant".equals(resource.getResourceType())
+                                    ? ARRANGEMENT_UNASSIGNED
+                                    : ARRANGEMENT_ITINERARY;
+        }
+        if (!Set.of(ARRANGEMENT_ITINERARY, ARRANGEMENT_ACCOMMODATION, ARRANGEMENT_BREAKFAST,
+                ARRANGEMENT_LUNCH, ARRANGEMENT_DINNER, ARRANGEMENT_UNASSIGNED).contains(role)) {
+            throw new BizException("资源安排位置不合法");
+        }
+        if (ARRANGEMENT_ACCOMMODATION.equals(role) && !"hotel".equals(resource.getResourceType())) {
+            throw new BizException("住宿位置只能安排酒店资源");
+        }
+        if ((MEAL_ARRANGEMENT_ROLES.contains(role) || ARRANGEMENT_UNASSIGNED.equals(role))
+                && !"restaurant".equals(resource.getResourceType())) {
+            throw new BizException("餐次位置只能安排餐厅资源");
+        }
+        if (ARRANGEMENT_ITINERARY.equals(role)
+                && ("hotel".equals(resource.getResourceType()) || "restaurant".equals(resource.getResourceType()))) {
+            throw new BizException("酒店和餐厅必须安排到住宿或具体餐次");
+        }
+        return role;
     }
 
     private PurchaseRelationEntity relationForSave(Long tenantId, PurchaseResourceEntity resource, Long supplierId) {
@@ -903,7 +1838,11 @@ public class SalesProductDesignerService {
                 .last("limit 1");
         PurchaseRelationEntity relation = relationMapper.selectOne(wrapper);
         if (relation == null) {
-            throw new BizException(supplierId == null ? "该资源没有有效供应商报价" : "供应商未绑定当前资源或已停用");
+            // 产品设计阶段允许先放入尚未询价的资源，成本暂按 0 处理；明确选择了供应商时仍必须校验绑定关系。
+            if (supplierId == null) {
+                return null;
+            }
+            throw new BizException("供应商未绑定当前资源或已停用");
         }
         return relation;
     }
@@ -922,6 +1861,153 @@ public class SalesProductDesignerService {
             throw new BizException("只能选择当前资源已发布的介绍版本");
         }
         return introduction;
+    }
+
+    private List<Long> normalizedIntroductionIds(ProductDesignerDayResourceSaveRequest request) {
+        if (request.introductionIds() != null) {
+            return request.introductionIds().stream()
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+        }
+        return request.selectedIntroductionId() == null
+                ? List.of()
+                : List.of(request.selectedIntroductionId());
+    }
+
+    /** 将统一素材数组拆为普通介绍，并校验其确实不是自费项目素材。 */
+    private List<PurchaseResourceIntroductionEntity> standardIntroductionsForMaterials(
+            Long tenantId,
+            Long resourceId,
+            List<ProductDesignerSelectedMaterialRequest> materials
+    ) {
+        List<Long> ids = materials.stream()
+                .filter(item -> "introduction".equals(item.materialType()))
+                .map(ProductDesignerSelectedMaterialRequest::introductionId)
+                .toList();
+        if (ids.stream().anyMatch(Objects::isNull) || materials.stream()
+                .anyMatch(item -> !"introduction".equals(item.materialType())
+                        && !"optional_item".equals(item.materialType()))) {
+            throw new BizException("素材类型或介绍素材不正确");
+        }
+        if (ids.size() != new java.util.HashSet<>(ids).size()) {
+            throw new BizException("普通介绍素材不能重复选择");
+        }
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        List<PurchaseResourceIntroductionEntity> found = introductionMapper.selectList(
+                new QueryWrapper<PurchaseResourceIntroductionEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .eq("resource_id", resourceId)
+                        .eq("status", INTRODUCTION_PUBLISHED)
+                        .eq("is_optional_item", false)
+                        .in("id", ids));
+        Map<Long, PurchaseResourceIntroductionEntity> byId = found.stream()
+                .collect(Collectors.toMap(PurchaseResourceIntroductionEntity::getId, Function.identity()));
+        if (byId.size() != ids.size() || ids.stream().anyMatch(id -> !byId.containsKey(id))) {
+            throw new BizException("只能选择当前资源已发布的普通介绍素材");
+        }
+        return ids.stream().map(byId::get).toList();
+    }
+
+    /** 把统一自费素材转换为原有快照服务的请求，并在落库前阻止重复项目。 */
+    private List<ProductDesignerSelectedOptionalItemRequest> optionalMaterialRows(
+            List<ProductDesignerSelectedMaterialRequest> materials
+    ) {
+        List<ProductDesignerSelectedOptionalItemRequest> rows = materials.stream()
+                .filter(item -> "optional_item".equals(item.materialType()))
+                .map(item -> {
+                    if (item.resourceOptionalItemId() == null) {
+                        throw new BizException("自费项目不能为空");
+                    }
+                    return new ProductDesignerSelectedOptionalItemRequest(
+                            item.resourceOptionalItemId(), item.introductionId(), item.supplierOptionalItemId(),
+                            null, null, item.salePrice());
+                })
+                .toList();
+        if (rows.stream().map(ProductDesignerSelectedOptionalItemRequest::resourceOptionalItemId)
+                .collect(Collectors.toSet()).size() != rows.size()) {
+            throw new BizException("自费项目不能重复选择");
+        }
+        return rows;
+    }
+
+    private List<Integer> standardMaterialSortOrders(List<ProductDesignerSelectedMaterialRequest> materials) {
+        return java.util.stream.IntStream.range(0, materials.size())
+                .filter(index -> "introduction".equals(materials.get(index).materialType()))
+                .map(index -> index + 1).boxed().toList();
+    }
+
+    private List<Integer> optionalMaterialSortOrders(List<ProductDesignerSelectedMaterialRequest> materials) {
+        return java.util.stream.IntStream.range(0, materials.size())
+                .filter(index -> "optional_item".equals(materials.get(index).materialType()))
+                .map(index -> index + 1).boxed().toList();
+    }
+
+    private List<Long> normalizedIntroductionIds(ProductDesignerIntroductionSaveRequest request) {
+        if (request.introductionIds() != null) {
+            return request.introductionIds().stream()
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+        }
+        return request.selectedIntroductionId() == null
+                ? List.of()
+                : List.of(request.selectedIntroductionId());
+    }
+
+    /**
+     * 按请求顺序批量读取并校验当前资源的已发布介绍素材。
+     */
+    private List<PurchaseResourceIntroductionEntity> introductionsForSave(
+            Long tenantId,
+            Long resourceId,
+            ProductDesignerDayResourceSaveRequest request,
+            List<Long> introductionIds
+    ) {
+        if (request.introductionIds() == null && request.selectedIntroductionId() != null) {
+            return List.of(introductionForSave(tenantId, resourceId, request.selectedIntroductionId()));
+        }
+        return introductionsForSaveByIds(tenantId, resourceId, introductionIds);
+    }
+
+    private List<PurchaseResourceIntroductionEntity> introductionsForSave(
+            Long tenantId,
+            Long resourceId,
+            ProductDesignerIntroductionSaveRequest request,
+            List<Long> introductionIds
+    ) {
+        if (request.introductionIds() == null && request.selectedIntroductionId() != null) {
+            return List.of(introductionForSave(tenantId, resourceId, request.selectedIntroductionId()));
+        }
+        return introductionsForSaveByIds(tenantId, resourceId, introductionIds);
+    }
+
+    private List<PurchaseResourceIntroductionEntity> introductionsForSaveByIds(
+            Long tenantId,
+            Long resourceId,
+            List<Long> introductionIds
+    ) {
+        if (introductionIds == null || introductionIds.isEmpty()) {
+            return List.of();
+        }
+        List<PurchaseResourceIntroductionEntity> introductions = introductionMapper.selectList(
+                new QueryWrapper<PurchaseResourceIntroductionEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .eq("resource_id", resourceId)
+                        .eq("status", INTRODUCTION_PUBLISHED)
+                        .in("id", introductionIds)
+        );
+        Map<Long, PurchaseResourceIntroductionEntity> byId = introductions.stream()
+                .collect(Collectors.toMap(PurchaseResourceIntroductionEntity::getId, Function.identity()));
+        if (byId.size() != introductionIds.size()
+                || introductionIds.stream().anyMatch(id -> !byId.containsKey(id))) {
+            throw new BizException("只能选择当前资源已发布的介绍版本");
+        }
+        return introductionIds.stream().map(byId::get).toList();
     }
 
     /**
@@ -950,6 +2036,80 @@ public class SalesProductDesignerService {
                 .orderByDesc("id"));
     }
 
+    /** 批量读取已发布介绍绑定的有效资源图片，确保产品详情接口不产生 N+1 查询。 */
+    private Map<Long, List<Long>> introductionImageIdsByIntroduction(
+            Long tenantId,
+            List<PurchaseResourceIntroductionEntity> introductions,
+            List<PurchaseResourceImageEntity> activeResourceImages
+    ) {
+        Map<Long, List<PurchaseResourceImageEntity>> imagesByResource = activeResourceImages.stream()
+                .collect(Collectors.groupingBy(
+                        PurchaseResourceImageEntity::getResourceId,
+                        LinkedHashMap::new,
+                        Collectors.toList()
+                ));
+        return introductionImageIdsByIntroduction(tenantId, introductions, imagesByResource);
+    }
+
+    /** 批量版本：按介绍所属资源过滤其有效图片关联。 */
+    private Map<Long, List<Long>> introductionImageIdsByIntroduction(
+            Long tenantId,
+            List<PurchaseResourceIntroductionEntity> introductions,
+            Map<Long, List<PurchaseResourceImageEntity>> activeImagesByResource
+    ) {
+        if (introductionImageMapper == null || introductions.isEmpty() || activeImagesByResource.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> introductionIds = introductions.stream()
+                .map(PurchaseResourceIntroductionEntity::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (introductionIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, Set<Long>> activeImageIdsByResource = activeImagesByResource.entrySet().stream()
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        entry -> entry.getValue().stream()
+                                .map(PurchaseResourceImageEntity::getId)
+                                .filter(Objects::nonNull)
+                                .collect(Collectors.toSet()),
+                        (left, right) -> left,
+                        LinkedHashMap::new
+                ));
+        if (activeImageIdsByResource.values().stream().allMatch(Set::isEmpty)) {
+            return Map.of();
+        }
+        List<PurchaseResourceIntroductionImageEntity> links = introductionImageMapper.selectList(
+                new QueryWrapper<PurchaseResourceIntroductionImageEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .in("introduction_id", introductionIds)
+                        .orderByAsc("introduction_id")
+                        .orderByAsc("sort_order")
+                        .orderByAsc("id")
+        );
+        if (links.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, List<Long>> imageIdsByIntroduction = new LinkedHashMap<>();
+        for (PurchaseResourceIntroductionImageEntity link : links) {
+            PurchaseResourceIntroductionEntity introduction = introductions.stream()
+                    .filter(item -> Objects.equals(item.getId(), link.getIntroductionId()))
+                    .findFirst()
+                    .orElse(null);
+            Set<Long> activeImageIds = introduction == null
+                    ? Set.of()
+                    : activeImageIdsByResource.getOrDefault(introduction.getResourceId(), Set.of());
+            if (activeImageIds.contains(link.getResourceImageId())) {
+                imageIdsByIntroduction
+                        .computeIfAbsent(link.getIntroductionId(), ignored -> new java.util.ArrayList<>())
+                        .add(link.getResourceImageId());
+            }
+        }
+        return imageIdsByIntroduction;
+    }
+
     private void applyIntroductionSnapshot(
             SalesProductDayResourceEntity entity,
             PurchaseResourceIntroductionEntity introduction
@@ -960,6 +2120,8 @@ public class SalesProductDesignerService {
             entity.setIntroductionTitleSnapshot(null);
             entity.setIntroductionContentSnapshot(null);
             entity.setIntroductionNoticeSnapshot(null);
+            entity.setIntroductionWarmTipSnapshot(null);
+            entity.setIntroductionVisitDurationSnapshot(null);
             return;
         }
         entity.setSelectedIntroductionId(introduction.getId());
@@ -967,6 +2129,18 @@ public class SalesProductDesignerService {
         entity.setIntroductionTitleSnapshot(introduction.getTitle());
         entity.setIntroductionContentSnapshot(introduction.getContent());
         entity.setIntroductionNoticeSnapshot(clean(introduction.getNoticeContent()));
+        entity.setIntroductionWarmTipSnapshot(clean(introduction.getWarmTipContent()));
+        entity.setIntroductionVisitDurationSnapshot(clean(introduction.getVisitDuration()));
+    }
+
+    private void applyIntroductionSnapshot(
+            SalesProductDayResourceEntity entity,
+            List<PurchaseResourceIntroductionEntity> introductions
+    ) {
+        PurchaseResourceIntroductionEntity first = introductions == null || introductions.isEmpty()
+                ? null
+                : introductions.getFirst();
+        applyIntroductionSnapshot(entity, first);
     }
 
     private void applyIntroductionSnapshotForSave(
@@ -982,6 +2156,75 @@ public class SalesProductDesignerService {
         applyIntroductionSnapshot(entity, introduction);
     }
 
+    private void applyIntroductionSnapshotForSave(
+            SalesProductDayResourceEntity entity,
+            Long resourceId,
+            List<PurchaseResourceIntroductionEntity> introductions
+    ) {
+        applyIntroductionSnapshot(entity, introductions);
+    }
+
+    private void saveIntroductionSnapshots(
+            Long tenantId,
+            SalesProductDayResourceEntity dayResource,
+            List<PurchaseResourceIntroductionEntity> introductions,
+            String operator
+    ) {
+        saveIntroductionSnapshots(tenantId, dayResource, introductions,
+                java.util.stream.IntStream.rangeClosed(1, introductions == null ? 0 : introductions.size())
+                        .boxed().toList(), operator);
+    }
+
+    /** 保存普通介绍快照；统一素材契约传入的排序是普通、自费混排后的绝对序号。 */
+    private void saveIntroductionSnapshots(
+            Long tenantId,
+            SalesProductDayResourceEntity dayResource,
+            List<PurchaseResourceIntroductionEntity> introductions,
+            List<Integer> sortOrders,
+            String operator
+    ) {
+        SalesProductDayResourceIntroductionEntity deleted =
+                new SalesProductDayResourceIntroductionEntity();
+        markDeleted(deleted, operator, OffsetDateTime.now());
+        dayResourceIntroductionMapper.update(deleted,
+                new UpdateWrapper<SalesProductDayResourceIntroductionEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .eq("product_id", dayResource.getProductId())
+                        .eq("day_resource_id", dayResource.getId()));
+        if (introductions == null || introductions.isEmpty()) {
+            return;
+        }
+        if (sortOrders == null || sortOrders.size() != introductions.size()) {
+            throw new BizException("介绍素材排序数据不完整");
+        }
+        for (int index = 0; index < introductions.size(); index += 1) {
+            PurchaseResourceIntroductionEntity introduction = introductions.get(index);
+            SalesProductDayResourceIntroductionEntity snapshot =
+                    new SalesProductDayResourceIntroductionEntity();
+            snapshot.setTenantId(tenantId);
+            snapshot.setProductId(dayResource.getProductId());
+            snapshot.setDayResourceId(dayResource.getId());
+            snapshot.setResourceIntroductionId(introduction.getId());
+            snapshot.setIntroductionIndexVersion(introduction.getIndexVersion());
+            snapshot.setTitleSnapshot(introduction.getTitle());
+            snapshot.setContentSnapshot(introduction.getContent());
+            snapshot.setNoticeSnapshot(clean(introduction.getNoticeContent()));
+            snapshot.setWarmTipSnapshot(clean(introduction.getWarmTipContent()));
+            snapshot.setExtensionBlocksSnapshot(introduction.getExtensionBlocks());
+            snapshot.setVisitDurationSnapshot(clean(introduction.getVisitDuration()));
+            snapshot.setSortOrder(sortOrders.get(index));
+            snapshot.setCreatedBy(operator);
+            snapshot.setIsDeleted(false);
+            dayResourceIntroductionMapper.insert(snapshot);
+        }
+    }
+
+    /** 未接入扩展模块的历史快照按空数组回显，避免影响既有产品。 */
+    private List<com.mtravel.platform.purchase.resource.material.dto.ResourceIntroductionExtensionBlock> extensionBlocks(String value) {
+        return extensionBlockCodec == null ? List.of() : extensionBlockCodec.decode(value);
+    }
+
     private BigDecimal unitPriceForSave(Long tenantId, PurchaseResourceEntity resource, PurchaseRelationEntity relation) {
         if (PurchaseResourceProcurementMode.NOT_REQUIRED.value().equals(resource.getProcurementMode())) {
             return BigDecimal.ZERO;
@@ -992,6 +2235,29 @@ public class SalesProductDesignerService {
     private List<ProductDesignerSupplierResponse> supplierResponses(Long tenantId, PurchaseResourceEntity resource) {
         return supplierResponsesByResource(tenantId, List.of(resource.getId()))
                 .getOrDefault(resource.getId(), List.of());
+    }
+
+    /** 批量读取景区资源自费项目主档，供当天方案左侧候选列表使用。 */
+    private Map<Long, List<PurchaseResourceOptionalItemResponse>> optionalItemsByResource(
+            Long tenantId,
+            List<Long> resourceIds
+    ) {
+        if (resourceOptionalItemMapper == null || resourceIds == null || resourceIds.isEmpty()) {
+            return Map.of();
+        }
+        return resourceOptionalItemMapper.selectList(new QueryWrapper<PurchaseResourceOptionalItemEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .in("resource_id", resourceIds)
+                        .orderByAsc("resource_id")
+                        .orderByAsc("project_name")
+                        .orderByAsc("id"))
+                .stream()
+                .collect(Collectors.groupingBy(
+                        PurchaseResourceOptionalItemEntity::getResourceId,
+                        LinkedHashMap::new,
+                        Collectors.mapping(PurchaseResourceOptionalItemResponse::fromEntity, Collectors.toList())
+                ));
     }
 
     private Map<Long, List<ProductDesignerSupplierResponse>> supplierResponsesByResource(
@@ -1013,11 +2279,13 @@ public class SalesProductDesignerService {
                         Collectors.toList()
                 ));
         Map<Long, List<ProductDesignerSupplierResponse>> result = new LinkedHashMap<>();
-        byResource.forEach((resourceId, resourceRows) -> result.put(resourceId, supplierResponses(resourceRows)));
+        List<Long> relationIds = rows.stream().map(PurchaseRelationSupplierPriceRow::getRelationId).distinct().toList();
+        Map<Long, List<ProductDesignerSupplierOptionalItemResponse>> optionalByRelation = relationOptionalItemMapper == null ? Map.of() : relationOptionalItemMapper.selectList(new QueryWrapper<PurchaseRelationOptionalItemEntity>().eq("tenant_id", tenantId).eq("is_deleted", false).eq("status", STATUS_ACTIVE).in("relation_id", relationIds)).stream().collect(Collectors.groupingBy(PurchaseRelationOptionalItemEntity::getRelationId, LinkedHashMap::new, Collectors.mapping(item -> new ProductDesignerSupplierOptionalItemResponse(item.getId(), item.getResourceOptionalItemId(), item.getProjectName(), money(item.getCostPrice()), money(item.getSuggestedSalePrice()), item.getStatus()), Collectors.toList())));
+        byResource.forEach((resourceId, resourceRows) -> result.put(resourceId, supplierResponses(resourceRows, optionalByRelation)));
         return result;
     }
 
-    private List<ProductDesignerSupplierResponse> supplierResponses(List<PurchaseRelationSupplierPriceRow> rows) {
+    private List<ProductDesignerSupplierResponse> supplierResponses(List<PurchaseRelationSupplierPriceRow> rows, Map<Long, List<ProductDesignerSupplierOptionalItemResponse>> optionalByRelation) {
         return rows.stream()
                 .collect(Collectors.groupingBy(
                         PurchaseRelationSupplierPriceRow::getRelationId,
@@ -1026,11 +2294,11 @@ public class SalesProductDesignerService {
                 ))
                 .values()
                 .stream()
-                .map(this::supplierResponse)
+                .map(group -> supplierResponse(group, optionalByRelation.getOrDefault(group.getFirst().getRelationId(), List.of())))
                 .toList();
     }
 
-    private ProductDesignerSupplierResponse supplierResponse(List<PurchaseRelationSupplierPriceRow> rows) {
+    private ProductDesignerSupplierResponse supplierResponse(List<PurchaseRelationSupplierPriceRow> rows, List<ProductDesignerSupplierOptionalItemResponse> optionalItems) {
         PurchaseRelationSupplierPriceRow relation = rows.getFirst();
         List<ProductDesignerSupplierPriceLineResponse> lines = rows.stream()
                 .filter(item -> item.getResourceProjectId() != null)
@@ -1050,7 +2318,8 @@ public class SalesProductDesignerService {
                 relation.getPriceMode(),
                 money(relation.getUnifiedPrice()),
                 referencePrice,
-                lines
+                lines,
+                optionalItems
         );
     }
 

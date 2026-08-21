@@ -20,5 +20,6 @@ public record ProductDesignerResourceDetailResponse(
         List<ProductDesignerIntroductionResponse> introductions,
         List<ProductDesignerResourceImageResponse> images,
         List<ProductDesignerSupplierResponse> suppliers,
-        Long defaultSupplierId
+        Long defaultSupplierId,
+        List<com.mtravel.platform.purchase.resource.optional.dto.PurchaseResourceOptionalItemResponse> optionalItems
 ) {}

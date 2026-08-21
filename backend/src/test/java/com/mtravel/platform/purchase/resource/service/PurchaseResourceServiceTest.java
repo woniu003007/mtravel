@@ -15,7 +15,6 @@ import java.time.LocalTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.mockito.stubbing.Answer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -64,7 +63,7 @@ class PurchaseResourceServiceTest {
     }
 
     @Test
-    void createShouldAutoCreateSameNameSupplierAndBindPurchaseRelation() {
+    void createShouldCreateDefaultSupplierForAnyResourceTypeWhenRequested() {
         PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
         SupplierMapper supplierMapper = mock(SupplierMapper.class);
         PurchaseRelationMapper relationMapper = mock(PurchaseRelationMapper.class);
@@ -74,16 +73,12 @@ class PurchaseResourceServiceTest {
         ArgumentCaptor<PurchaseRelationEntity> relationCaptor = ArgumentCaptor.forClass(PurchaseRelationEntity.class);
 
         when(resourceMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
-        when(supplierMapper.selectOne(any(Wrapper.class))).thenReturn(null);
-        when(relationMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
-        doAnswer((Answer<Integer>) invocation -> {
-            PurchaseResourceEntity entity = invocation.getArgument(0);
-            entity.setId(88L);
+        doAnswer(invocation -> {
+            ((PurchaseResourceEntity) invocation.getArgument(0)).setId(101L);
             return 1;
         }).when(resourceMapper).insert(any(PurchaseResourceEntity.class));
-        doAnswer((Answer<Integer>) invocation -> {
-            SupplierEntity entity = invocation.getArgument(0);
-            entity.setId(66L);
+        doAnswer(invocation -> {
+            ((SupplierEntity) invocation.getArgument(0)).setId(202L);
             return 1;
         }).when(supplierMapper).insert(any(SupplierEntity.class));
 
@@ -92,6 +87,25 @@ class PurchaseResourceServiceTest {
         verify(resourceMapper).insert(resourceCaptor.capture());
         verify(supplierMapper).insert(supplierCaptor.capture());
         verify(relationMapper).insert(relationCaptor.capture());
+
+        SupplierEntity supplier = supplierCaptor.getValue();
+        assertThat(supplier.getSupplierName()).isEqualTo("苏州园林");
+        assertThat(supplier.getSupplierCategory()).isEqualTo("scenic");
+        assertThat(supplier.getProvince()).isEqualTo("江苏省");
+        assertThat(supplier.getCity()).isEqualTo("苏州市");
+        assertThat(supplier.getDistrict()).isEqualTo("姑苏区");
+        assertThat(supplier.getContactName()).isEqualTo("资源联系人");
+        assertThat(supplier.getContactPhone()).isEqualTo("0512-00000000");
+        assertThat(supplier.getOfficeAddress()).isEqualTo("苏州市姑苏区测试路");
+
+        PurchaseRelationEntity relation = relationCaptor.getValue();
+        assertThat(relation.getResourceId()).isEqualTo(101L);
+        assertThat(relation.getSupplierId()).isEqualTo(202L);
+        assertThat(relation.getResourceType()).isEqualTo("scenic");
+        assertThat(relation.getResourceName()).isEqualTo("苏州园林");
+        assertThat(relation.getGroupQuantity()).isZero();
+        assertThat(relation.getIsDefault()).isTrue();
+        assertThat(relation.getStatus()).isEqualTo("active");
 
         PurchaseResourceEntity resource = resourceCaptor.getValue();
         assertThat(resource.getResourceType()).isEqualTo("scenic");
@@ -107,48 +121,22 @@ class PurchaseResourceServiceTest {
         assertThat(resource.getLastSiteVisitDate()).isEqualTo(LocalDate.of(2026, 8, 1));
         assertThat(resource.getSiteVisitNote()).isEqualTo("入口和停车场已核实");
         assertThat(resource.getIsDeleted()).isFalse();
-
-        SupplierEntity supplier = supplierCaptor.getValue();
-        assertThat(supplier.getSupplierName()).isEqualTo("苏州园林");
-        assertThat(supplier.getSupplierCategory()).isEqualTo("scenic");
-        assertThat(supplier.getStatus()).isEqualTo("active");
-
-        PurchaseRelationEntity relation = relationCaptor.getValue();
-        assertThat(relation.getResourceType()).isEqualTo("scenic");
-        assertThat(relation.getResourceId()).isEqualTo(88L);
-        assertThat(relation.getResourceName()).isEqualTo("苏州园林");
-        assertThat(relation.getSupplierId()).isEqualTo(66L);
-        assertThat(relation.getGroupQuantity()).isZero();
-        assertThat(relation.getPurchasePrice()).isNull();
-        assertThat(relation.getStatus()).isEqualTo("active");
     }
 
     @Test
-    void createShouldReuseExistingSameNameSupplierWhenAutoCreateEnabled() {
+    void createShouldNotCreateSupplierWhenAutoCreateIsDisabled() {
         PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
         SupplierMapper supplierMapper = mock(SupplierMapper.class);
         PurchaseRelationMapper relationMapper = mock(PurchaseRelationMapper.class);
         PurchaseResourceService service = new PurchaseResourceService(resourceMapper, supplierMapper, relationMapper);
-        ArgumentCaptor<PurchaseRelationEntity> relationCaptor = ArgumentCaptor.forClass(PurchaseRelationEntity.class);
-        SupplierEntity existing = new SupplierEntity();
-        existing.setId(12L);
-        existing.setSupplierName("苏州园林");
-        existing.setSupplierCategory("scenic");
 
         when(resourceMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
-        when(supplierMapper.selectOne(any(Wrapper.class))).thenReturn(existing);
-        when(relationMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
-        doAnswer((Answer<Integer>) invocation -> {
-            PurchaseResourceEntity entity = invocation.getArgument(0);
-            entity.setId(90L);
-            return 1;
-        }).when(resourceMapper).insert(any(PurchaseResourceEntity.class));
 
-        service.create(request(true), 1L, "admin");
+        service.create(request(false), 1L, "admin");
 
+        verify(resourceMapper).insert(any(PurchaseResourceEntity.class));
         verify(supplierMapper, never()).insert(any(SupplierEntity.class));
-        verify(relationMapper).insert(relationCaptor.capture());
-        assertThat(relationCaptor.getValue().getSupplierId()).isEqualTo(12L);
+        verify(relationMapper, never()).insert(any(PurchaseRelationEntity.class));
     }
 
     @Test

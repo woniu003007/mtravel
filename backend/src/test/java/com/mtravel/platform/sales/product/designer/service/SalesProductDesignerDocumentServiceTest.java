@@ -2,14 +2,18 @@ package com.mtravel.platform.sales.product.designer.service;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mtravel.platform.common.attachment.entity.CommonAttachmentEntity;
 import com.mtravel.platform.common.attachment.dto.AttachmentResponse;
 import com.mtravel.platform.common.attachment.service.CommonAttachmentService;
 import com.mtravel.platform.sales.product.designer.entity.SalesProductAdultQuoteEntity;
 import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceEntity;
+import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceIntroductionEntity;
+import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceImageEntity;
 import com.mtravel.platform.sales.product.designer.entity.SalesProductDocumentVersionEntity;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductAdultQuoteMapper;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceMapper;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceImageMapper;
+import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceIntroductionMapper;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductDocumentVersionMapper;
 import com.mtravel.platform.sales.product.entity.SalesProductEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductDescriptionEntity;
@@ -17,15 +21,25 @@ import com.mtravel.platform.sales.product.entity.SalesProductItineraryDayEntity;
 import com.mtravel.platform.sales.product.mapper.SalesProductDescriptionMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductItineraryDayMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductMapper;
+import com.mtravel.platform.purchase.resource.material.dto.ResourceIntroductionExtensionBlock;
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.util.Base64;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
+import java.util.zip.ZipInputStream;
+import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Assumptions;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xwpf.usermodel.XWPFParagraph;
+import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -46,6 +60,8 @@ class SalesProductDesignerDocumentServiceTest {
         SalesProductMapper productMapper = mock(SalesProductMapper.class);
         SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
         SalesProductDayResourceImageMapper dayResourceImageMapper = mock(SalesProductDayResourceImageMapper.class);
+        SalesProductDayResourceIntroductionMapper dayResourceIntroductionMapper =
+                mock(SalesProductDayResourceIntroductionMapper.class);
         SalesProductAdultQuoteMapper adultQuoteMapper = mock(SalesProductAdultQuoteMapper.class);
         SalesProductDescriptionMapper descriptionMapper = mock(SalesProductDescriptionMapper.class);
         SalesProductItineraryDayMapper itineraryDayMapper = mock(SalesProductItineraryDayMapper.class);
@@ -53,7 +69,8 @@ class SalesProductDesignerDocumentServiceTest {
         CommonAttachmentService attachmentService = mock(CommonAttachmentService.class);
         SalesProductDesignerDocumentService service = service(
                 productMapper, descriptionMapper, itineraryDayMapper, dayResourceMapper,
-                dayResourceImageMapper, adultQuoteMapper, versionMapper, attachmentService
+                dayResourceImageMapper, dayResourceIntroductionMapper,
+                adultQuoteMapper, versionMapper, attachmentService
         );
         when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
         when(dayResourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of(resource()));
@@ -92,7 +109,7 @@ class SalesProductDesignerDocumentServiceTest {
             String text = document.getParagraphs().stream()
                     .map(paragraph -> paragraph.getText())
                     .reduce("", (left, right) -> left + right);
-            assertThat(text).contains("漫步西湖", "费用包含", "行程内首道门票", "杭州接团游览西湖", "雨天注意防滑", "请勿下水");
+            assertThat(text).contains("漫步西湖", "费用包含", "行程内首道门票", "杭州接团游览西湖", "建议穿舒适鞋子", "雨天注意防滑", "请勿下水");
             assertThat(text).doesNotContain("供应商内部成本");
             assertThat(document.getParagraphs().stream()
                     .flatMap(paragraph -> paragraph.getRuns().stream())
@@ -104,6 +121,29 @@ class SalesProductDesignerDocumentServiceTest {
                     .filter(run -> "沿湖步行，感受杭州的城市风景。".equals(run.text()))
                     .map(org.apache.poi.xwpf.usermodel.XWPFRun::getColor))
                     .containsOnlyNulls();
+            assertThat(document.getParagraphs().stream()
+                    .flatMap(paragraph -> paragraph.getRuns().stream())
+                    .filter(run -> "建议穿舒适鞋子".equals(run.text()))
+                    .map(org.apache.poi.xwpf.usermodel.XWPFRun::getColor))
+                    .containsOnlyNulls();
+            List<XWPFParagraph> paragraphs = document.getParagraphs();
+            int introductionStart = paragraphs.stream()
+                    .map(XWPFParagraph::getText)
+                    .toList()
+                    .indexOf("沿湖步行，感受杭州的城市风景。");
+            assertThat(introductionStart).isGreaterThanOrEqualTo(0);
+            assertThat(paragraphs.subList(introductionStart, introductionStart + 5))
+                    .extracting(XWPFParagraph::getText)
+                    .containsExactly(
+                            "沿湖步行，感受杭州的城市风景。",
+                            "",
+                            "灵山大佛绝佳拍照机位推荐：",
+                            "1、胜境门楼：整条灵山的中轴线尽在视觉延伸线上。",
+                            "2、佛手广场：可拍摄天下第一掌与大佛的合影。"
+                    );
+            XWPFParagraph numberedParagraph = paragraphs.get(introductionStart + 3);
+            assertThat(numberedParagraph.getIndentationLeft()).isEqualTo(420);
+            assertThat(numberedParagraph.getIndentationHanging()).isEqualTo(420);
             assertThat(document.getParagraphs().stream()
                     .flatMap(paragraph -> paragraph.getRuns().stream())
                     .map(run -> run.getFontFamily(org.apache.poi.xwpf.usermodel.XWPFRun.FontCharRange.eastAsia)))
@@ -126,10 +166,12 @@ class SalesProductDesignerDocumentServiceTest {
     }
 
     @Test
-    void adultQuoteShouldOnlyExposeExternalPrice() throws Exception {
+    void productWordShouldConcatenateMultipleIntroductionSnapshotsInOrder() throws Exception {
         SalesProductMapper productMapper = mock(SalesProductMapper.class);
         SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
         SalesProductDayResourceImageMapper dayResourceImageMapper = mock(SalesProductDayResourceImageMapper.class);
+        SalesProductDayResourceIntroductionMapper dayResourceIntroductionMapper =
+                mock(SalesProductDayResourceIntroductionMapper.class);
         SalesProductAdultQuoteMapper adultQuoteMapper = mock(SalesProductAdultQuoteMapper.class);
         SalesProductDescriptionMapper descriptionMapper = mock(SalesProductDescriptionMapper.class);
         SalesProductItineraryDayMapper itineraryDayMapper = mock(SalesProductItineraryDayMapper.class);
@@ -137,7 +179,385 @@ class SalesProductDesignerDocumentServiceTest {
         CommonAttachmentService attachmentService = mock(CommonAttachmentService.class);
         SalesProductDesignerDocumentService service = service(
                 productMapper, descriptionMapper, itineraryDayMapper, dayResourceMapper,
-                dayResourceImageMapper, adultQuoteMapper, versionMapper, attachmentService
+                dayResourceImageMapper, dayResourceIntroductionMapper,
+                adultQuoteMapper, versionMapper, attachmentService
+        );
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
+        when(dayResourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of(resource()));
+        when(descriptionMapper.selectOne(any(Wrapper.class))).thenReturn(null);
+        when(itineraryDayMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(dayResourceImageMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        var firstIntroduction = introductionSnapshot(801L, 701L, 1, "灵山主体", "先游览灵山胜境。");
+        firstIntroduction.setNoticeSnapshot("表演时间以景区当天安排为准");
+        firstIntroduction.setVisitDurationSnapshot("60");
+        when(dayResourceIntroductionMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                firstIntroduction,
+                introductionSnapshot(802L, 702L, 2, "九龙灌浴", "随后观看九龙灌浴。")
+        ));
+        when(versionMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(attachmentService.uploadBytes(
+                any(byte[].class), anyString(), anyString(), anyString(), anyString(), anyLong(), anyLong(), anyString()
+        )).thenReturn(uploadedAttachment());
+        when(versionMapper.insert(any(SalesProductDocumentVersionEntity.class))).thenAnswer(invocation -> 1);
+
+        ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
+        service.productWord(1L, 88L, "admin");
+        verify(attachmentService).uploadBytes(
+                bytesCaptor.capture(), anyString(), anyString(), anyString(), anyString(), eq(88L), eq(1L), eq("admin")
+        );
+
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytesCaptor.getValue()))) {
+            String text = document.getParagraphs().stream()
+                    .map(XWPFParagraph::getText)
+                    .reduce("", (left, right) -> left + "|" + right);
+            assertThat(text.indexOf("灵山主体")).isGreaterThanOrEqualTo(0);
+            assertThat(text.indexOf("九龙灌浴")).isGreaterThan(text.indexOf("灵山主体"));
+            assertThat(text).contains("先游览灵山胜境。", "随后观看九龙灌浴。");
+            List<XWPFParagraph> contentParagraphs = document.getTables().get(1).getRow(3).getCell(0).getParagraphs();
+            List<String> contentTexts = contentParagraphs.stream().map(XWPFParagraph::getText).toList();
+            assertThat(contentTexts).anyMatch(value -> value.contains("灵山主体") && value.contains("九龙灌浴"));
+            int titleIndex = contentTexts.stream().mapToInt(value -> value.contains("游览： 【灵山主体】（游览约60分钟）") ? contentTexts.indexOf(value) : -1).max().orElse(-1);
+            assertThat(titleIndex).as("content paragraphs: %s", contentTexts).isGreaterThanOrEqualTo(0);
+            XWPFParagraph resourceParagraph = contentParagraphs.get(titleIndex);
+            assertThat(resourceParagraph.getIndentationFirstLine()).isEqualTo(420);
+            assertThat(resourceParagraph.getText()).contains("表演时间以景区当天安排为准", "先游览灵山胜境。", "【九龙灌浴】", "随后观看九龙灌浴。");
+            assertThat(resourceParagraph.getRuns().stream()
+                    .filter(run -> "表演时间以景区当天安排为准".equals(run.text()))
+                    .map(org.apache.poi.xwpf.usermodel.XWPFRun::getColor))
+                    .containsOnly("C00000");
+        }
+    }
+
+    @Test
+    void productWordShouldPlaceDayEndImagesInCompactGrid() throws Exception {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDayResourceImageMapper dayResourceImageMapper = mock(SalesProductDayResourceImageMapper.class);
+        SalesProductDayResourceIntroductionMapper dayResourceIntroductionMapper = mock(SalesProductDayResourceIntroductionMapper.class);
+        SalesProductAdultQuoteMapper adultQuoteMapper = mock(SalesProductAdultQuoteMapper.class);
+        SalesProductDescriptionMapper descriptionMapper = mock(SalesProductDescriptionMapper.class);
+        SalesProductItineraryDayMapper itineraryDayMapper = mock(SalesProductItineraryDayMapper.class);
+        SalesProductDocumentVersionMapper versionMapper = mock(SalesProductDocumentVersionMapper.class);
+        CommonAttachmentService attachmentService = mock(CommonAttachmentService.class);
+        SalesProductDesignerDocumentService service = service(
+                productMapper, descriptionMapper, itineraryDayMapper, dayResourceMapper,
+                dayResourceImageMapper, dayResourceIntroductionMapper,
+                adultQuoteMapper, versionMapper, attachmentService
+        );
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
+        when(dayResourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of(resource()));
+        SalesProductItineraryDayEntity itinerary = new SalesProductItineraryDayEntity();
+        itinerary.setDayNo(1);
+        itinerary.setWordImageMode("day_end");
+        when(itineraryDayMapper.selectList(any(Wrapper.class))).thenReturn(List.of(itinerary));
+        when(descriptionMapper.selectOne(any(Wrapper.class))).thenReturn(null);
+        when(dayResourceIntroductionMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        SalesProductDayResourceImageEntity first = imageSnapshot(601L, 701L, 1);
+        SalesProductDayResourceImageEntity second = imageSnapshot(602L, 702L, 2);
+        when(dayResourceImageMapper.selectList(any(Wrapper.class))).thenReturn(List.of(first, second));
+        when(attachmentService.getEntity(anyLong(), eq(1L))).thenAnswer(invocation -> attachment(invocation.getArgument(0)));
+        when(attachmentService.openStream(anyLong(), eq(1L))).thenAnswer(invocation -> new ByteArrayInputStream(onePixelPng()));
+        when(versionMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(attachmentService.uploadBytes(any(byte[].class), anyString(), anyString(), anyString(), anyString(), anyLong(), anyLong(), anyString()))
+                .thenReturn(uploadedAttachment());
+        when(versionMapper.insert(any(SalesProductDocumentVersionEntity.class))).thenAnswer(invocation -> 1);
+
+        ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
+        service.productWord(1L, 88L, "admin");
+        verify(attachmentService).uploadBytes(bytesCaptor.capture(), anyString(), anyString(), anyString(), anyString(), anyLong(), anyLong(), anyString());
+        writeImageLayoutSampleIfRequested(bytesCaptor.getValue());
+
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytesCaptor.getValue()))) {
+            var contentCell = document.getTables().get(1).getRow(3).getCell(0);
+            assertThat(contentCell.getTables()).hasSize(1);
+            assertThat(contentCell.getTables().getFirst().getNumberOfRows()).isEqualTo(1);
+            assertThat(contentCell.getTables().getFirst().getRow(0).getTableCells()).hasSize(2);
+            var firstImageRun = contentCell.getTables().getFirst().getRow(0).getCell(0)
+                    .getParagraphs().getFirst().getRuns().getFirst();
+            assertThat(firstImageRun.getCTR().getDrawingArray(0).getInlineArray(0).getExtent().getCx())
+                    .isEqualTo(3_429_000L);
+            var imageBorders = contentCell.getTables().getFirst().getRow(0).getCell(0)
+                    .getCTTc().getTcPr().getTcBorders();
+            assertThat(imageBorders).isNotNull();
+            assertThat((byte[]) imageBorders.getTop().getColor()).containsExactly((byte) 0xD9, (byte) 0xD9, (byte) 0xD9);
+        }
+    }
+
+    @Test
+    void productWordShouldPlaceThreeImagesInOneRow() throws Exception {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDayResourceImageMapper dayResourceImageMapper = mock(SalesProductDayResourceImageMapper.class);
+        SalesProductDayResourceIntroductionMapper dayResourceIntroductionMapper = mock(SalesProductDayResourceIntroductionMapper.class);
+        SalesProductAdultQuoteMapper adultQuoteMapper = mock(SalesProductAdultQuoteMapper.class);
+        SalesProductDescriptionMapper descriptionMapper = mock(SalesProductDescriptionMapper.class);
+        SalesProductItineraryDayMapper itineraryDayMapper = mock(SalesProductItineraryDayMapper.class);
+        SalesProductDocumentVersionMapper versionMapper = mock(SalesProductDocumentVersionMapper.class);
+        CommonAttachmentService attachmentService = mock(CommonAttachmentService.class);
+        SalesProductDesignerDocumentService service = service(
+                productMapper, descriptionMapper, itineraryDayMapper, dayResourceMapper,
+                dayResourceImageMapper, dayResourceIntroductionMapper,
+                adultQuoteMapper, versionMapper, attachmentService
+        );
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
+        when(dayResourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of(resource()));
+        SalesProductItineraryDayEntity itinerary = new SalesProductItineraryDayEntity();
+        itinerary.setDayNo(1);
+        itinerary.setWordImageMode("day_end");
+        when(itineraryDayMapper.selectList(any(Wrapper.class))).thenReturn(List.of(itinerary));
+        when(descriptionMapper.selectOne(any(Wrapper.class))).thenReturn(null);
+        when(dayResourceIntroductionMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(dayResourceImageMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                imageSnapshot(601L, 701L, 1),
+                imageSnapshot(602L, 702L, 2),
+                imageSnapshot(603L, 703L, 3)
+        ));
+        when(attachmentService.getEntity(anyLong(), eq(1L))).thenAnswer(invocation -> attachment(invocation.getArgument(0)));
+        when(attachmentService.openStream(anyLong(), eq(1L))).thenAnswer(invocation -> new ByteArrayInputStream(onePixelPng()));
+        when(versionMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(attachmentService.uploadBytes(any(byte[].class), anyString(), anyString(), anyString(), anyString(), anyLong(), anyLong(), anyString()))
+                .thenReturn(uploadedAttachment());
+        when(versionMapper.insert(any(SalesProductDocumentVersionEntity.class))).thenAnswer(invocation -> 1);
+
+        ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
+        service.productWord(1L, 88L, "admin");
+        verify(attachmentService).uploadBytes(bytesCaptor.capture(), anyString(), anyString(), anyString(), anyString(), anyLong(), anyLong(), anyString());
+        writeImageLayoutSampleIfRequested(bytesCaptor.getValue());
+
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytesCaptor.getValue()))) {
+            var contentCell = document.getTables().get(1).getRow(3).getCell(0);
+            assertThat(contentCell.getTables()).hasSize(1);
+            assertThat(contentCell.getTables().getFirst().getRow(0).getTableCells()).hasSize(3);
+            var firstImageRun = contentCell.getTables().getFirst().getRow(0).getCell(0)
+                    .getParagraphs().getFirst().getRuns().getFirst();
+            assertThat(firstImageRun.getCTR().getDrawingArray(0).getInlineArray(0).getExtent().getCx())
+                    .isEqualTo(2_286_000L);
+        }
+    }
+
+    @Test
+    void productWordShouldCoverCropPortraitImageToFourByThreeFrame() throws Exception {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDayResourceImageMapper dayResourceImageMapper = mock(SalesProductDayResourceImageMapper.class);
+        SalesProductDayResourceIntroductionMapper dayResourceIntroductionMapper = mock(SalesProductDayResourceIntroductionMapper.class);
+        SalesProductAdultQuoteMapper adultQuoteMapper = mock(SalesProductAdultQuoteMapper.class);
+        SalesProductDescriptionMapper descriptionMapper = mock(SalesProductDescriptionMapper.class);
+        SalesProductItineraryDayMapper itineraryDayMapper = mock(SalesProductItineraryDayMapper.class);
+        SalesProductDocumentVersionMapper versionMapper = mock(SalesProductDocumentVersionMapper.class);
+        CommonAttachmentService attachmentService = mock(CommonAttachmentService.class);
+        SalesProductDesignerDocumentService service = service(
+                productMapper, descriptionMapper, itineraryDayMapper, dayResourceMapper,
+                dayResourceImageMapper, dayResourceIntroductionMapper,
+                adultQuoteMapper, versionMapper, attachmentService
+        );
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
+        when(dayResourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of(resource()));
+        SalesProductItineraryDayEntity itinerary = new SalesProductItineraryDayEntity();
+        itinerary.setDayNo(1);
+        itinerary.setWordImageMode("day_end");
+        when(itineraryDayMapper.selectList(any(Wrapper.class))).thenReturn(List.of(itinerary));
+        when(descriptionMapper.selectOne(any(Wrapper.class))).thenReturn(null);
+        when(dayResourceIntroductionMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(dayResourceImageMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                imageSnapshot(601L, 701L, 1), imageSnapshot(602L, 702L, 2)
+        ));
+        when(attachmentService.getEntity(anyLong(), eq(1L))).thenAnswer(invocation -> attachment(invocation.getArgument(0)));
+        when(attachmentService.openStream(anyLong(), eq(1L))).thenAnswer(invocation -> new ByteArrayInputStream(portraitPng()));
+        when(versionMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(attachmentService.uploadBytes(any(byte[].class), anyString(), anyString(), anyString(), anyString(), anyLong(), anyLong(), anyString()))
+                .thenReturn(uploadedAttachment());
+        when(versionMapper.insert(any(SalesProductDocumentVersionEntity.class))).thenAnswer(invocation -> 1);
+
+        ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
+        service.productWord(1L, 88L, "admin");
+        verify(attachmentService).uploadBytes(bytesCaptor.capture(), anyString(), anyString(), anyString(), anyString(), anyLong(), anyLong(), anyString());
+
+        BufferedImage embedded = firstEmbeddedPicture(bytesCaptor.getValue());
+        assertThat(embedded.getWidth() * 3).isEqualTo(embedded.getHeight() * 4);
+    }
+
+    private SalesProductDayResourceImageEntity imageSnapshot(Long id, Long attachmentId, int sortOrder) {
+        SalesProductDayResourceImageEntity image = new SalesProductDayResourceImageEntity();
+        image.setId(id);
+        image.setDayResourceId(301L);
+        image.setResourceImageId(id);
+        image.setAttachmentId(attachmentId);
+        image.setOriginalFilenameSnapshot("scenic-" + sortOrder + ".png");
+        image.setSortOrder(sortOrder);
+        return image;
+    }
+
+    private CommonAttachmentEntity attachment(Long id) {
+        CommonAttachmentEntity attachment = new CommonAttachmentEntity();
+        attachment.setId(id);
+        attachment.setContentType("image/png");
+        attachment.setOriginalFilename("scenic.png");
+        return attachment;
+    }
+
+    private byte[] onePixelPng() {
+        return Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+    }
+
+    private byte[] portraitPng() throws IOException {
+        BufferedImage image = new BufferedImage(120, 240, BufferedImage.TYPE_INT_RGB);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", output);
+        return output.toByteArray();
+    }
+
+    private BufferedImage firstEmbeddedPicture(byte[] documentBytes) throws IOException {
+        try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(documentBytes))) {
+            ZipEntry entry;
+            while ((entry = input.getNextEntry()) != null) {
+                if (entry.getName().startsWith("word/media/")) {
+                    BufferedImage image = ImageIO.read(input);
+                    if (image != null) return image;
+                }
+            }
+        }
+        throw new AssertionError("Word document does not contain an embedded picture");
+    }
+
+    private void writeImageLayoutSampleIfRequested(byte[] documentBytes) throws IOException {
+        String outputDir = System.getProperty("productDesignerImageOutputDir");
+        if (outputDir == null || outputDir.isBlank()) return;
+        Path output = Path.of(outputDir);
+        Files.createDirectories(output);
+        Files.write(output.resolve("product-word-image-layout.docx"), documentBytes);
+    }
+
+    @Test
+    void productWordShouldRenderIntroductionExtensionBlocksFromSnapshot() throws Exception {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDayResourceImageMapper dayResourceImageMapper = mock(SalesProductDayResourceImageMapper.class);
+        SalesProductDayResourceIntroductionMapper dayResourceIntroductionMapper =
+                mock(SalesProductDayResourceIntroductionMapper.class);
+        SalesProductAdultQuoteMapper adultQuoteMapper = mock(SalesProductAdultQuoteMapper.class);
+        SalesProductDescriptionMapper descriptionMapper = mock(SalesProductDescriptionMapper.class);
+        SalesProductItineraryDayMapper itineraryDayMapper = mock(SalesProductItineraryDayMapper.class);
+        SalesProductDocumentVersionMapper versionMapper = mock(SalesProductDocumentVersionMapper.class);
+        CommonAttachmentService attachmentService = mock(CommonAttachmentService.class);
+        SalesProductDesignerDocumentService service = service(
+                productMapper, descriptionMapper, itineraryDayMapper, dayResourceMapper,
+                dayResourceImageMapper, dayResourceIntroductionMapper,
+                adultQuoteMapper, versionMapper, attachmentService
+        );
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
+        when(dayResourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of(resource()));
+        when(descriptionMapper.selectOne(any(Wrapper.class))).thenReturn(null);
+        when(itineraryDayMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(dayResourceImageMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        SalesProductDayResourceIntroductionEntity introduction =
+                introductionSnapshot(801L, 701L, 1, "灵山胜境", "游览灵山胜境。");
+        introduction.setExtensionBlocksSnapshot(new ObjectMapper().writeValueAsString(List.of(
+                new ResourceIntroductionExtensionBlock(
+                        "generic", "灵山大佛绝佳拍照机位推荐：", "#d97706", "items", null,
+                        List.of("1、胜境门楼：整条灵山的中轴线尽在视觉延伸线上。",
+                                "2、佛手广场：可拍摄天下第一掌与大佛的合影。",
+                                "3、祥符禅寺山门：经典两佛伴行场景。",
+                                "4、杏坛广场：最近距离拍到大佛全景。")
+                )
+        )));
+        when(dayResourceIntroductionMapper.selectList(any(Wrapper.class))).thenReturn(List.of(introduction));
+        when(versionMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(attachmentService.uploadBytes(
+                any(byte[].class), anyString(), anyString(), anyString(), anyString(), anyLong(), anyLong(), anyString()
+        )).thenReturn(uploadedAttachment());
+        when(versionMapper.insert(any(SalesProductDocumentVersionEntity.class))).thenAnswer(invocation -> 1);
+
+        ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
+        service.productWord(1L, 88L, "admin");
+        verify(attachmentService).uploadBytes(
+                bytesCaptor.capture(), anyString(), anyString(), anyString(), anyString(), eq(88L), eq(1L), eq("admin")
+        );
+
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytesCaptor.getValue()))) {
+            XWPFParagraph paragraph = document.getTables().get(1).getRow(3).getCell(0).getParagraphs().stream()
+                    .filter(item -> item.getText().contains("灵山大佛绝佳拍照机位推荐："))
+                    .findFirst()
+                    .orElseThrow();
+            String text = paragraph.getText();
+            assertThat(text).contains(
+                    "灵山大佛绝佳拍照机位推荐：",
+                    "1、胜境门楼：整条灵山的中轴线尽在视觉延伸线上。",
+                    "4、杏坛广场：最近距离拍到大佛全景。"
+            );
+            assertThat(text.indexOf("1、胜境门楼")).isLessThan(text.indexOf("4、杏坛广场"));
+            assertThat(paragraph.getRuns().stream()
+                    .filter(run -> run.text() != null && run.text().contains("灵山大佛绝佳拍照机位推荐："))
+                    .map(XWPFRun::getColor))
+                    .containsOnly("D97706");
+        }
+    }
+
+    @Test
+    void productWordShouldUseTemplateAndPrefixEachScenicGroupOnce() throws Exception {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDayResourceImageMapper dayResourceImageMapper = mock(SalesProductDayResourceImageMapper.class);
+        SalesProductDayResourceIntroductionMapper dayResourceIntroductionMapper =
+                mock(SalesProductDayResourceIntroductionMapper.class);
+        SalesProductAdultQuoteMapper adultQuoteMapper = mock(SalesProductAdultQuoteMapper.class);
+        SalesProductDescriptionMapper descriptionMapper = mock(SalesProductDescriptionMapper.class);
+        SalesProductItineraryDayMapper itineraryDayMapper = mock(SalesProductItineraryDayMapper.class);
+        SalesProductDocumentVersionMapper versionMapper = mock(SalesProductDocumentVersionMapper.class);
+        CommonAttachmentService attachmentService = mock(CommonAttachmentService.class);
+        SalesProductDesignerDocumentService service = service(
+                productMapper, descriptionMapper, itineraryDayMapper, dayResourceMapper,
+                dayResourceImageMapper, dayResourceIntroductionMapper,
+                adultQuoteMapper, versionMapper, attachmentService
+        );
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
+        when(dayResourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of(resource(), secondResource()));
+        when(descriptionMapper.selectOne(any(Wrapper.class))).thenReturn(null);
+        when(itineraryDayMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(dayResourceImageMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(dayResourceIntroductionMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                introductionSnapshot(801L, 701L, 1, "灵山胜境", "先游览灵山胜境。"),
+                introductionSnapshot(802L, 702L, 2, "九龙灌浴", "随后观看九龙灌浴。"),
+                introductionSnapshot(803L, 302L, 703L, 1, "惠山古镇", "游览惠山古镇。")
+        ));
+        when(versionMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(attachmentService.uploadBytes(
+                any(byte[].class), anyString(), anyString(), anyString(), anyString(), anyLong(), anyLong(), anyString()
+        )).thenReturn(uploadedAttachment());
+        when(versionMapper.insert(any(SalesProductDocumentVersionEntity.class))).thenAnswer(invocation -> 1);
+
+        ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
+        service.productWord(1L, 88L, "admin");
+        verify(attachmentService).uploadBytes(
+                bytesCaptor.capture(), anyString(), anyString(), anyString(), anyString(), eq(88L), eq(1L), eq("admin")
+        );
+
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytesCaptor.getValue()))) {
+            assertThat(document.getTables()).hasSize(2);
+            String text = allDocumentText(document);
+            assertThat(text).contains("灵山胜境", "九龙灌浴", "惠山古镇");
+            assertThat(text).contains("游览： 【灵山胜境】", "【九龙灌浴】", "游览： 【惠山古镇】");
+            assertThat(countOccurrences(text, "游览：")).isEqualTo(2);
+            assertThat(text).doesNotContain("供应商内部成本");
+        }
+    }
+
+    @Test
+    void adultQuoteShouldOnlyExposeExternalPrice() throws Exception {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDayResourceImageMapper dayResourceImageMapper = mock(SalesProductDayResourceImageMapper.class);
+        SalesProductDayResourceIntroductionMapper dayResourceIntroductionMapper =
+                mock(SalesProductDayResourceIntroductionMapper.class);
+        SalesProductAdultQuoteMapper adultQuoteMapper = mock(SalesProductAdultQuoteMapper.class);
+        SalesProductDescriptionMapper descriptionMapper = mock(SalesProductDescriptionMapper.class);
+        SalesProductItineraryDayMapper itineraryDayMapper = mock(SalesProductItineraryDayMapper.class);
+        SalesProductDocumentVersionMapper versionMapper = mock(SalesProductDocumentVersionMapper.class);
+        CommonAttachmentService attachmentService = mock(CommonAttachmentService.class);
+        SalesProductDesignerDocumentService service = service(
+                productMapper, descriptionMapper, itineraryDayMapper, dayResourceMapper,
+                dayResourceImageMapper, dayResourceIntroductionMapper,
+                adultQuoteMapper, versionMapper, attachmentService
         );
         when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
         when(adultQuoteMapper.selectList(any(Wrapper.class))).thenReturn(List.of(quote()));
@@ -188,6 +608,8 @@ class SalesProductDesignerDocumentServiceTest {
         SalesProductMapper productMapper = mock(SalesProductMapper.class);
         SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
         SalesProductDayResourceImageMapper dayResourceImageMapper = mock(SalesProductDayResourceImageMapper.class);
+        SalesProductDayResourceIntroductionMapper dayResourceIntroductionMapper =
+                mock(SalesProductDayResourceIntroductionMapper.class);
         SalesProductAdultQuoteMapper adultQuoteMapper = mock(SalesProductAdultQuoteMapper.class);
         SalesProductDescriptionMapper descriptionMapper = mock(SalesProductDescriptionMapper.class);
         SalesProductItineraryDayMapper itineraryDayMapper = mock(SalesProductItineraryDayMapper.class);
@@ -195,7 +617,8 @@ class SalesProductDesignerDocumentServiceTest {
         CommonAttachmentService attachmentService = mock(CommonAttachmentService.class);
         SalesProductDesignerDocumentService service = service(
                 productMapper, descriptionMapper, itineraryDayMapper, dayResourceMapper,
-                dayResourceImageMapper, adultQuoteMapper, versionMapper, attachmentService
+                dayResourceImageMapper, dayResourceIntroductionMapper,
+                adultQuoteMapper, versionMapper, attachmentService
         );
         when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
         when(dayResourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of(resource()));
@@ -249,13 +672,14 @@ class SalesProductDesignerDocumentServiceTest {
             SalesProductItineraryDayMapper itineraryDayMapper,
             SalesProductDayResourceMapper dayResourceMapper,
             SalesProductDayResourceImageMapper dayResourceImageMapper,
+            SalesProductDayResourceIntroductionMapper dayResourceIntroductionMapper,
             SalesProductAdultQuoteMapper adultQuoteMapper,
             SalesProductDocumentVersionMapper versionMapper,
             CommonAttachmentService attachmentService
     ) {
         return new SalesProductDesignerDocumentService(
                 productMapper, descriptionMapper, itineraryDayMapper, dayResourceMapper,
-                dayResourceImageMapper, adultQuoteMapper, versionMapper,
+                dayResourceImageMapper, dayResourceIntroductionMapper, adultQuoteMapper, versionMapper,
                 attachmentService, new ObjectMapper()
         );
     }
@@ -283,11 +707,79 @@ class SalesProductDesignerDocumentServiceTest {
         entity.setIncludeInWord(true);
         entity.setStayMinutes(120);
         entity.setIntroductionTitleSnapshot("漫步西湖");
-        entity.setIntroductionContentSnapshot("沿湖步行，感受杭州的城市风景。");
+        entity.setIntroductionContentSnapshot(
+                "沿湖步行，感受杭州的城市风景。\n\n"
+                        + "灵山大佛绝佳拍照机位推荐：\n"
+                        + "1、胜境门楼：整条灵山的中轴线尽在视觉延伸线上。\n"
+                        + "2、佛手广场：可拍摄天下第一掌与大佛的合影。"
+        );
         entity.setIntroductionNoticeSnapshot("雨天注意防滑\n\n请勿下水");
+        entity.setIntroductionWarmTipSnapshot("建议穿舒适鞋子");
         entity.setSupplierNameSnapshot("供应商内部成本");
         entity.setCostAmountSnapshot(new BigDecimal("88.00"));
         return entity;
+    }
+
+    private SalesProductDayResourceEntity secondResource() {
+        SalesProductDayResourceEntity entity = new SalesProductDayResourceEntity();
+        entity.setId(302L);
+        entity.setProductId(88L);
+        entity.setDayNo(1);
+        entity.setResourceNameSnapshot("惠山古镇");
+        entity.setIncludeInWord(true);
+        entity.setStayMinutes(90);
+        entity.setSupplierNameSnapshot("供应商内部成本");
+        entity.setCostAmountSnapshot(new BigDecimal("66.00"));
+        return entity;
+    }
+
+    private SalesProductDayResourceIntroductionEntity introductionSnapshot(
+            Long id,
+            Long sourceId,
+            int sortOrder,
+            String title,
+            String content
+    ) {
+        SalesProductDayResourceIntroductionEntity entity = new SalesProductDayResourceIntroductionEntity();
+        entity.setId(id);
+        entity.setDayResourceId(301L);
+        entity.setResourceIntroductionId(sourceId);
+        entity.setSortOrder(sortOrder);
+        entity.setTitleSnapshot(title);
+        entity.setContentSnapshot(content);
+        entity.setNoticeSnapshot("");
+        return entity;
+    }
+
+    private SalesProductDayResourceIntroductionEntity introductionSnapshot(
+            Long id,
+            Long dayResourceId,
+            Long sourceId,
+            int sortOrder,
+            String title,
+            String content
+    ) {
+        SalesProductDayResourceIntroductionEntity entity = introductionSnapshot(id, sourceId, sortOrder, title, content);
+        entity.setDayResourceId(dayResourceId);
+        return entity;
+    }
+
+    private String allDocumentText(XWPFDocument document) {
+        StringBuilder text = new StringBuilder();
+        document.getParagraphs().forEach(paragraph -> text.append(paragraph.getText()).append('\n'));
+        document.getTables().forEach(table -> table.getRows().forEach(row -> row.getTableCells().forEach(cell ->
+                cell.getParagraphs().forEach(paragraph -> text.append(paragraph.getText()).append('\n')))));
+        return text.toString();
+    }
+
+    private int countOccurrences(String value, String needle) {
+        int count = 0;
+        int offset = 0;
+        while ((offset = value.indexOf(needle, offset)) >= 0) {
+            count++;
+            offset += needle.length();
+        }
+        return count;
     }
 
     private SalesProductAdultQuoteEntity quote() {

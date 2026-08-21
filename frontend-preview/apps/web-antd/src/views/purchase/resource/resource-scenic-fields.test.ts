@@ -19,6 +19,17 @@ function sourceBetween(source: string, start: string, end: string) {
 }
 
 describe('purchase resource place fields', () => {
+  it('supports searching resource location at province, city, or district level', () => {
+    const source = readAppFile('src/views/purchase/resource/index.vue');
+
+    expect(source).toContain('const queryLocationKeyword = ref(\'\');');
+    expect(source).toContain('const queryLocationOptions = computed(() =>');
+    expect(source).toContain('function applyQueryLocationKeyword()');
+    expect(source).toContain('placeholder="输入省 / 市 / 区县搜索"');
+    expect(source).toContain('@press-enter="applyQueryLocationKeyword"');
+    expect(source).toContain('@select="selectQueryLocation"');
+  });
+
   it('defines resource typed fields, filters and common map endpoints', () => {
     const apiSource = readAppFile('src/api/purchase/resource.ts');
 
@@ -51,10 +62,14 @@ describe('purchase resource place fields', () => {
     expect(apiSource).toContain("'/common/map/amap/tips'");
     expect(apiSource).toContain("'/common/map/amap/js-config'");
     expect(apiSource).toContain("'/common/map/amap/regeo'");
+    expect(apiSource).toContain('province?: string;');
+    expect(apiSource).toContain('city?: string;');
+    expect(apiSource).toContain('district?: string;');
     expect(apiSource).not.toContain("'/sales/product/roadbook/amap");
     expect(apiSource).toContain("export type ProcurementMode = 'not_required' | 'required';");
     expect(apiSource).toContain('procurementMode: ProcurementMode;');
     expect(apiSource).toContain('procurementMode?: ProcurementMode;');
+    expect(apiSource).toContain('autoCreateSupplier?: boolean;');
   });
 
   it('lets users maintain and filter the two default procurement attributes', () => {
@@ -73,6 +88,12 @@ describe('purchase resource place fields', () => {
     expect(payloadSource).toContain("procurementMode: formState.procurementMode || 'required'");
     expect(payloadSource).toContain("formState.procurementMode === 'not_required'");
     expect(source).toContain("formState.procurementMode !== 'not_required'");
+    expect(source).toContain('<Form.Item v-if="!editingId" label="供应商">');
+    expect(source).toContain('同时生成默认供应商');
+    expect(source).toContain('供应商名称默认使用资源名称，暂不生成报价');
+    expect(payloadSource).toContain(
+      'autoCreateSupplier: !editingId.value && Boolean(formState.autoCreateSupplier)',
+    );
   });
 
   it('exposes resource documents for every resource type', () => {
@@ -94,7 +115,7 @@ describe('purchase resource place fields', () => {
     expect(apiSource).not.toContain('ScenicDocumentItem');
   });
 
-  it('keeps optional introduction notices in the resource material lifecycle', () => {
+  it('keeps warm tips, red attention items and visit duration in the resource material lifecycle', () => {
     const apiSource = readAppFile('src/api/purchase/resource.ts');
     const source = readAppFile('src/views/purchase/resource/index.vue');
     const selectSource = sourceBetween(
@@ -109,13 +130,69 @@ describe('purchase resource place fields', () => {
     );
 
     expect(apiSource).toContain('noticeContent?: string;');
+    expect(apiSource).toContain('warmTipContent?: string;');
+    expect(apiSource).toContain('isOptionalItem: boolean;');
+    expect(apiSource).toContain('visitDuration?: string;');
     expect(source).toContain("introductionForm.noticeContent = ''");
+    expect(source).toContain("introductionForm.visitDuration = ''");
+    expect(source).toContain("introductionForm.warmTipContent = ''");
+    expect(source).toContain('introductionForm.isOptionalItem = false');
     expect(selectSource).toContain('record?.noticeContent || \'\'');
+    expect(selectSource).toContain('record?.visitDuration || \'\'');
+    expect(selectSource).toContain('record?.warmTipContent || \'\'');
+    expect(selectSource).toContain('Boolean(record?.isOptionalItem)');
     expect(payloadSource).toContain('noticeContent: (introductionForm.noticeContent || \'\').trim()');
-    expect(source).toContain('<Form.Item\n                    label="注意事项（选填）"');
+    expect(payloadSource).toContain('visitDuration: (introductionForm.visitDuration || \'\').trim()');
+    expect(payloadSource).toContain('warmTipContent: (introductionForm.warmTipContent || \'\').trim()');
+    expect(payloadSource).toContain('isOptionalItem: Boolean(introductionForm.isOptionalItem)');
+    expect(source).toContain('常规介绍');
+    expect(source).toContain('自费项目介绍');
+    expect(source).toContain('<Tag v-if="item.isOptionalItem" color="orange">');
+    expect(source).toContain('<Form.Item label="游览时间（分钟）"');
+    expect(source).toContain('handleVisitDurationInput');
+    expect(source).toContain('<Form.Item label="温馨提示（选填）"');
+    expect(source).toContain('<Form.Item label="注意事项（选填）"');
     expect(source).toContain('一行一条，生成产品资料时会以红色强调。');
     expect(source).toContain('resource-material-intro-notice-preview');
-    expect(source).toContain('color: #cf1322;');
+    expect(source).toContain('color: #b42318;');
+  });
+
+  it('keeps supplier costs separate from suggested public prices and links optional materials to resource masters', () => {
+    const apiSource = readAppFile('src/api/purchase/resource.ts');
+    const source = readAppFile('src/views/purchase/resource/index.vue');
+    const supplierOptionalItemFields = sourceBetween(
+      source,
+      'class="optional-items-section"',
+      '<Form.Item label="报价备注">',
+    );
+    const supplierPayload = sourceBetween(
+      source,
+      'function buildScenicSupplierPayload()',
+      'async function editBoundSupplier',
+    );
+    const introductionPayload = sourceBetween(
+      source,
+      'function introductionPayload()',
+      'async function saveIntroduction',
+    );
+
+    expect(apiSource).toContain('resourceOptionalItemId?: number;');
+    expect(apiSource).toContain('suggestedSalePrice?: number;');
+    expect(apiSource).toContain('export interface ResourceOptionalItem');
+    expect(apiSource).toContain('getPurchaseResourceOptionalItems');
+    expect(apiSource).toContain('createPurchaseResourceOptionalItem');
+    expect(source).toContain('建议对外自费价');
+    expect(source).toContain('成本价仅供内部核算');
+    expect(supplierOptionalItemFields).toContain('v-model:value="item.projectName"');
+    expect(supplierOptionalItemFields).not.toContain('resourceOptionalItemId');
+    expect(supplierOptionalItemFields).not.toContain('新建');
+    expect(source).not.toContain('新建项目');
+    expect(source).not.toContain('新建自费项目');
+    expect(source).toContain('自费项目介绍必须关联一个自费项目');
+    expect(source).toContain('素材只维护介绍内容，不展示或写入供应商成本。');
+    expect(supplierPayload).not.toContain('resourceOptionalItemId: item.resourceOptionalItemId');
+    expect(supplierPayload).toContain('suggestedSalePrice: item.suggestedSalePrice');
+    expect(introductionPayload).toContain('resourceOptionalItemId: introductionForm.isOptionalItem');
   });
 
   it('uses the current resource pricing unit for unified supplier quotes', () => {
@@ -196,7 +273,7 @@ describe('purchase resource place fields', () => {
     );
   });
 
-  it('restores place edit data and keeps map selection away from province fields', () => {
+  it('restores place edit data and applies reverse-geocoded region fields', () => {
     const source = readAppFile('src/views/purchase/resource/index.vue');
     const editSource = sourceBetween(
       source,
@@ -221,14 +298,21 @@ describe('purchase resource place fields', () => {
     expect(clickSource).toContain(
       'applyScenicMapPosition(longitude, latitude)',
     );
-    expect(clickSource).toContain('formState.address = result.address.trim()');
-    expect(clickSource).not.toContain('formState.province');
-    expect(clickSource).not.toContain('formState.city');
-    expect(clickSource).not.toContain('formState.district');
+    expect(clickSource).toContain('reverseGeocodeScenicMapPosition(longitude, latitude, true)');
+    const regionSource = sourceBetween(
+      source,
+      'function applyScenicMapReverseGeocodeResult',
+      'function syncScenicMapFromCoordinates',
+    );
+    expect(regionSource).toContain('formState.address = result.address.trim()');
+    expect(regionSource).toContain('formState.province = province');
+    expect(regionSource).toContain('formState.city = city');
+    expect(regionSource).toContain('formState.district = district');
+    expect(regionSource).toContain('formRegionPath.value = buildRegionPath');
     expect(source).toContain('地图暂不可用，可继续手工填写详细地址和经纬度。');
   });
 
-  it('supports hand-written place address location without forcing province fields', () => {
+  it('supports hand-written place address location and enriches region fields', () => {
     const source = readAppFile('src/views/purchase/resource/index.vue');
     const locateSource = sourceBetween(
       source,
@@ -244,8 +328,6 @@ describe('purchase resource place fields', () => {
     );
     expect(locateSource).toContain('applyScenicMapPosition');
     expect(locateSource).toContain('scenicMapInstance?.setZoomAndCenter');
-    expect(locateSource).not.toContain('formState.province');
-    expect(locateSource).not.toContain('formState.city');
-    expect(locateSource).not.toContain('formState.district');
+    expect(locateSource).toContain('reverseGeocodeScenicMapPosition');
   });
 });

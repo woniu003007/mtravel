@@ -7,5 +7,9 @@ import java.util.List;
 public record ProductDesignerDayPlanResponse(
         Integer dayNo,
         BigDecimal dayCostAmount,
-        List<ProductDesignerDayResourceResponse> resources
+        List<ProductDesignerDayResourceResponse> resources,
+        String accommodationCity,
+        Boolean breakfastIncluded,
+        Boolean lunchIncluded,
+        Boolean dinnerIncluded
 ) {}

@@ -8,12 +8,15 @@ import com.mtravel.platform.common.BusinessCrudService;
 import com.mtravel.platform.common.PageResult;
 import com.mtravel.platform.purchase.relation.entity.PurchaseRelationEntity;
 import com.mtravel.platform.purchase.relation.mapper.PurchaseRelationMapper;
+import com.mtravel.platform.purchase.relation.optional.entity.PurchaseRelationOptionalItemEntity;
+import com.mtravel.platform.purchase.relation.optional.mapper.PurchaseRelationOptionalItemMapper;
 import com.mtravel.platform.purchase.relation.price.entity.SupplierResourcePriceEntity;
 import com.mtravel.platform.purchase.relation.price.mapper.SupplierResourcePriceMapper;
 import com.mtravel.platform.purchase.resource.dto.PurchaseResourceBindingResponse;
 import com.mtravel.platform.purchase.resource.dto.PurchaseResourceResponse;
 import com.mtravel.platform.purchase.resource.dto.PurchaseResourceSaveRequest;
 import com.mtravel.platform.purchase.resource.dto.ResourceSupplierPriceLineResponse;
+import com.mtravel.platform.purchase.resource.dto.ResourceSupplierOptionalItemResponse;
 import com.mtravel.platform.purchase.resource.entity.PurchaseResourceEntity;
 import com.mtravel.platform.purchase.resource.enums.PurchaseResourceProcurementMode;
 import com.mtravel.platform.purchase.resource.enums.PurchaseResourceStatus;
@@ -53,19 +56,22 @@ public class PurchaseResourceService extends BusinessCrudService<PurchaseResourc
     private final SupplierMapper supplierMapper;
     private final PurchaseRelationMapper relationMapper;
     private final SupplierResourcePriceMapper priceMapper;
+    private final PurchaseRelationOptionalItemMapper optionalItemMapper;
 
     @Autowired
     public PurchaseResourceService(
             PurchaseResourceMapper resourceMapper,
             SupplierMapper supplierMapper,
             PurchaseRelationMapper relationMapper,
-            SupplierResourcePriceMapper priceMapper
+            SupplierResourcePriceMapper priceMapper,
+            PurchaseRelationOptionalItemMapper optionalItemMapper
     ) {
         super(resourceMapper);
         this.resourceMapper = resourceMapper;
         this.supplierMapper = supplierMapper;
         this.relationMapper = relationMapper;
         this.priceMapper = priceMapper;
+        this.optionalItemMapper = optionalItemMapper;
     }
 
     /** 保留无报价映射器的单元测试及历史构造入口兼容性。 */
@@ -74,7 +80,17 @@ public class PurchaseResourceService extends BusinessCrudService<PurchaseResourc
             SupplierMapper supplierMapper,
             PurchaseRelationMapper relationMapper
     ) {
-        this(resourceMapper, supplierMapper, relationMapper, null);
+        this(resourceMapper, supplierMapper, relationMapper, null, null);
+    }
+
+    /** 保留旧测试和历史构造入口，不加载自费项目回显。 */
+    public PurchaseResourceService(
+            PurchaseResourceMapper resourceMapper,
+            SupplierMapper supplierMapper,
+            PurchaseRelationMapper relationMapper,
+            SupplierResourcePriceMapper priceMapper
+    ) {
+        this(resourceMapper, supplierMapper, relationMapper, priceMapper, null);
     }
 
     /**
@@ -120,12 +136,7 @@ public class PurchaseResourceService extends BusinessCrudService<PurchaseResourc
         return new PageResult<>(items, result.getTotal());
     }
 
-    /**
-     * 新增资源。
-     *
-     * <p>勾选自动创建同名供应商时，系统会优先复用同租户、同名、同分类的供应商；没有则创建供应商，
-     * 然后写入一条默认采购关系，保证“已绑定 X 家”立即能反映出来。</p>
-     */
+    /** 新增资源主档；勾选自动创建时，在同一事务内生成并绑定同名默认供应商。 */
     @Transactional
     public PurchaseResourceResponse create(PurchaseResourceSaveRequest request, Long tenantId, String operator) {
         assertUnique(request, tenantId, null);
@@ -136,16 +147,73 @@ public class PurchaseResourceService extends BusinessCrudService<PurchaseResourc
         entity.setCreatedBy(operator);
         entity.setIsDeleted(false);
         resourceMapper.insert(entity);
-
-        if (Boolean.TRUE.equals(request.autoCreateSupplier())
-                && PurchaseResourceProcurementMode.NOT_REQUIRED.value().equals(entity.getProcurementMode())) {
-            throw new BizException("无需采购的资源不能自动创建供应商");
-        }
         if (Boolean.TRUE.equals(request.autoCreateSupplier())) {
-            SupplierEntity supplier = findOrCreateSameNameSupplier(entity, tenantId, operator);
-            ensureRelation(entity, supplier.getId(), tenantId, operator);
+            createDefaultSupplier(entity, tenantId, operator);
         }
+
         return toResponse(entity);
+    }
+
+    /**
+     * 为新资源创建一个无报价的默认供应商占位档案，方便后续直接补充成本价。
+     *
+     * <p>供应商名称沿用资源名称，所在地和联系人从资源主档带入；价格不在资源新增时臆造，
+     * 后续仍由供应商绑定页维护。供应商和采购关系随资源新增同事务提交或回滚。</p>
+     */
+    private void createDefaultSupplier(PurchaseResourceEntity resource, Long tenantId, String operator) {
+        Long existingCount = supplierMapper.selectCount(new QueryWrapper<SupplierEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq("supplier_name", resource.getResourceName()));
+        if (existingCount != null && existingCount > 0) {
+            throw new BizException("同名供应商已存在，请取消自动生成或先绑定已有供应商");
+        }
+        clearOtherDefaultRelations(tenantId, resource.getId(), null);
+
+        SupplierEntity supplier = new SupplierEntity();
+        supplier.setTenantId(tenantId);
+        supplier.setSupplierCategory(resource.getResourceType());
+        supplier.setSupplierName(resource.getResourceName());
+        supplier.setProvince(resource.getProvince());
+        supplier.setCity(resource.getCity());
+        supplier.setDistrict(resource.getDistrict());
+        supplier.setContactName(resource.getContactName());
+        supplier.setContactPhone(resource.getPhone());
+        supplier.setOfficeAddress(resource.getAddress());
+        supplier.setStatus("active");
+        supplier.setCreatedBy(operator);
+        supplier.setRemark(resource.getRemark());
+        supplier.setIsDeleted(false);
+        supplierMapper.insert(supplier);
+
+        PurchaseRelationEntity relation = new PurchaseRelationEntity();
+        relation.setTenantId(tenantId);
+        relation.setResourceType(resource.getResourceType());
+        relation.setResourceId(resource.getId());
+        relation.setResourceName(resource.getResourceName());
+        relation.setSupplierId(supplier.getId());
+        relation.setGroupQuantity(0);
+        relation.setIsDefault(true);
+        relation.setPriceMode("classified");
+        relation.setStatus("active");
+        relation.setCreatedBy(operator);
+        relation.setRemark(resource.getRemark());
+        relation.setIsDeleted(false);
+        relationMapper.insert(relation);
+    }
+
+    private void clearOtherDefaultRelations(Long tenantId, Long resourceId, Long excludeRelationId) {
+        PurchaseRelationEntity entity = new PurchaseRelationEntity();
+        entity.setIsDefault(false);
+        UpdateWrapper<PurchaseRelationEntity> wrapper = new UpdateWrapper<PurchaseRelationEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq("resource_id", resourceId)
+                .eq("is_default", true);
+        if (excludeRelationId != null) {
+            wrapper.ne("id", excludeRelationId);
+        }
+        relationMapper.update(entity, wrapper);
     }
 
     /** 修改资源主档。修改资源不会自动改历史采购关系，避免误影响已有采购价格和合同口径。 */
@@ -210,13 +278,27 @@ public class PurchaseResourceService extends BusinessCrudService<PurchaseResourc
                         SupplierResourcePriceEntity::getRelationId,
                         Collectors.mapping(ResourceSupplierPriceLineResponse::fromEntity, Collectors.toList())
                 ));
+        Map<Long, List<ResourceSupplierOptionalItemResponse>> optionalItemsByRelation = optionalItemMapper == null
+                ? Map.of()
+                : optionalItemMapper.selectList(
+                        new QueryWrapper<PurchaseRelationOptionalItemEntity>()
+                                .eq("tenant_id", tenantId)
+                                .eq("is_deleted", false)
+                                .in("relation_id", relations.stream().map(PurchaseRelationEntity::getId).toList())
+                                .orderByAsc("id"))
+                .stream()
+                .collect(Collectors.groupingBy(
+                        PurchaseRelationOptionalItemEntity::getRelationId,
+                        Collectors.mapping(ResourceSupplierOptionalItemResponse::fromEntity, Collectors.toList())
+                ));
         Map<Long, String> supplierNames = supplierNames(tenantId, relations);
         return relations
                 .stream()
                 .map(item -> PurchaseResourceBindingResponse.fromEntity(
                         item,
                         supplierNames.get(item.getSupplierId()),
-                        pricesByRelation.getOrDefault(item.getId(), List.of())
+                        pricesByRelation.getOrDefault(item.getId(), List.of()),
+                        optionalItemsByRelation.getOrDefault(item.getId(), List.of())
                 ))
                 .toList();
     }
@@ -299,7 +381,7 @@ public class PurchaseResourceService extends BusinessCrudService<PurchaseResourc
             entity.setStarLevel(null);
             return;
         }
-        entity.setStarLevel(StringUtils.hasText(request.starLevel()) ? request.starLevel() : "unrated");
+        entity.setStarLevel(clean(request.starLevel()));
     }
 
     /** 地点类资源共享定位、营业和踩点字段。 */
@@ -475,62 +557,6 @@ public class PurchaseResourceService extends BusinessCrudService<PurchaseResourc
         if (count != null && count > 0) {
             throw new BizException("同地区同类型资源名称已存在");
         }
-    }
-
-    /** 查找或创建同名供应商，用于资源创建时的快捷绑定。 */
-    private SupplierEntity findOrCreateSameNameSupplier(PurchaseResourceEntity resource, Long tenantId, String operator) {
-        SupplierEntity existing = supplierMapper.selectOne(new QueryWrapper<SupplierEntity>()
-                .eq("tenant_id", tenantId)
-                .eq("is_deleted", false)
-                .eq("supplier_name", resource.getResourceName())
-                .eq("supplier_category", resource.getResourceType())
-                .last("limit 1"));
-        if (existing != null) {
-            return existing;
-        }
-
-        SupplierEntity supplier = new SupplierEntity();
-        supplier.setTenantId(tenantId);
-        supplier.setSupplierName(resource.getResourceName());
-        supplier.setSupplierCategory(resource.getResourceType());
-        supplier.setProvince(resource.getProvince());
-        supplier.setCity(resource.getCity());
-        supplier.setDistrict(resource.getDistrict());
-        supplier.setContactName(resource.getContactName());
-        supplier.setContactPhone(resource.getPhone());
-        supplier.setStatus("active");
-        supplier.setCreatedBy(operator);
-        supplier.setRemark("由资源总览自动创建");
-        supplier.setIsDeleted(false);
-        supplierMapper.insert(supplier);
-        return supplier;
-    }
-
-    /** 确保资源和供应商之间存在一条默认采购关系。 */
-    private void ensureRelation(PurchaseResourceEntity resource, Long supplierId, Long tenantId, String operator) {
-        Long count = relationMapper.selectCount(new QueryWrapper<PurchaseRelationEntity>()
-                .eq("tenant_id", tenantId)
-                .eq("is_deleted", false)
-                .eq("resource_type", resource.getResourceType())
-                .eq("resource_id", resource.getId())
-                .eq("supplier_id", supplierId));
-        if (count != null && count > 0) {
-            return;
-        }
-
-        PurchaseRelationEntity relation = new PurchaseRelationEntity();
-        relation.setTenantId(tenantId);
-        relation.setResourceType(resource.getResourceType());
-        relation.setResourceId(resource.getId());
-        relation.setResourceName(resource.getResourceName());
-        relation.setSupplierId(supplierId);
-        relation.setGroupQuantity(0);
-        relation.setIsDefault(false);
-        relation.setStatus("active");
-        relation.setCreatedBy(operator);
-        relation.setRemark("由资源总览自动绑定");
-        relation.setIsDeleted(false);
-        relationMapper.insert(relation);
     }
 
     /** 计算当前资源已绑定的有效供应商数量。 */

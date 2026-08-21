@@ -20,7 +20,6 @@ CREATE TABLE IF NOT EXISTS sales_products (
   id BIGSERIAL PRIMARY KEY,
   tenant_id bigint NOT NULL REFERENCES tenants(id),
   product_name varchar(200) NOT NULL,
-  product_scope varchar(30) NOT NULL DEFAULT 'template',
   business_type varchar(120),
   domestic_international varchar(20) NOT NULL DEFAULT 'domestic',
   province varchar(80),
@@ -41,7 +40,8 @@ CREATE TABLE IF NOT EXISTS sales_products (
   is_deleted boolean NOT NULL DEFAULT false,
   deleted_at timestamptz,
   deleted_by varchar(64),
-  CONSTRAINT chk_sales_products_scope CHECK (product_scope IN ('template', 'team_snapshot')),
+  product_scope varchar(30) NOT NULL DEFAULT 'template',
+  CONSTRAINT chk_sales_products_scope CHECK (product_scope IN ('template', 'team_snapshot', 'design_draft')),
   CONSTRAINT chk_sales_products_domestic CHECK (domestic_international IN ('domestic', 'international')),
   CONSTRAINT chk_sales_products_trip_type CHECK (trip_type IN ('daily', 'weekly', 'irregular')),
   CONSTRAINT chk_sales_products_days CHECK (travel_days >= 1),
@@ -60,6 +60,9 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE INDEX IF NOT EXISTS idx_sales_products_tenant_deleted_status
   ON sales_products (tenant_id, is_deleted, product_scope, status);
 
+CREATE INDEX IF NOT EXISTS idx_sales_products_tenant_scope_updated
+  ON sales_products (tenant_id, is_deleted, product_scope, updated_at DESC, id DESC);
+
 CREATE INDEX IF NOT EXISTS idx_sales_products_tenant_deleted_city
   ON sales_products (tenant_id, is_deleted, province, city, district);
 
@@ -68,7 +71,7 @@ CREATE INDEX IF NOT EXISTS idx_sales_products_tenant_deleted_type
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_sales_products_tenant_name_active
   ON sales_products (tenant_id, product_name)
-  WHERE is_deleted = false AND product_scope = 'template';
+  WHERE is_deleted = false AND product_scope IN ('template', 'design_draft');
 
 CREATE TABLE IF NOT EXISTS sales_product_itinerary_days (
   id BIGSERIAL PRIMARY KEY,
@@ -94,12 +97,14 @@ CREATE TABLE IF NOT EXISTS sales_product_itinerary_days (
   roadbook_summary varchar(500),
   roadbook_total_distance_meters integer NOT NULL DEFAULT 0,
   roadbook_total_duration_seconds integer NOT NULL DEFAULT 0,
+  word_image_mode varchar(30) NOT NULL DEFAULT 'follow_resource',
   CONSTRAINT fk_sales_product_itinerary_product
     FOREIGN KEY (tenant_id, product_id) REFERENCES sales_products (tenant_id, id),
   CONSTRAINT chk_sales_product_itinerary_day CHECK (day_no >= 1),
   CONSTRAINT chk_sales_product_itinerary_surcharge CHECK (seasonal_surcharge >= 0),
   CONSTRAINT chk_sales_product_itinerary_distance CHECK (roadbook_total_distance_meters >= 0),
-  CONSTRAINT chk_sales_product_itinerary_duration CHECK (roadbook_total_duration_seconds >= 0)
+  CONSTRAINT chk_sales_product_itinerary_duration CHECK (roadbook_total_duration_seconds >= 0),
+  CONSTRAINT chk_sales_product_itinerary_word_image_mode CHECK (word_image_mode IN ('follow_resource', 'day_end', 'hidden'))
 );
 
 DROP TRIGGER IF EXISTS trg_sales_product_itinerary_days_updated_at ON sales_product_itinerary_days;
@@ -622,11 +627,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_vehicle_usage_histories_content_active
 CREATE INDEX IF NOT EXISTS idx_vehicle_usage_histories_suggest
   ON vehicle_usage_histories (tenant_id, is_deleted, history_type, usage_count DESC, last_used_at DESC);
 
-COMMENT ON TABLE sales_products IS '销售产品模板主表。用于维护线路产品的基础资料，后续团期和团队从产品模板生成。';
+COMMENT ON TABLE sales_products IS '销售产品主表。用于维护正式线路产品模板、产品设计草稿和团队专属快照。';
 COMMENT ON COLUMN sales_products.id IS '销售产品主键ID，系统内部使用。';
 COMMENT ON COLUMN sales_products.tenant_id IS '租户ID，标识该产品属于哪一家地接公司。';
 COMMENT ON COLUMN sales_products.product_name IS '产品名称，也就是线路名称。';
-COMMENT ON COLUMN sales_products.product_scope IS '产品记录用途。template 表示正式产品模板；team_snapshot 表示直接建团产生的团队专属产品快照，不进入产品管理列表。';
+COMMENT ON COLUMN sales_products.product_scope IS '产品记录用途。design_draft表示尚未进入产品管理的设计草稿；template表示已完成设计的正式产品模板；team_snapshot表示团队专属产品快照。';
 COMMENT ON COLUMN sales_products.business_type IS '业务类型，例如疗休养、定制团、红色培训。';
 COMMENT ON COLUMN sales_products.domestic_international IS '国内国际标记。domestic表示国内，international表示国际。';
 COMMENT ON COLUMN sales_products.province IS '接团省份。';
@@ -665,6 +670,7 @@ COMMENT ON COLUMN sales_product_itinerary_days.roadbook_place IS '路书地点�
 COMMENT ON COLUMN sales_product_itinerary_days.roadbook_summary IS '当天路书路线摘要，例如出发地到景区再到酒店。';
 COMMENT ON COLUMN sales_product_itinerary_days.roadbook_total_distance_meters IS '当天路书总距离，单位米。';
 COMMENT ON COLUMN sales_product_itinerary_days.roadbook_total_duration_seconds IS '当天路书预计总车程，单位秒。';
+COMMENT ON COLUMN sales_product_itinerary_days.word_image_mode IS '产品 Word 图片展示方式：跟随景区、当天末尾或不展示。';
 COMMENT ON COLUMN sales_product_itinerary_days.created_by IS '创建人账号或名称。';
 COMMENT ON COLUMN sales_product_itinerary_days.remark IS '备注。';
 COMMENT ON COLUMN sales_product_itinerary_days.created_at IS '创建时间。';
@@ -889,7 +895,8 @@ COMMENT ON COLUMN sales_product_vehicle_inquiries.deleted_by IS '删除人账号
 COMMENT ON INDEX idx_sales_product_vehicle_inquiry_item IS '用车询价记录查询索引，用于产品详情按安排项回显报价列表。';
 COMMENT ON INDEX idx_sales_product_vehicle_inquiry_selected IS '用车询价选定报价查询索引。';
 
-COMMENT ON INDEX uk_sales_products_tenant_name_active IS '产品名称唯一索引，仅约束同一租户下未删除产品。';
+COMMENT ON INDEX uk_sales_products_tenant_name_active IS '产品名称唯一索引，仅约束同一租户下未删除的template和design_draft产品，排除团队专属快照。';
+COMMENT ON INDEX idx_sales_products_tenant_scope_updated IS '支持按租户和产品用途分页查询设计草稿或正式产品。';
 COMMENT ON INDEX uk_sales_product_itinerary_day_active IS '每日行程唯一索引，仅约束同一产品下未删除行程天数。';
 COMMENT ON INDEX uk_sales_product_descriptions_product_active IS '产品说明唯一索引，仅约束同一产品下未删除说明。';
 COMMENT ON INDEX uk_sales_product_roadbook_point_order_active IS '路书地点顺序唯一索引，仅约束同一产品同一天未删除地点顺序。';

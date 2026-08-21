@@ -26,6 +26,8 @@ public record ResourceSupplierUpdateRequest(
         @Pattern(regexp = "unified|classified", message = "报价模式不合法") String priceMode,
         @DecimalMin(value = "0.00", message = "统一报价不能小于0") BigDecimal unifiedPrice,
         @Valid List<ResourceSupplierPriceLineRequest> priceLines,
+        /** 景区供应商下可选的自费项目报价，统一按元/人。 */
+        @Valid List<ResourceSupplierOptionalItemRequest> optionalItems,
         @Size(max = 500, message = "报价备注不能超过500个字符") String priceRemark,
         @Size(max = 1000, message = "备注不能超过1000个字符") String remark
 ) {}

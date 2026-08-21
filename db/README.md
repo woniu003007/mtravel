@@ -40,6 +40,18 @@
 | `037_sales_product_designer_schema.sql` | 销售产品地图式设计工作台表结构：维护每日资源快照、配图快照、成人报价草稿和生成文件版本。 |
 | `038_sales_product_design_draft_scope.sql` | 表结构迁移：补齐 `sales_products.product_scope='design_draft'` 约束、查询索引，并将产品名称唯一约束限定到正式模板和设计草稿，排除团队专属快照。 |
 | `039_resource_introduction_notice.sql` | 表结构迁移：为资源介绍增加注意事项，并为产品每日资源增加注意事项快照。 |
+| `040_sales_product_day_resource_introductions.sql` | 产品设计迁移：为一个产品日资源增加多个介绍素材快照、排序和软删除约束，生成 Word 时按素材顺序串联。 |
+| `042_purchase_relation_optional_items.sql` | 采购关系自费项目报价：维护供应商提供的景区自费门票/游览项目成本，固定按元/人计价。 |
+| `043_purchase_resource_introduction_visit_duration.sql` | 表结构迁移：为资源介绍素材增加建议游览时间。 |
+| `044_purchase_resource_introduction_warm_tip.sql` | 表结构迁移：为资源介绍及产品设计快照增加温馨提示，并明确注意事项按红色输出。 |
+| `045_purchase_resource_introduction_optional_item_flag.sql` | 表结构迁移：为资源介绍素材增加自费项目标记，复用现有介绍内容和产品输出流程。 |
+| `046_resource_optional_item_product_word.sql` | 资源级自费项目主档、供应商成本及建议对外价、介绍素材关联和产品最终对外价快照。 |
+| `047_purchase_resource_introduction_images.sql` | 资源介绍素材图片关联表结构，维护素材选用资源图片及输出顺序。 |
+| `048_purchase_resource_introduction_sort_order.sql` | 表结构迁移：为资源介绍素材增加资源内维护排序，支持资料页拖拽排序。 |
+| `049_purchase_resource_introduction_extension_blocks.sql` | 表结构迁移：为资源介绍素材增加可排序扩展内容模块，并为产品设计保存对应快照。 |
+| `050_purchase_resource_reception_standard.sql` | 表结构迁移：将酒店资源星级改为复用企业产品字典 `reception_standard`。 |
+| `051_sales_product_designer_accommodation_and_meals.sql` | 产品设计迁移：将酒店、早餐、中餐、晚餐改为明确的资源编排归属，允许当天多酒店，并保证每餐次唯一餐厅。 |
+| `052_sales_product_designer_multi_hotel_accommodation.sql` | 产品设计修正迁移：移除每天仅一个酒店的限制，保留每餐次仅一个餐厅的规则。 |
 | `数据库设计-客户管理四表说明.md` | 客户管理四表的表作用、字段含义、软删除策略和唯一约束说明。 |
 | `数据库设计-系统操作日志说明.md` | 系统操作日志表的表作用、字段含义、脱敏规则和索引说明。 |
 | `数据库设计-系统配置说明.md` | 系统配置表的表作用、字段含义、配置项和索引说明。 |

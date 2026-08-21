@@ -6,6 +6,8 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
+import java.util.List;
+import jakarta.validation.Valid;
 
 /**
  * 景区资源页快捷新增供应商请求。
@@ -62,6 +64,10 @@ public record ScenicSupplierCreateRequest(
 
         @DecimalMin(value = "0.00", message = "优待票价格不能小于0")
         BigDecimal preferentialPrice,
+
+        /** 景区供应商下可选的自费项目报价，统一按元/人。 */
+        @Valid
+        List<ResourceSupplierOptionalItemRequest> optionalItems,
 
         @Size(max = 500, message = "报价备注不能超过500个字符")
         String priceRemark,

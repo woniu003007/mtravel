@@ -16,6 +16,18 @@ public class PurchaseResourceIntroductionEntity extends TenantSoftDeleteEntity {
     @TableField("resource_id")
     private Long resourceId;
 
+    /** 当前资源内介绍素材的维护排序，从 1 开始。 */
+    @TableField("sort_order")
+    private Integer sortOrder;
+
+    /** 是否为自费项目介绍素材。 */
+    @TableField("is_optional_item")
+    private Boolean isOptionalItem;
+
+    /** 自费介绍关联的资源级自费项目主档 ID。 */
+    @TableField("resource_optional_item_id")
+    private Long resourceOptionalItemId;
+
     /** 介绍素材名称。 */
     @TableField("title")
     private String title;
@@ -31,6 +43,18 @@ public class PurchaseResourceIntroductionEntity extends TenantSoftDeleteEntity {
     /** 介绍使用时需要重点提示的注意事项，一行一条。 */
     @TableField(value = "notice_content", updateStrategy = FieldStrategy.ALWAYS)
     private String noticeContent;
+
+    /** 介绍使用时展示的温馨提示，一行一条。 */
+    @TableField(value = "warm_tip_content", updateStrategy = FieldStrategy.ALWAYS)
+    private String warmTipContent;
+
+    /** JSON 数组格式的可排序扩展内容模块。 */
+    @TableField(value = "extension_blocks", typeHandler = PostgreSqlJsonbStringTypeHandler.class, jdbcType = JdbcType.OTHER)
+    private String extensionBlocks;
+
+    /** 资源建议游览时长，保存为分钟数字。 */
+    @TableField(value = "visit_duration", updateStrategy = FieldStrategy.ALWAYS)
+    private String visitDuration;
 
     /** 发布状态。 */
     @TableField("status")
@@ -54,6 +78,12 @@ public class PurchaseResourceIntroductionEntity extends TenantSoftDeleteEntity {
 
     public Long getResourceId() { return resourceId; }
     public void setResourceId(Long resourceId) { this.resourceId = resourceId; }
+    public Integer getSortOrder() { return sortOrder; }
+    public void setSortOrder(Integer sortOrder) { this.sortOrder = sortOrder; }
+    public Boolean getIsOptionalItem() { return isOptionalItem; }
+    public void setIsOptionalItem(Boolean isOptionalItem) { this.isOptionalItem = isOptionalItem; }
+    public Long getResourceOptionalItemId() { return resourceOptionalItemId; }
+    public void setResourceOptionalItemId(Long resourceOptionalItemId) { this.resourceOptionalItemId = resourceOptionalItemId; }
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
     public String getTags() { return tags; }
@@ -62,6 +92,12 @@ public class PurchaseResourceIntroductionEntity extends TenantSoftDeleteEntity {
     public void setContent(String content) { this.content = content; }
     public String getNoticeContent() { return noticeContent; }
     public void setNoticeContent(String noticeContent) { this.noticeContent = noticeContent; }
+    public String getWarmTipContent() { return warmTipContent; }
+    public void setWarmTipContent(String warmTipContent) { this.warmTipContent = warmTipContent; }
+    public String getExtensionBlocks() { return extensionBlocks; }
+    public void setExtensionBlocks(String extensionBlocks) { this.extensionBlocks = extensionBlocks; }
+    public String getVisitDuration() { return visitDuration; }
+    public void setVisitDuration(String visitDuration) { this.visitDuration = visitDuration; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public String getIndexStatus() { return indexStatus; }

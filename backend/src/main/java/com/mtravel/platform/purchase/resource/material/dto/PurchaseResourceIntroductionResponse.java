@@ -8,10 +8,17 @@ import java.util.List;
 public record PurchaseResourceIntroductionResponse(
         Long id,
         Long resourceId,
+        Integer sortOrder,
+        Boolean isOptionalItem,
+        Long resourceOptionalItemId,
+        String resourceOptionalItemName,
         String title,
         List<String> tags,
         String content,
         String noticeContent,
+        String warmTipContent,
+        List<ResourceIntroductionExtensionBlock> extensionBlocks,
+        String visitDuration,
         String status,
         String indexStatus,
         Integer indexVersion,
@@ -23,10 +30,16 @@ public record PurchaseResourceIntroductionResponse(
 ) {
     public static PurchaseResourceIntroductionResponse fromEntity(
             PurchaseResourceIntroductionEntity entity,
-            List<String> tags
+            List<String> tags,
+            List<ResourceIntroductionExtensionBlock> extensionBlocks
     ) {
+        return fromEntity(entity, tags, extensionBlocks, null);
+    }
+    public static PurchaseResourceIntroductionResponse fromEntity(PurchaseResourceIntroductionEntity entity, List<String> tags, List<ResourceIntroductionExtensionBlock> extensionBlocks, String resourceOptionalItemName) {
         return new PurchaseResourceIntroductionResponse(
-                entity.getId(), entity.getResourceId(), entity.getTitle(), tags, entity.getContent(), entity.getNoticeContent(),
+                entity.getId(), entity.getResourceId(), entity.getSortOrder(),
+                Boolean.TRUE.equals(entity.getIsOptionalItem()), entity.getResourceOptionalItemId(), resourceOptionalItemName, entity.getTitle(), tags, entity.getContent(), entity.getNoticeContent(),
+                entity.getWarmTipContent(), extensionBlocks == null ? List.of() : extensionBlocks, entity.getVisitDuration(),
                 entity.getStatus(), entity.getIndexStatus(), entity.getIndexVersion(), entity.getErrorMessage(),
                 entity.getPublishedAt(), entity.getCreatedBy(), entity.getCreatedAt(), entity.getUpdatedAt()
         );

@@ -11,26 +11,39 @@ import com.mtravel.platform.purchase.relation.dto.PurchaseRelationSupplierPriceR
 import com.mtravel.platform.purchase.resource.entity.PurchaseResourceEntity;
 import com.mtravel.platform.purchase.resource.mapper.PurchaseResourceMapper;
 import com.mtravel.platform.purchase.resource.material.entity.PurchaseResourceIntroductionEntity;
+import com.mtravel.platform.purchase.resource.material.entity.PurchaseResourceImageEntity;
 import com.mtravel.platform.purchase.resource.material.mapper.PurchaseResourceImageMapper;
 import com.mtravel.platform.purchase.resource.material.mapper.PurchaseResourceIntroductionMapper;
 import com.mtravel.platform.purchase.supplier.mapper.SupplierMapper;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceSaveRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayItinerarySaveRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayEndImageSelectionRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayWordPlanSaveRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerSelectedMaterialRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerSelectedOptionalItemResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerAdultQuoteSaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDraftSaveRequest;
 import com.mtravel.platform.sales.product.designer.entity.SalesProductAdultQuoteEntity;
 import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceEntity;
+import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceImageEntity;
+import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceIntroductionEntity;
 import com.mtravel.platform.sales.product.designer.entity.SalesProductDocumentVersionEntity;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductAdultQuoteMapper;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceMapper;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceImageMapper;
+import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceIntroductionMapper;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductDocumentVersionMapper;
 import com.mtravel.platform.sales.product.entity.SalesProductEntity;
 import com.mtravel.platform.sales.product.mapper.SalesProductMapper;
+import com.mtravel.platform.sales.product.mapper.SalesProductItineraryDayMapper;
+import com.mtravel.platform.sales.product.entity.SalesProductItineraryDayEntity;
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -39,6 +52,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -49,6 +63,138 @@ import static org.mockito.Mockito.when;
  * 防止后续把产品地图工作台又退回到只适合采购结算资源的录入方式。</p>
  */
 class SalesProductDesignerServiceTest {
+
+    @Test
+    void dayEndImagesShouldPersistCrossResourceGlobalOrderAndRejectOneImage() {
+        PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
+        PurchaseResourceImageMapper imageMapper = mock(PurchaseResourceImageMapper.class);
+        SalesProductDayResourceImageMapper snapshotMapper = mock(SalesProductDayResourceImageMapper.class);
+        SalesProductDesignerService service = new SalesProductDesignerService(
+                mock(SalesProductMapper.class), resourceMapper, mock(PurchaseRelationMapper.class), mock(SupplierMapper.class),
+                mock(SupplierResourcePriceMapper.class), mock(PurchaseResourceIntroductionMapper.class), imageMapper,
+                mock(SalesProductDayResourceMapper.class), snapshotMapper,
+                mock(SalesProductDayResourceIntroductionMapper.class), mock(SalesProductAdultQuoteMapper.class),
+                mock(SalesProductDocumentVersionMapper.class));
+        SalesProductDayResourceEntity first = existingDayResource();
+        first.setId(501L);
+        first.setResourceId(21L);
+        SalesProductDayResourceEntity second = existingDayResource();
+        second.setId(502L);
+        second.setResourceId(22L);
+        PurchaseResourceEntity firstResource = freeResource();
+        PurchaseResourceEntity secondResource = otherFreeResource();
+        when(resourceMapper.selectOne(any(Wrapper.class))).thenReturn(firstResource, secondResource);
+        java.util.concurrent.atomic.AtomicInteger imageQueryCount = new java.util.concurrent.atomic.AtomicInteger();
+        when(imageMapper.selectList(any(Wrapper.class))).thenAnswer(invocation ->
+                imageQueryCount.getAndIncrement() == 0 ? List.of(resourceImage(101L)) : List.of(resourceImage(202L)));
+        ProductDesignerDayWordPlanSaveRequest request = new ProductDesignerDayWordPlanSaveRequest(
+                88L, 1, List.of(501L, 502L), List.of(), "day_end", null,
+                List.of(new ProductDesignerDayEndImageSelectionRequest(502L, 202L),
+                        new ProductDesignerDayEndImageSelectionRequest(501L, 101L)));
+
+        ReflectionTestUtils.invokeMethod(service, "saveDayEndImageSelectionsIfProvided", 1L, request,
+                List.of(first, second), "admin");
+
+        ArgumentCaptor<SalesProductDayResourceImageEntity> captor =
+                ArgumentCaptor.forClass(SalesProductDayResourceImageEntity.class);
+        verify(snapshotMapper, times(2)).insert(captor.capture());
+        assertThat(captor.getAllValues())
+                .extracting(item -> item.getDayResourceId() + ":" + item.getSortOrder())
+                .containsExactlyInAnyOrder("502:1", "501:2");
+
+        ProductDesignerDayWordPlanSaveRequest oneImage = new ProductDesignerDayWordPlanSaveRequest(
+                88L, 1, List.of(501L, 502L), List.of(), "day_end", null,
+                List.of(new ProductDesignerDayEndImageSelectionRequest(501L, 101L)));
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(service, "saveDayEndImageSelectionsIfProvided",
+                1L, oneImage, List.of(first, second), "admin"))
+                .isInstanceOf(BizException.class)
+                .hasMessage("当天末尾图片只能选择 0、2 或 3 张");
+    }
+
+    @Test
+    void saveDayItineraryShouldPersistAccommodationCityAndMeals() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductItineraryDayMapper itineraryMapper = mock(SalesProductItineraryDayMapper.class);
+        SalesProductDesignerService service = service(
+                productMapper,
+                mock(PurchaseResourceMapper.class),
+                mock(PurchaseRelationMapper.class),
+                mock(SupplierResourcePriceMapper.class),
+                mock(SalesProductDayResourceMapper.class)
+        );
+        ReflectionTestUtils.setField(service, "itineraryDayMapper", itineraryMapper);
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(draftProduct());
+        when(itineraryMapper.selectOne(any(Wrapper.class))).thenReturn(null);
+        when(itineraryMapper.insert(any(SalesProductItineraryDayEntity.class))).thenAnswer(invocation -> 1);
+
+        var response = service.saveDayItinerary(1L, new ProductDesignerDayItinerarySaveRequest(
+                88L, 1, "南京市", true, false, true
+        ), "admin");
+
+        ArgumentCaptor<SalesProductItineraryDayEntity> captor = ArgumentCaptor.forClass(SalesProductItineraryDayEntity.class);
+        verify(itineraryMapper).insert(captor.capture());
+        assertThat(captor.getValue().getRelatedHotel()).isEqualTo("南京市");
+        assertThat(captor.getValue().getBreakfastIncluded()).isTrue();
+        assertThat(captor.getValue().getLunchIncluded()).isFalse();
+        assertThat(captor.getValue().getDinnerIncluded()).isTrue();
+        assertThat(response.accommodationCity()).isEqualTo("南京市");
+    }
+
+    @Test
+    void selectedMaterialsShouldPersistAbsoluteGlobalOrderAndReturnMixedSequence() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
+        PurchaseResourceIntroductionMapper introductionMapper = mock(PurchaseResourceIntroductionMapper.class);
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDayResourceIntroductionMapper introductionSnapshotMapper =
+                mock(SalesProductDayResourceIntroductionMapper.class);
+        SalesProductDayResourceImageMapper imageSnapshotMapper = mock(SalesProductDayResourceImageMapper.class);
+        SalesProductDesignerService service = new SalesProductDesignerService(
+                productMapper, resourceMapper, mock(PurchaseRelationMapper.class), mock(SupplierMapper.class),
+                mock(SupplierResourcePriceMapper.class), introductionMapper, mock(PurchaseResourceImageMapper.class),
+                dayResourceMapper, imageSnapshotMapper, introductionSnapshotMapper,
+                mock(SalesProductAdultQuoteMapper.class), mock(SalesProductDocumentVersionMapper.class));
+        SalesProductDesignerOptionalItemService optionalService = mock(SalesProductDesignerOptionalItemService.class);
+        var introductionImageMapper = mock(com.mtravel.platform.purchase.resource.material.mapper.PurchaseResourceIntroductionImageMapper.class);
+        ReflectionTestUtils.setField(service, "optionalItemService", optionalService);
+        ReflectionTestUtils.setField(service, "introductionImageMapper", introductionImageMapper);
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
+        when(resourceMapper.selectOne(any(Wrapper.class))).thenReturn(freeResource());
+        when(dayResourceMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
+        when(dayResourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(introductionMapper.selectList(any(Wrapper.class))).thenReturn(
+                List.of(introduction(601L, "灵山介绍"), introduction(602L, "梵宫介绍")));
+        when(introductionImageMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(dayResourceMapper.insert(any(SalesProductDayResourceEntity.class))).thenAnswer(invocation -> {
+            invocation.getArgument(0, SalesProductDayResourceEntity.class).setId(9010L);
+            return 1;
+        });
+        List<SalesProductDayResourceIntroductionEntity> snapshots = new ArrayList<>();
+        when(introductionSnapshotMapper.selectList(any(Wrapper.class))).thenAnswer(invocation -> snapshots);
+        when(introductionSnapshotMapper.insert(any(SalesProductDayResourceIntroductionEntity.class))).thenAnswer(invocation -> {
+            snapshots.add(invocation.getArgument(0));
+            return 1;
+        });
+        when(optionalService.list(eq(1L), eq(88L), eq(9010L))).thenReturn(List.of(
+                new ProductDesignerSelectedOptionalItemResponse(1L, 700L, "景交车", "traffic", null,
+                        null, null, new BigDecimal("40"), null, null, 2)));
+
+        var response = service.saveDayResource(1L, new ProductDesignerDayResourceSaveRequest(
+                null, 88L, 1, 21L, null, null, null, null, null, null, null, List.of(999L), null, null,
+                List.of(
+                        new ProductDesignerSelectedMaterialRequest("introduction", 601L, null, null, null),
+                        new ProductDesignerSelectedMaterialRequest("optional_item", null, 700L, null, new BigDecimal("40")),
+                        new ProductDesignerSelectedMaterialRequest("introduction", 602L, null, null, null))), "admin");
+
+        assertThat(snapshots).extracting(SalesProductDayResourceIntroductionEntity::getSortOrder)
+                .containsExactly(1, 3);
+        ArgumentCaptor<List<Integer>> sortCaptor = ArgumentCaptor.forClass(List.class);
+        verify(optionalService).saveWithGlobalSortOrders(eq(1L), any(), eq("admin"), anyList(), sortCaptor.capture());
+        assertThat(sortCaptor.getValue()).containsExactly(2);
+        assertThat(response.selectedMaterials()).extracting(item -> item.materialType() + ":" + item.sortOrder())
+                .containsExactly("introduction:1", "optional_item:2", "introduction:3");
+        verify(imageSnapshotMapper).update(any(), any(Wrapper.class));
+    }
 
     @Test
     void createDraftShouldPersistDesignDraftAndTranslateConcurrentNameConflict() {
@@ -287,6 +433,70 @@ class SalesProductDesignerServiceTest {
     }
 
     @Test
+    void saveDayResourceShouldAssignHotelToAccommodation() throws Exception {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDesignerService service = service(
+                productMapper,
+                resourceMapper,
+                mock(PurchaseRelationMapper.class),
+                mock(SupplierResourcePriceMapper.class),
+                dayResourceMapper
+        );
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
+        when(resourceMapper.selectOne(any(Wrapper.class))).thenReturn(freeHotelResource());
+        when(dayResourceMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
+        when(dayResourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(dayResourceMapper.insert(any(SalesProductDayResourceEntity.class))).thenAnswer(invocation -> {
+            invocation.getArgument(0, SalesProductDayResourceEntity.class).setId(9002L);
+            return 1;
+        });
+
+        service.saveDayResource(1L, new ProductDesignerDayResourceSaveRequest(
+                null, 88L, 1, 22L, null, null, null, true, null, null, null, null
+        ), "admin");
+
+        ArgumentCaptor<SalesProductDayResourceEntity> captor = ArgumentCaptor.forClass(SalesProductDayResourceEntity.class);
+        verify(dayResourceMapper).insert(captor.capture());
+        var arrangementGetter = java.util.Arrays.stream(SalesProductDayResourceEntity.class.getMethods())
+                .filter(method -> "getArrangementRole".equals(method.getName()))
+                .findFirst();
+        assertThat(arrangementGetter).isPresent();
+        assertThat(arrangementGetter.orElseThrow().invoke(captor.getValue())).isEqualTo("accommodation");
+    }
+
+    @Test
+    void saveDayResourceShouldAllowMultipleHotelsInSameDay() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDesignerService service = service(
+                productMapper, resourceMapper, mock(PurchaseRelationMapper.class),
+                mock(SupplierResourcePriceMapper.class), dayResourceMapper
+        );
+        PurchaseResourceEntity secondHotel = freeHotelResource();
+        secondHotel.setId(23L);
+        secondHotel.setResourceName("南京玄武酒店");
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
+        when(resourceMapper.selectOne(any(Wrapper.class))).thenReturn(freeHotelResource(), secondHotel);
+        when(dayResourceMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
+        when(dayResourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(dayResourceMapper.insert(any(SalesProductDayResourceEntity.class))).thenAnswer(invocation -> 1);
+
+        service.saveDayResource(1L, new ProductDesignerDayResourceSaveRequest(
+                null, 88L, 1, 22L, null, null, null, true, null, null, null, null
+        ), "admin");
+        service.saveDayResource(1L, new ProductDesignerDayResourceSaveRequest(
+                null, 88L, 1, 23L, null, null, null, true, null, null, null, null
+        ), "admin");
+
+        ArgumentCaptor<SalesProductDayResourceEntity> captor = ArgumentCaptor.forClass(SalesProductDayResourceEntity.class);
+        verify(dayResourceMapper, times(2)).insert(captor.capture());
+        assertThat(captor.getAllValues()).allMatch(item -> "accommodation".equals(item.getArrangementRole()));
+    }
+
+    @Test
     void saveDayResourceShouldSnapshotIntroductionNoticeContent() {
         SalesProductMapper productMapper = mock(SalesProductMapper.class);
         PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
@@ -334,9 +544,82 @@ class SalesProductDesignerServiceTest {
         assertThat(response.introductionTitle()).isEqualTo("西湖讲解");
         assertThat(response.introductionContent()).isEqualTo("正文保持黑色。");
         assertThat(response.introductionNotice()).isEqualTo("雨天注意防滑\n请勿下水");
+        assertThat(response.introductionWarmTip()).isEqualTo("建议穿舒适鞋子");
+        assertThat(response.introductionVisitDuration()).isEqualTo("约 2 小时");
         verify(dayResourceMapper).insert(captor.capture());
         assertThat(captor.getValue().getSelectedIntroductionId()).isEqualTo(601L);
         assertThat(captor.getValue().getIntroductionNoticeSnapshot()).isEqualTo("雨天注意防滑\n请勿下水");
+        assertThat(captor.getValue().getIntroductionWarmTipSnapshot()).isEqualTo("建议穿舒适鞋子");
+        assertThat(captor.getValue().getIntroductionVisitDurationSnapshot()).isEqualTo("约 2 小时");
+    }
+
+    @Test
+    void saveDayResourceShouldPersistMultipleIntroductionSnapshotsInRequestOrder() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
+        PurchaseResourceIntroductionMapper introductionMapper = mock(PurchaseResourceIntroductionMapper.class);
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDayResourceIntroductionMapper dayResourceIntroductionMapper =
+                mock(SalesProductDayResourceIntroductionMapper.class);
+        SalesProductDesignerService service = new SalesProductDesignerService(
+                productMapper,
+                resourceMapper,
+                mock(PurchaseRelationMapper.class),
+                mock(SupplierMapper.class),
+                mock(SupplierResourcePriceMapper.class),
+                introductionMapper,
+                mock(PurchaseResourceImageMapper.class),
+                dayResourceMapper,
+                mock(SalesProductDayResourceImageMapper.class),
+                dayResourceIntroductionMapper,
+                mock(SalesProductAdultQuoteMapper.class),
+                mock(SalesProductDocumentVersionMapper.class)
+        );
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
+        when(resourceMapper.selectOne(any(Wrapper.class))).thenReturn(freeResource());
+        when(dayResourceMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
+        when(dayResourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(introductionMapper.selectList(any(Wrapper.class))).thenReturn(
+                List.of(introduction(601L, "主体介绍"), introduction(602L, "九龙灌浴"))
+        );
+        when(dayResourceMapper.insert(any(SalesProductDayResourceEntity.class))).thenAnswer(invocation -> {
+            SalesProductDayResourceEntity entity = invocation.getArgument(0);
+            entity.setId(9004L);
+            return 1;
+        });
+        List<SalesProductDayResourceIntroductionEntity> savedSnapshots = new ArrayList<>();
+        when(dayResourceIntroductionMapper.selectList(any(Wrapper.class))).thenAnswer(invocation -> savedSnapshots);
+        when(dayResourceIntroductionMapper.insert(any(SalesProductDayResourceIntroductionEntity.class)))
+                .thenAnswer(invocation -> {
+                    SalesProductDayResourceIntroductionEntity entity = invocation.getArgument(0);
+                    entity.setId(9100L + entity.getSortOrder());
+                    savedSnapshots.add(entity);
+                    return 1;
+                });
+
+        var response = service.saveDayResource(
+                1L,
+                new ProductDesignerDayResourceSaveRequest(
+                        null, 88L, 1, 21L, null, null, 90, true, BigDecimal.ONE, null,
+                        "组合多个介绍", null, List.of(602L, 601L)
+                ),
+                "admin"
+        );
+
+        assertThat(response.selectedIntroductionIds()).containsExactly(602L, 601L);
+        assertThat(response.introductionSnapshots())
+                .extracting(item -> item.title())
+                .containsExactly("九龙灌浴", "主体介绍");
+        ArgumentCaptor<SalesProductDayResourceIntroductionEntity> snapshotCaptor =
+                ArgumentCaptor.forClass(SalesProductDayResourceIntroductionEntity.class);
+        verify(dayResourceIntroductionMapper, org.mockito.Mockito.times(2))
+                .insert(snapshotCaptor.capture());
+        assertThat(snapshotCaptor.getAllValues())
+                .extracting(SalesProductDayResourceIntroductionEntity::getResourceIntroductionId)
+                .containsExactly(602L, 601L);
+        assertThat(snapshotCaptor.getAllValues())
+                .extracting(SalesProductDayResourceIntroductionEntity::getSortOrder)
+                .containsExactly(1, 2);
     }
 
     @Test
@@ -679,6 +962,7 @@ class SalesProductDesignerServiceTest {
                 mock(PurchaseResourceImageMapper.class),
                 dayResourceMapper,
                 mock(SalesProductDayResourceImageMapper.class),
+                mock(com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceIntroductionMapper.class),
                 mock(SalesProductAdultQuoteMapper.class),
                 mock(SalesProductDocumentVersionMapper.class)
         );
@@ -724,6 +1008,7 @@ class SalesProductDesignerServiceTest {
                 mock(PurchaseResourceImageMapper.class),
                 dayResourceMapper,
                 dayResourceImageMapper,
+                mock(com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceIntroductionMapper.class),
                 adultQuoteMapper,
                 documentVersionMapper
         );
@@ -779,6 +1064,15 @@ class SalesProductDesignerServiceTest {
         return entity;
     }
 
+    private PurchaseResourceEntity freeHotelResource() {
+        PurchaseResourceEntity entity = freeResource();
+        entity.setId(22L);
+        entity.setResourceType("hotel");
+        entity.setResourceName("南京金陵酒店");
+        entity.setCity("南京市");
+        return entity;
+    }
+
     private PurchaseRelationSupplierPriceRow supplierPriceRow() {
         PurchaseRelationSupplierPriceRow row = new PurchaseRelationSupplierPriceRow();
         row.setResourceId(21L);
@@ -803,8 +1097,31 @@ class SalesProductDesignerServiceTest {
         entity.setTitle("西湖讲解");
         entity.setContent("正文保持黑色。");
         entity.setNoticeContent("雨天注意防滑\n请勿下水");
+        entity.setWarmTipContent("建议穿舒适鞋子");
+        entity.setVisitDuration("约 2 小时");
         entity.setStatus("published");
         entity.setIndexVersion(7);
+        entity.setIsDeleted(false);
+        return entity;
+    }
+
+    private PurchaseResourceIntroductionEntity introduction(Long id, String title) {
+        PurchaseResourceIntroductionEntity entity = publishedIntroduction();
+        entity.setId(id);
+        entity.setTitle(title);
+        entity.setContent(title + "正文");
+        entity.setNoticeContent(title + "注意事项");
+        entity.setWarmTipContent(title + "温馨提示");
+        entity.setVisitDuration("约 1 小时");
+        return entity;
+    }
+
+    private PurchaseResourceImageEntity resourceImage(Long id) {
+        PurchaseResourceImageEntity entity = new PurchaseResourceImageEntity();
+        entity.setId(id);
+        entity.setAttachmentId(id + 1000);
+        entity.setOriginalFilename("image-" + id + ".jpg");
+        entity.setStatus("active");
         entity.setIsDeleted(false);
         return entity;
     }

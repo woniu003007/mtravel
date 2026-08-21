@@ -12,5 +12,6 @@ public record ProductDesignerSupplierResponse(
         String priceMode,
         BigDecimal unifiedPrice,
         BigDecimal referenceUnitPrice,
-        List<ProductDesignerSupplierPriceLineResponse> priceLines
+        List<ProductDesignerSupplierPriceLineResponse> priceLines,
+        List<ProductDesignerSupplierOptionalItemResponse> optionalItems
 ) {}

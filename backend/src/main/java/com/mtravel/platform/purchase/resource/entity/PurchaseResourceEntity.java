@@ -57,7 +57,7 @@ public class PurchaseResourceEntity extends TenantSoftDeleteEntity {
     @TableField("address")
     private String address;
 
-    /** 酒店或餐厅星级/档次，例如 unrated、1star、2star。 */
+    /** 酒店或餐厅星级/接待标准，值来自企业产品字典 reception_standard。 */
     @TableField(value = "star_level", updateStrategy = FieldStrategy.ALWAYS)
     private String starLevel;
 

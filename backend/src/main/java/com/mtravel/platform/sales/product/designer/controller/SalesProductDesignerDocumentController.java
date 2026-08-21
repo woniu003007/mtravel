@@ -65,4 +65,11 @@ public class SalesProductDesignerDocumentController extends ControllerSupport {
     public ResponseEntity<InputStreamResource> download(@PathVariable Long versionId) {
         return service.download(currentTenantId(), versionId);
     }
+
+    /** 预览同一文档版本转换出的 PDF，不重新生成文档。 */
+    @OperationLog(module = "销售管理", type = "查询")
+    @GetMapping("/{versionId}/preview")
+    public ResponseEntity<InputStreamResource> preview(@PathVariable Long versionId) {
+        return service.preview(currentTenantId(), versionId);
+    }
 }

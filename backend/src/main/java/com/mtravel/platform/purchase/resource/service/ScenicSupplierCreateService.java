@@ -7,20 +7,28 @@ import com.mtravel.platform.enterprise.expenseitem.entity.EnterpriseExpenseItemE
 import com.mtravel.platform.enterprise.expenseitem.mapper.EnterpriseExpenseItemMapper;
 import com.mtravel.platform.purchase.relation.entity.PurchaseRelationEntity;
 import com.mtravel.platform.purchase.relation.mapper.PurchaseRelationMapper;
+import com.mtravel.platform.purchase.relation.optional.entity.PurchaseRelationOptionalItemEntity;
+import com.mtravel.platform.purchase.relation.optional.mapper.PurchaseRelationOptionalItemMapper;
 import com.mtravel.platform.purchase.relation.price.entity.SupplierResourcePriceEntity;
 import com.mtravel.platform.purchase.relation.price.mapper.SupplierResourcePriceMapper;
 import com.mtravel.platform.purchase.resource.dto.ResourceSupplierCreateRequest;
+import com.mtravel.platform.purchase.resource.dto.ResourceSupplierOptionalItemRequest;
 import com.mtravel.platform.purchase.resource.dto.ResourceSupplierPriceLineRequest;
 import com.mtravel.platform.purchase.resource.dto.ResourceSupplierUpdateRequest;
 import com.mtravel.platform.purchase.resource.dto.ScenicSupplierCreateRequest;
 import com.mtravel.platform.purchase.resource.dto.ScenicSupplierCreateResponse;
 import com.mtravel.platform.purchase.resource.entity.PurchaseResourceEntity;
 import com.mtravel.platform.purchase.resource.mapper.PurchaseResourceMapper;
+import com.mtravel.platform.purchase.resource.optional.entity.PurchaseResourceOptionalItemEntity;
+import com.mtravel.platform.purchase.resource.optional.mapper.PurchaseResourceOptionalItemMapper;
 import com.mtravel.platform.purchase.supplier.entity.SupplierEntity;
 import com.mtravel.platform.purchase.supplier.mapper.SupplierMapper;
 import java.math.BigDecimal;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -41,8 +49,30 @@ public class ScenicSupplierCreateService {
     private final SupplierMapper supplierMapper;
     private final PurchaseRelationMapper relationMapper;
     private final SupplierResourcePriceMapper priceMapper;
+    private final PurchaseRelationOptionalItemMapper optionalItemMapper;
+    private final PurchaseResourceOptionalItemMapper resourceOptionalItemMapper;
     private final EnterpriseExpenseItemMapper expenseItemMapper;
 
+    @Autowired
+    public ScenicSupplierCreateService(
+            PurchaseResourceMapper resourceMapper,
+            SupplierMapper supplierMapper,
+            PurchaseRelationMapper relationMapper,
+            SupplierResourcePriceMapper priceMapper,
+            EnterpriseExpenseItemMapper expenseItemMapper,
+            PurchaseRelationOptionalItemMapper optionalItemMapper,
+            PurchaseResourceOptionalItemMapper resourceOptionalItemMapper
+    ) {
+        this.resourceMapper = resourceMapper;
+        this.supplierMapper = supplierMapper;
+        this.relationMapper = relationMapper;
+        this.priceMapper = priceMapper;
+        this.expenseItemMapper = expenseItemMapper;
+        this.optionalItemMapper = optionalItemMapper;
+        this.resourceOptionalItemMapper = resourceOptionalItemMapper;
+    }
+
+    /** 保留旧单元测试和历史构造入口，生产环境由 Spring 注入自费项目 Mapper。 */
     public ScenicSupplierCreateService(
             PurchaseResourceMapper resourceMapper,
             SupplierMapper supplierMapper,
@@ -50,12 +80,15 @@ public class ScenicSupplierCreateService {
             SupplierResourcePriceMapper priceMapper,
             EnterpriseExpenseItemMapper expenseItemMapper
     ) {
-        this.resourceMapper = resourceMapper;
-        this.supplierMapper = supplierMapper;
-        this.relationMapper = relationMapper;
-        this.priceMapper = priceMapper;
-        this.expenseItemMapper = expenseItemMapper;
+        this(resourceMapper, supplierMapper, relationMapper, priceMapper, expenseItemMapper, null, null);
     }
+
+    /** 兼容已有单测和历史构造入口。 */
+    public ScenicSupplierCreateService(
+            PurchaseResourceMapper resourceMapper, SupplierMapper supplierMapper,
+            PurchaseRelationMapper relationMapper, SupplierResourcePriceMapper priceMapper,
+            EnterpriseExpenseItemMapper expenseItemMapper, PurchaseRelationOptionalItemMapper optionalItemMapper
+    ) { this(resourceMapper, supplierMapper, relationMapper, priceMapper, expenseItemMapper, optionalItemMapper, null); }
 
     /**
      * 为当前资源新建供应商并自动绑定。
@@ -71,7 +104,7 @@ public class ScenicSupplierCreateService {
             String operator
     ) {
         PurchaseResourceEntity resource = requireResource(tenantId, resourceId);
-        validateResourceSupplierRequest(request);
+        validateResourceSupplierRequest(resource, request);
         assertSupplierNameAvailable(tenantId, request.supplierName());
         if (Boolean.TRUE.equals(request.isDefault())) {
             clearOtherDefaultRelations(tenantId, resource.getId(), null);
@@ -111,6 +144,7 @@ public class ScenicSupplierCreateService {
 
         saveClassifiedPrices(tenantId, relation.getId(), resource.getResourceType(), request.priceMode(),
                 request.priceLines(), operator);
+        saveOptionalItems(tenantId, relation.getId(), resource.getId(), resource.getResourceType(), request.optionalItems(), operator);
         return new ScenicSupplierCreateResponse(supplier.getId(), relation.getId());
     }
 
@@ -162,6 +196,7 @@ public class ScenicSupplierCreateService {
         relationMapper.insert(relation);
 
         saveScenicClassifiedPrices(tenantId, relation.getId(), request, operator);
+        saveOptionalItems(tenantId, relation.getId(), resource.getId(), resource.getResourceType(), request.optionalItems(), operator);
         return new ScenicSupplierCreateResponse(supplier.getId(), relation.getId());
     }
 
@@ -188,11 +223,11 @@ public class ScenicSupplierCreateService {
         if (relation == null) {
             throw new BizException("资源供应商绑定关系不存在或已删除");
         }
-        validateResourceSupplierRequest(new ResourceSupplierCreateRequest(
+        validateResourceSupplierRequest(resource, new ResourceSupplierCreateRequest(
                 request.supplierName(), request.province(), request.city(), request.district(),
                 request.basicInfo(), request.contactName(), request.contactPhone(), request.status(),
                 request.isDefault(), request.priceMode(), request.unifiedPrice(), request.priceLines(),
-                request.priceRemark(), request.remark()
+                request.optionalItems(), request.priceRemark(), request.remark()
         ));
         assertSupplierNameAvailable(tenantId, request.supplierName(), relation.getSupplierId());
         String supplierStatus = StringUtils.hasText(request.status()) ? request.status() : "active";
@@ -244,6 +279,10 @@ public class ScenicSupplierCreateService {
                 .set("deleted_by", operator));
         saveClassifiedPrices(tenantId, relationId, resource.getResourceType(), request.priceMode(),
                 request.priceLines(), operator);
+        if (optionalItemMapper != null) {
+            optionalItemMapper.softDeleteByRelation(tenantId, relationId, operator);
+        }
+        saveOptionalItems(tenantId, relationId, resource.getId(), resource.getResourceType(), request.optionalItems(), operator);
         return new ScenicSupplierCreateResponse(relation.getSupplierId(), relationId);
     }
 
@@ -277,7 +316,13 @@ public class ScenicSupplierCreateService {
         }
     }
 
-    private void validateResourceSupplierRequest(ResourceSupplierCreateRequest request) {
+    /**
+     * 景区允许仅维护自费项目报价；其它资源仍至少需要一项统一或分类资源报价。
+     */
+    private void validateResourceSupplierRequest(
+            PurchaseResourceEntity resource,
+            ResourceSupplierCreateRequest request
+    ) {
         if (!StringUtils.hasText(request.priceMode())) {
             throw new BizException("报价模式不能为空");
         }
@@ -285,25 +330,28 @@ public class ScenicSupplierCreateService {
         if (Boolean.TRUE.equals(request.isDefault()) && !"active".equals(supplierStatus)) {
             throw new BizException("默认供应商必须是合作中状态");
         }
+        boolean hasOptionalItemQuote = RESOURCE_TYPE.equals(resource.getResourceType())
+                && request.optionalItems() != null
+                && request.optionalItems().stream().anyMatch(item ->
+                        StringUtils.hasText(item.projectName()) && item.costPrice() != null);
         if ("unified".equals(request.priceMode())) {
-            if (request.unifiedPrice() == null) {
-                throw new BizException("统一报价不能为空");
+            if (request.unifiedPrice() != null) {
+                validateMoneyScale(request.unifiedPrice());
+            } else if (!hasOptionalItemQuote) {
+                throw new BizException("请填写门票统一报价，或至少维护一条自费项目报价");
             }
-            validateMoneyScale(request.unifiedPrice());
             return;
         }
-        if (request.priceLines() == null || request.priceLines().isEmpty()) {
-            throw new BizException("分类报价至少填写一项");
-        }
         boolean hasAny = false;
-        for (ResourceSupplierPriceLineRequest line : request.priceLines()) {
+        for (ResourceSupplierPriceLineRequest line : Objects.requireNonNullElse(
+                request.priceLines(), List.<ResourceSupplierPriceLineRequest>of())) {
             if (line.teamPrice() != null) {
                 validateMoneyScale(line.teamPrice());
                 hasAny = true;
             }
         }
-        if (!hasAny) {
-            throw new BizException("分类报价至少填写一项");
+        if (!hasAny && !hasOptionalItemQuote) {
+            throw new BizException("分类门票报价至少填写一项，或至少维护一条自费项目报价");
         }
     }
 
@@ -362,6 +410,119 @@ public class ScenicSupplierCreateService {
         if (!prices.isEmpty()) {
             priceMapper.insertBatch(prices);
         }
+    }
+
+    /**
+     * 保存供应商关系下的自费项目报价。
+     *
+     * <p>自费项目只属于景区资源，价格是供应商成本价且固定按元/人。项目名称在同一绑定关系内
+     * 不能重复；更新时由调用方先软删除旧快照，再插入当前表单中的启用/停用项目。</p>
+     */
+    private void saveOptionalItems(
+            Long tenantId,
+            Long relationId,
+            Long resourceId,
+            String resourceType,
+            List<ResourceSupplierOptionalItemRequest> optionalItems,
+            String operator
+    ) {
+        List<ResourceSupplierOptionalItemRequest> items = Objects.requireNonNullElse(optionalItems, List.of());
+        if (items.isEmpty()) {
+            return;
+        }
+        if (!RESOURCE_TYPE.equals(resourceType)) {
+            throw new BizException("自费项目报价仅适用于景区资源");
+        }
+        if (optionalItemMapper == null) {
+            throw new BizException("自费项目报价服务未配置");
+        }
+        if (resourceOptionalItemMapper == null) {
+            throw new BizException("自费项目主档服务未配置");
+        }
+
+        Set<String> names = new HashSet<>();
+        List<PurchaseRelationOptionalItemEntity> entities = new java.util.ArrayList<>(items.size());
+        for (ResourceSupplierOptionalItemRequest item : items) {
+            String projectName = clean(item.projectName());
+            if (!StringUtils.hasText(projectName)) {
+                throw new BizException("自费项目名称不能为空");
+            }
+            if (!names.add(projectName)) {
+                throw new BizException("同一供应商下自费项目名称不能重复");
+            }
+            if (item.costPrice() == null) {
+                throw new BizException("自费项目供应商成本价不能为空");
+            }
+            validateMoneyScale(item.costPrice());
+            if (item.suggestedSalePrice() != null) {
+                validateMoneyScale(item.suggestedSalePrice());
+            }
+            Long optionalItemId = resolveOptionalItemMaster(
+                    tenantId, resourceId, item.resourceOptionalItemId(), projectName, operator);
+
+            PurchaseRelationOptionalItemEntity entity = new PurchaseRelationOptionalItemEntity();
+            entity.setTenantId(tenantId);
+            entity.setRelationId(relationId);
+            entity.setResourceOptionalItemId(optionalItemId);
+            entity.setProjectName(projectName);
+            entity.setCostPrice(item.costPrice());
+            entity.setSuggestedSalePrice(item.suggestedSalePrice());
+            entity.setPriceUnit("yuan_per_person");
+            entity.setPriceDescription(clean(item.priceDescription()));
+            entity.setStatus(StringUtils.hasText(item.status()) ? item.status() : "active");
+            if (!"active".equals(entity.getStatus()) && !"disabled".equals(entity.getStatus())) {
+                throw new BizException("自费项目状态不合法");
+            }
+            entity.setCreatedBy(operator);
+            entity.setIsDeleted(false);
+            entities.add(entity);
+        }
+        optionalItemMapper.insertBatch(entities);
+    }
+
+    /**
+     * 将手工录入的报价项目同步到当前景区的项目主档。
+     *
+     * <p>报价表单只要求业务人员填写名称；同名主档已存在时直接复用，不存在时自动补建，
+     * 使介绍素材和产品设计仍能稳定地按主档 ID 关联。</p>
+     */
+    private Long resolveOptionalItemMaster(
+            Long tenantId,
+            Long resourceId,
+            Long requestedOptionalItemId,
+            String projectName,
+            String operator
+    ) {
+        if (requestedOptionalItemId != null) {
+            PurchaseResourceOptionalItemEntity master = resourceOptionalItemMapper.selectOne(
+                    new QueryWrapper<PurchaseResourceOptionalItemEntity>()
+                            .eq("tenant_id", tenantId).eq("id", requestedOptionalItemId)
+                            .eq("resource_id", resourceId).eq("is_deleted", false).last("limit 1"));
+            if (master == null) {
+                throw new BizException("关联自费项目不属于当前景区或已删除");
+            }
+            return master.getId();
+        }
+
+        PurchaseResourceOptionalItemEntity master = resourceOptionalItemMapper.selectOne(
+                new QueryWrapper<PurchaseResourceOptionalItemEntity>()
+                        .eq("tenant_id", tenantId).eq("resource_id", resourceId)
+                        .eq("project_name", projectName).eq("is_deleted", false).last("limit 1"));
+        if (master != null) {
+            return master.getId();
+        }
+
+        master = new PurchaseResourceOptionalItemEntity();
+        master.setTenantId(tenantId);
+        master.setResourceId(resourceId);
+        master.setProjectName(projectName);
+        master.setItemType("recommended_self_pay");
+        master.setPriceUnit("yuan_per_person");
+        master.setStatus("active");
+        master.setCreatedBy(operator);
+        master.setIsDeleted(false);
+        resourceOptionalItemMapper.insert(master);
+        return master.getId();
     }
 
     private void addPriceIfPresent(

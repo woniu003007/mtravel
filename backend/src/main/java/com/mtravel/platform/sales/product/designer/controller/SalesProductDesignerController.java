@@ -6,16 +6,25 @@ import com.mtravel.platform.common.PageResult;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerAdultQuoteResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerAdultQuoteSaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceDeleteRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayItineraryResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayItinerarySaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceReorderRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceSaveRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayItineraryResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayItinerarySaveRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayWordPlanResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayWordPlanSaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDetailResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDraftResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDraftSaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerIntroductionSaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerMapResourceResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerOptionalItemsSaveRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerSelectedOptionalItemResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerResourceDetailResponse;
 import com.mtravel.platform.sales.product.designer.service.SalesProductDesignerService;
+import com.mtravel.platform.sales.product.designer.service.SalesProductDesignerOptionalItemService;
 import com.mtravel.platform.system.log.web.OperationLog;
 import com.mtravel.platform.tenant.TenantProperties;
 import jakarta.validation.Valid;
@@ -42,13 +51,16 @@ import org.springframework.web.bind.annotation.RestController;
 public class SalesProductDesignerController extends ControllerSupport {
 
     private final SalesProductDesignerService service;
+    private final SalesProductDesignerOptionalItemService optionalItemService;
 
     public SalesProductDesignerController(
             SalesProductDesignerService service,
+            SalesProductDesignerOptionalItemService optionalItemService,
             TenantProperties tenantProperties
     ) {
         super(tenantProperties);
         this.service = service;
+        this.optionalItemService = optionalItemService;
     }
 
     /** 分页查询产品设计草稿，不返回正式产品。 */
@@ -159,6 +171,47 @@ public class SalesProductDesignerController extends ControllerSupport {
     ) {
         return ApiResponse.ok(service.saveDayResource(currentTenantId(), request, currentOperator(authentication)));
     }
+
+    /** 保存产品设计工作台当天住宿城市和三餐。 */
+    @OperationLog(module = "销售管理", type = "修改")
+    @PostMapping("/day-itinerary/save")
+    public ApiResponse<ProductDesignerDayItineraryResponse> saveDayItinerary(
+            @Valid @RequestBody ProductDesignerDayItinerarySaveRequest request,
+            Authentication authentication
+    ) {
+        return ApiResponse.ok(service.saveDayItinerary(
+                currentTenantId(), request, currentOperator(authentication)
+        ));
+    }
+
+    /** 查询当天所有景区共用的 Word 素材编排，避免逐景区打开抽屉请求。 */
+    @OperationLog(module = "销售管理", type = "查询")
+    @GetMapping("/day-word-plan")
+    public ApiResponse<ProductDesignerDayWordPlanResponse> dayWordPlan(
+            @RequestParam Long productId,
+            @RequestParam @Min(1) Integer dayNo
+    ) {
+        return ApiResponse.ok(service.dayWordPlan(currentTenantId(), productId, dayNo));
+    }
+
+    /** 事务保存当天景区的跨景区 Word 素材顺序，不修改供应商和成本。 */
+    @OperationLog(module = "销售管理", type = "修改")
+    @PostMapping("/day-word-plan/save")
+    public ApiResponse<ProductDesignerDayWordPlanResponse> saveDayWordPlan(
+            @Valid @RequestBody ProductDesignerDayWordPlanSaveRequest request,
+            Authentication authentication
+    ) {
+        return ApiResponse.ok(service.saveDayWordPlan(
+                currentTenantId(), request, currentOperator(authentication)
+        ));
+    }
+
+    /** 单独保存某条产品日资源选择的自费项目及最终游客报价。 */
+    @OperationLog(module = "销售管理", type = "修改")
+    @PostMapping("/day-resource/optional-items")
+    public ApiResponse<java.util.List<ProductDesignerSelectedOptionalItemResponse>> saveOptionalItems(
+            @Valid @RequestBody ProductDesignerOptionalItemsSaveRequest request, Authentication authentication
+    ) { return ApiResponse.ok(optionalItemService.save(currentTenantId(), request, currentOperator(authentication))); }
 
     /** 软删除产品某天的一条资源。 */
     @OperationLog(module = "销售管理", type = "删除")

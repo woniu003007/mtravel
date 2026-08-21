@@ -12,6 +12,8 @@ public record ProductDesignerDayResourceResponse(
         Long resourceId,
         String resourceName,
         String resourceType,
+        String arrangementRole,
+        Boolean hotelBreakfastIncluded,
         String province,
         String city,
         String district,
@@ -32,8 +34,14 @@ public record ProductDesignerDayResourceResponse(
         String introductionTitle,
         String introductionContent,
         String introductionNotice,
+        String introductionWarmTip,
+        String introductionVisitDuration,
         String remark,
-        List<Long> selectedImageIds
+        List<Long> selectedImageIds,
+        List<Long> selectedIntroductionIds,
+        List<ProductDesignerIntroductionSnapshotResponse> introductionSnapshots,
+        List<ProductDesignerSelectedOptionalItemResponse> selectedOptionalItems,
+        List<ProductDesignerSelectedMaterialResponse> selectedMaterials
 ) {
     public static ProductDesignerDayResourceResponse fromEntity(SalesProductDayResourceEntity entity) {
         return fromEntity(entity, List.of());
@@ -43,6 +51,30 @@ public record ProductDesignerDayResourceResponse(
             SalesProductDayResourceEntity entity,
             List<Long> selectedImageIds
     ) {
+        return fromEntity(entity, selectedImageIds, List.of(), List.of(), List.of(), List.of());
+    }
+
+    public static ProductDesignerDayResourceResponse fromEntity(
+            SalesProductDayResourceEntity entity,
+            List<Long> selectedImageIds,
+            List<Long> selectedIntroductionIds,
+            List<ProductDesignerIntroductionSnapshotResponse> introductionSnapshots
+    ) {
+        return fromEntity(entity, selectedImageIds, selectedIntroductionIds, introductionSnapshots, List.of(), List.of());
+    }
+    public static ProductDesignerDayResourceResponse fromEntity(
+            SalesProductDayResourceEntity entity, List<Long> selectedImageIds, List<Long> selectedIntroductionIds,
+            List<ProductDesignerIntroductionSnapshotResponse> introductionSnapshots,
+            List<ProductDesignerSelectedOptionalItemResponse> selectedOptionalItems
+    ) {
+        return fromEntity(entity, selectedImageIds, selectedIntroductionIds, introductionSnapshots, selectedOptionalItems, List.of());
+    }
+    public static ProductDesignerDayResourceResponse fromEntity(
+            SalesProductDayResourceEntity entity, List<Long> selectedImageIds, List<Long> selectedIntroductionIds,
+            List<ProductDesignerIntroductionSnapshotResponse> introductionSnapshots,
+            List<ProductDesignerSelectedOptionalItemResponse> selectedOptionalItems,
+            List<ProductDesignerSelectedMaterialResponse> selectedMaterials
+    ) {
         return new ProductDesignerDayResourceResponse(
                 entity.getId(),
                 entity.getProductId(),
@@ -50,6 +82,8 @@ public record ProductDesignerDayResourceResponse(
                 entity.getResourceId(),
                 entity.getResourceNameSnapshot(),
                 entity.getResourceTypeSnapshot(),
+                entity.getArrangementRole(),
+                entity.getHotelBreakfastIncluded(),
                 entity.getProvinceSnapshot(),
                 entity.getCitySnapshot(),
                 entity.getDistrictSnapshot(),
@@ -70,8 +104,14 @@ public record ProductDesignerDayResourceResponse(
                 entity.getIntroductionTitleSnapshot(),
                 entity.getIntroductionContentSnapshot(),
                 entity.getIntroductionNoticeSnapshot(),
+                entity.getIntroductionWarmTipSnapshot(),
+                entity.getIntroductionVisitDurationSnapshot(),
                 entity.getRemark(),
-                selectedImageIds == null ? List.of() : selectedImageIds
+                selectedImageIds == null ? List.of() : selectedImageIds,
+                selectedIntroductionIds == null ? List.of() : selectedIntroductionIds,
+                introductionSnapshots == null ? List.of() : introductionSnapshots,
+                selectedOptionalItems == null ? List.of() : selectedOptionalItems,
+                selectedMaterials == null ? List.of() : selectedMaterials
         );
     }
 }

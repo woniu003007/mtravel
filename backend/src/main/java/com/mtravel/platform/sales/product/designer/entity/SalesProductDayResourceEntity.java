@@ -20,6 +20,10 @@ public class SalesProductDayResourceEntity extends TenantSoftDeleteEntity {
     @TableField("resource_id") private Long resourceId;
     @TableField("resource_name_snapshot") private String resourceNameSnapshot;
     @TableField("resource_type_snapshot") private String resourceTypeSnapshot;
+    /** 资源在当天行程中的业务归属，例如住宿、早餐、中餐或晚餐。 */
+    @TableField("arrangement_role") private String arrangementRole;
+    /** 当晚酒店是否包含次日早餐，仅住宿资源可设置。 */
+    @TableField("hotel_breakfast_included") private Boolean hotelBreakfastIncluded;
     @TableField("province_snapshot") private String provinceSnapshot;
     @TableField("city_snapshot") private String citySnapshot;
     @TableField("district_snapshot") private String districtSnapshot;
@@ -40,6 +44,8 @@ public class SalesProductDayResourceEntity extends TenantSoftDeleteEntity {
     @TableField(value = "introduction_title_snapshot", updateStrategy = FieldStrategy.ALWAYS) private String introductionTitleSnapshot;
     @TableField(value = "introduction_content_snapshot", updateStrategy = FieldStrategy.ALWAYS) private String introductionContentSnapshot;
     @TableField(value = "introduction_notice_snapshot", updateStrategy = FieldStrategy.ALWAYS) private String introductionNoticeSnapshot;
+    @TableField(value = "introduction_warm_tip_snapshot", updateStrategy = FieldStrategy.ALWAYS) private String introductionWarmTipSnapshot;
+    @TableField(value = "introduction_visit_duration_snapshot", updateStrategy = FieldStrategy.ALWAYS) private String introductionVisitDurationSnapshot;
 
     public Long getProductId() { return productId; }
     public void setProductId(Long productId) { this.productId = productId; }
@@ -51,6 +57,10 @@ public class SalesProductDayResourceEntity extends TenantSoftDeleteEntity {
     public void setResourceNameSnapshot(String resourceNameSnapshot) { this.resourceNameSnapshot = resourceNameSnapshot; }
     public String getResourceTypeSnapshot() { return resourceTypeSnapshot; }
     public void setResourceTypeSnapshot(String resourceTypeSnapshot) { this.resourceTypeSnapshot = resourceTypeSnapshot; }
+    public String getArrangementRole() { return arrangementRole; }
+    public void setArrangementRole(String arrangementRole) { this.arrangementRole = arrangementRole; }
+    public Boolean getHotelBreakfastIncluded() { return hotelBreakfastIncluded; }
+    public void setHotelBreakfastIncluded(Boolean hotelBreakfastIncluded) { this.hotelBreakfastIncluded = hotelBreakfastIncluded; }
     public String getProvinceSnapshot() { return provinceSnapshot; }
     public void setProvinceSnapshot(String provinceSnapshot) { this.provinceSnapshot = provinceSnapshot; }
     public String getCitySnapshot() { return citySnapshot; }
@@ -91,4 +101,8 @@ public class SalesProductDayResourceEntity extends TenantSoftDeleteEntity {
     public void setIntroductionContentSnapshot(String introductionContentSnapshot) { this.introductionContentSnapshot = introductionContentSnapshot; }
     public String getIntroductionNoticeSnapshot() { return introductionNoticeSnapshot; }
     public void setIntroductionNoticeSnapshot(String introductionNoticeSnapshot) { this.introductionNoticeSnapshot = introductionNoticeSnapshot; }
+    public String getIntroductionWarmTipSnapshot() { return introductionWarmTipSnapshot; }
+    public void setIntroductionWarmTipSnapshot(String introductionWarmTipSnapshot) { this.introductionWarmTipSnapshot = introductionWarmTipSnapshot; }
+    public String getIntroductionVisitDurationSnapshot() { return introductionVisitDurationSnapshot; }
+    public void setIntroductionVisitDurationSnapshot(String introductionVisitDurationSnapshot) { this.introductionVisitDurationSnapshot = introductionVisitDurationSnapshot; }
 }

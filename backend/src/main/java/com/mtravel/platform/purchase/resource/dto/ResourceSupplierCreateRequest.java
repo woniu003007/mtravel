@@ -52,6 +52,10 @@ public record ResourceSupplierCreateRequest(
         @Valid
         List<ResourceSupplierPriceLineRequest> priceLines,
 
+        /** 景区供应商下可选的自费项目报价，统一按元/人。 */
+        @Valid
+        List<ResourceSupplierOptionalItemRequest> optionalItems,
+
         @Size(max = 500, message = "报价备注不能超过500个字符")
         String priceRemark,
 

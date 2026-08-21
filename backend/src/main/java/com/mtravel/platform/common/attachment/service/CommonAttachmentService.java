@@ -184,15 +184,34 @@ public class CommonAttachmentService {
      */
     public InputStream openStream(Long attachmentId, Long tenantId) {
         CommonAttachmentEntity entity = getEntity(attachmentId, tenantId);
-        Path path = Path.of(entity.getStoragePath()).toAbsolutePath().normalize();
-        if (!path.startsWith(uploadRoot)) {
-            throw new BizException("附件路径不合法");
-        }
+        Path path = resolveStoragePath(entity);
         try {
             return Files.newInputStream(path);
         } catch (IOException ex) {
             throw new BizException("附件文件读取失败");
         }
+    }
+
+    /**
+     * 兼容历史数据写入的服务器绝对路径，同时仍将最终路径限制在当前租户上传根目录内。
+     * 本地联调时数据库可能来自另一台服务器，绝对前缀不同但 data/uploads 后的相对路径一致。
+     */
+    private Path resolveStoragePath(CommonAttachmentEntity entity) {
+        String storagePath = entity.getStoragePath();
+        if (!StringUtils.hasText(storagePath)) {
+            throw new BizException("附件路径不合法");
+        }
+        Path path = Path.of(storagePath).toAbsolutePath().normalize();
+        if (path.startsWith(uploadRoot)) return path;
+
+        String normalized = storagePath.replace('\\', '/');
+        int marker = normalized.indexOf("/data/uploads/");
+        if (marker >= 0) {
+            String relative = normalized.substring(marker + "/data/uploads/".length());
+            Path compatible = uploadRoot.resolve(relative).normalize();
+            if (compatible.startsWith(uploadRoot) && Files.exists(compatible)) return compatible;
+        }
+        throw new BizException("附件路径不合法");
     }
 
     /**
@@ -233,8 +252,10 @@ public class CommonAttachmentService {
         if (attachment == null || !StringUtils.hasText(attachment.getStoragePath())) {
             return;
         }
-        Path path = Path.of(attachment.getStoragePath()).toAbsolutePath().normalize();
-        if (!path.startsWith(uploadRoot)) {
+        Path path;
+        try {
+            path = resolveStoragePath(attachment);
+        } catch (BizException ex) {
             return;
         }
         for (int i = 0; i < 3; i += 1) {

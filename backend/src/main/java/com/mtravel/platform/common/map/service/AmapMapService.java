@@ -111,7 +111,7 @@ public class AmapMapService {
         }
         Map<?, ?> response = client.getJson(tenantId, REGEO_ENDPOINT, Map.of(
                 "location", normalizedLongitude + "," + normalizedLatitude,
-                "extensions", "base",
+                "extensions", "all",
                 "radius", 1000
         ));
         Map<?, ?> regeocode = mapValue(response.get("regeocode"));
@@ -119,7 +119,14 @@ public class AmapMapService {
         if (!StringUtils.hasText(address)) {
             throw new BizException("高德未返回可用地址");
         }
-        AmapRegeoResponse result = new AmapRegeoResponse(address);
+        Map<?, ?> addressComponent = mapValue(regeocode.get("addressComponent"));
+        String province = stringValue(addressComponent.get("province"));
+        String city = firstStringValue(addressComponent.get("city"));
+        if (!StringUtils.hasText(city)) {
+            city = province;
+        }
+        String district = stringValue(addressComponent.get("district"));
+        AmapRegeoResponse result = new AmapRegeoResponse(address, province, city, district);
         regeoCache.put(cacheKey, cacheEntry(result));
         return result;
     }
@@ -180,6 +187,17 @@ public class AmapMapService {
         }
         String text = String.valueOf(value);
         return StringUtils.hasText(text) && !"[]".equals(text) ? text : null;
+    }
+
+    private String firstStringValue(Object value) {
+        if (value instanceof List<?> values) {
+            return values.stream()
+                    .map(this::stringValue)
+                    .filter(StringUtils::hasText)
+                    .findFirst()
+                    .orElse(null);
+        }
+        return stringValue(value);
     }
 
     private record CacheEntry<T>(T value, long expiresAt) {

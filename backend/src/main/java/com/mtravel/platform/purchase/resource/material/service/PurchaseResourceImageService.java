@@ -11,7 +11,9 @@ import com.mtravel.platform.purchase.resource.enums.PurchaseResourceStatus;
 import com.mtravel.platform.purchase.resource.material.dto.PurchaseResourceImageResponse;
 import com.mtravel.platform.purchase.resource.material.dto.PurchaseResourceImageUpdateRequest;
 import com.mtravel.platform.purchase.resource.material.entity.PurchaseResourceImageEntity;
+import com.mtravel.platform.purchase.resource.material.entity.PurchaseResourceIntroductionImageEntity;
 import com.mtravel.platform.purchase.resource.material.mapper.PurchaseResourceImageMapper;
+import com.mtravel.platform.purchase.resource.material.mapper.PurchaseResourceIntroductionImageMapper;
 import com.mtravel.platform.purchase.resource.mapper.PurchaseResourceMapper;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -39,6 +41,9 @@ public class PurchaseResourceImageService {
     private final PurchaseResourceImageMapper imageMapper;
     private final CommonAttachmentService attachmentService;
     private final ResourceMaterialTagCodec tagCodec;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private PurchaseResourceIntroductionImageMapper introductionImageMapper;
 
     public PurchaseResourceImageService(
             PurchaseResourceMapper resourceMapper,
@@ -140,6 +145,17 @@ public class PurchaseResourceImageService {
         entity.setDeletedAt(OffsetDateTime.now());
         entity.setDeletedBy(operator);
         imageMapper.update(entity, baseUpdate(tenantId, resourceId, imageId));
+        if (introductionImageMapper != null) {
+            PurchaseResourceIntroductionImageEntity deletedLink = new PurchaseResourceIntroductionImageEntity();
+            deletedLink.setIsDeleted(true);
+            deletedLink.setDeletedAt(OffsetDateTime.now());
+            deletedLink.setDeletedBy(operator);
+            introductionImageMapper.update(deletedLink,
+                    new UpdateWrapper<PurchaseResourceIntroductionImageEntity>()
+                            .eq("tenant_id", tenantId)
+                            .eq("resource_image_id", imageId)
+                            .eq("is_deleted", false));
+        }
         CommonAttachmentEntity attachment = attachmentService.softDelete(existing.getAttachmentId(), tenantId, operator);
         attachmentService.deletePhysicalFileAfterCommit(attachment);
     }

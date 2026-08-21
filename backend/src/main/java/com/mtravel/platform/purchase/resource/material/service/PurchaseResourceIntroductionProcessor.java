@@ -23,6 +23,7 @@ public class PurchaseResourceIntroductionProcessor {
     private static final int CHUNK_OVERLAP = 120;
     private static final String CONTENT_LABEL = "【资源介绍正文】";
     private static final String NOTICE_LABEL = "【注意事项】";
+    private static final String WARM_TIP_LABEL = "【温馨提示】";
 
     private final PurchaseResourceIntroductionMapper introductionMapper;
     private final PurchaseResourceIntroductionChunkMapper chunkMapper;
@@ -38,7 +39,7 @@ public class PurchaseResourceIntroductionProcessor {
         this.embeddingClient = embeddingClient;
     }
 
-    /** 异步切片并向量化已发布的介绍正文和注意事项。过期版本不会继续写入向量表。 */
+    /** 异步切片并向量化已发布的介绍正文和温馨提示。过期版本不会继续写入向量表。 */
     @Async("knowledgeTaskExecutor")
     public void processAsync(Long tenantId, Long introductionId, Integer indexVersion) {
         try {
@@ -79,7 +80,7 @@ public class PurchaseResourceIntroductionProcessor {
                     allEmbedded
                             ? PurchaseResourceIntroductionIndexStatus.INDEXED.value()
                             : PurchaseResourceIntroductionIndexStatus.PENDING.value(),
-                    allEmbedded ? null : "介绍正文和注意事项已切片，向量服务未配置或调用失败，待重试"
+                            allEmbedded ? null : "介绍正文、温馨提示和注意事项已切片，向量服务未配置或调用失败，待重试"
             );
         } catch (RuntimeException ex) {
             chunkMapper.deleteByIntroduction(tenantId, introductionId);
@@ -105,10 +106,11 @@ public class PurchaseResourceIntroductionProcessor {
             String indexStatus,
             String errorMessage
     ) {
-        PurchaseResourceIntroductionEntity entity = new PurchaseResourceIntroductionEntity();
-        entity.setIndexStatus(indexStatus);
-        entity.setErrorMessage(errorMessage);
-        introductionMapper.update(entity, new UpdateWrapper<PurchaseResourceIntroductionEntity>()
+        // 这里只能写向量化状态。介绍实体允许编辑时将注意事项等字段清空，
+        // 其 ALWAYS 策略会使“半空实体更新”误删已保存的素材内容。
+        introductionMapper.update(null, new UpdateWrapper<PurchaseResourceIntroductionEntity>()
+                .set("index_status", indexStatus)
+                .set("error_message", errorMessage)
                 .eq("tenant_id", tenantId)
                 .eq("is_deleted", false)
                 .eq("id", introductionId)
@@ -135,12 +137,13 @@ public class PurchaseResourceIntroductionProcessor {
     }
 
     /**
-     * 正文和注意事项分别切片，并为每段保留来源标签。
+     * 正文和温馨提示分别切片，并为每段保留来源标签。
      * 不能把两类文本拼成一段后再切，否则检索命中时无法判断内容应作为宣传文案还是执行提醒。
      */
     private List<String> splitIntroduction(PurchaseResourceIntroductionEntity introduction) {
         List<String> chunks = new ArrayList<>();
         appendLabeledChunks(chunks, CONTENT_LABEL, introduction.getContent());
+        appendLabeledChunks(chunks, WARM_TIP_LABEL, introduction.getWarmTipContent());
         appendLabeledChunks(chunks, NOTICE_LABEL, introduction.getNoticeContent());
         return chunks;
     }

@@ -5,8 +5,11 @@ import com.mtravel.platform.common.ControllerSupport;
 import com.mtravel.platform.purchase.resource.material.dto.PurchaseResourceImageResponse;
 import com.mtravel.platform.purchase.resource.material.dto.PurchaseResourceImageUpdateRequest;
 import com.mtravel.platform.purchase.resource.material.dto.PurchaseResourceIntroductionResponse;
+import com.mtravel.platform.purchase.resource.material.dto.PurchaseResourceIntroductionImageSaveRequest;
+import com.mtravel.platform.purchase.resource.material.dto.PurchaseResourceIntroductionReorderRequest;
 import com.mtravel.platform.purchase.resource.material.dto.PurchaseResourceIntroductionSaveRequest;
 import com.mtravel.platform.purchase.resource.material.service.PurchaseResourceImageService;
+import com.mtravel.platform.purchase.resource.material.service.PurchaseResourceIntroductionImageService;
 import com.mtravel.platform.purchase.resource.material.service.PurchaseResourceIntroductionService;
 import com.mtravel.platform.system.log.web.OperationLog;
 import com.mtravel.platform.tenant.TenantProperties;
@@ -32,23 +35,39 @@ import org.springframework.web.multipart.MultipartFile;
 public class PurchaseResourceMaterialController extends ControllerSupport {
 
     private final PurchaseResourceIntroductionService introductionService;
+    private final PurchaseResourceIntroductionImageService introductionImageService;
     private final PurchaseResourceImageService imageService;
 
     public PurchaseResourceMaterialController(
             PurchaseResourceIntroductionService introductionService,
+            PurchaseResourceIntroductionImageService introductionImageService,
             PurchaseResourceImageService imageService,
             TenantProperties tenantProperties
     ) {
         super(tenantProperties);
         this.introductionService = introductionService;
+        this.introductionImageService = introductionImageService;
         this.imageService = imageService;
     }
+
 
     /** 查询当前资源的介绍素材版本。 */
     @OperationLog(module = "采购管理", type = "查询")
     @GetMapping("/introductions")
     public ApiResponse<List<PurchaseResourceIntroductionResponse>> introductions(@PathVariable Long resourceId) {
         return ApiResponse.ok(introductionService.list(currentTenantId(), resourceId));
+    }
+
+    /** 保存当前资源全部介绍素材的拖拽排序。 */
+    @OperationLog(module = "采购管理", type = "修改")
+    @PostMapping("/introductions/reorder")
+    public ApiResponse<List<PurchaseResourceIntroductionResponse>> reorderIntroductions(
+            @PathVariable Long resourceId,
+            @Valid @RequestBody PurchaseResourceIntroductionReorderRequest request
+    ) {
+        return ApiResponse.ok(introductionService.reorder(
+                currentTenantId(), resourceId, request
+        ));
     }
 
     /** 新增介绍草稿。 */
@@ -105,6 +124,32 @@ public class PurchaseResourceMaterialController extends ControllerSupport {
     ) {
         introductionService.delete(currentTenantId(), resourceId, introductionId, currentOperator(authentication));
         return ApiResponse.ok();
+    }
+
+    /** 查询某份介绍素材已选择的资源图片，按素材内排序返回。 */
+    @OperationLog(module = "采购管理", type = "查询")
+    @GetMapping("/introductions/{introductionId}/images")
+    public ApiResponse<List<Long>> introductionImages(
+            @PathVariable Long resourceId,
+            @PathVariable Long introductionId
+    ) {
+        return ApiResponse.ok(introductionImageService.listImageIds(
+                currentTenantId(), resourceId, introductionId
+        ));
+    }
+
+    /** 保存介绍素材从当前资源图片素材库选用的图片。 */
+    @OperationLog(module = "采购管理", type = "修改")
+    @PostMapping("/introductions/{introductionId}/images")
+    public ApiResponse<List<Long>> saveIntroductionImages(
+            @PathVariable Long resourceId,
+            @PathVariable Long introductionId,
+            @Valid @RequestBody PurchaseResourceIntroductionImageSaveRequest request,
+            Authentication authentication
+    ) {
+        return ApiResponse.ok(introductionImageService.save(
+                currentTenantId(), resourceId, introductionId, request, currentOperator(authentication)
+        ));
     }
 
     /** 查询当前资源的图片素材。 */

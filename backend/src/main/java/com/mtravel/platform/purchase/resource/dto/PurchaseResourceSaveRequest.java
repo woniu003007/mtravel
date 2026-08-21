@@ -21,7 +21,7 @@ import java.time.LocalTime;
  * @param fax 传真号码
  * @param address 详细地址
  * @param scenicLevel 景区国家 A 级，仅景区使用
- * @param starLevel 酒店或餐厅星级/档次
+ * @param starLevel 酒店或餐厅星级/接待标准，酒店由企业产品字典提供
  * @param categoryTags 类型标签，餐厅菜系、购物商品类别或其它资源分类
  * @param longitude 高德 GCJ-02 经度
  * @param latitude 高德 GCJ-02 纬度
@@ -46,7 +46,7 @@ import java.time.LocalTime;
  * @param warmTip 接待、预约或注意事项
  * @param introduction 资源简介
  * @param status 资源启停状态
- * @param autoCreateSupplier 是否自动创建同名供应商并建立采购关系
+ * @param autoCreateSupplier 是否按资源名称自动创建并绑定一个无报价默认供应商
  * @param remark 资源备注
  */
 public record PurchaseResourceSaveRequest(
@@ -60,7 +60,7 @@ public record PurchaseResourceSaveRequest(
         @Size(max = 40) String fax,
         @Size(max = 300) String address,
         @Pattern(regexp = "unrated|1a|2a|3a|4a|5a", message = "景区等级不合法") String scenicLevel,
-        @Pattern(regexp = "unrated|1star|2star|3star|4star|5star", message = "星级不合法") String starLevel,
+        @Size(max = 120, message = "星级/接待标准不能超过120个字符") String starLevel,
         @Size(max = 500, message = "类型标签不能超过500个字符") String categoryTags,
         BigDecimal longitude,
         BigDecimal latitude,

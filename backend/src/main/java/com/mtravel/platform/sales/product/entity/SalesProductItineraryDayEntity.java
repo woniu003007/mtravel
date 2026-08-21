@@ -69,6 +69,10 @@ public class SalesProductItineraryDayEntity extends TenantSoftDeleteEntity {
     @TableField("roadbook_total_duration_seconds")
     private Integer roadbookTotalDurationSeconds;
 
+    /** 产品 Word 图片展示方式：跟随景区、当天末尾或不展示。 */
+    @TableField("word_image_mode")
+    private String wordImageMode;
+
     public Long getProductId() {
         return productId;
     }
@@ -179,5 +183,13 @@ public class SalesProductItineraryDayEntity extends TenantSoftDeleteEntity {
 
     public void setRoadbookTotalDurationSeconds(Integer roadbookTotalDurationSeconds) {
         this.roadbookTotalDurationSeconds = roadbookTotalDurationSeconds;
+    }
+
+    public String getWordImageMode() {
+        return wordImageMode;
+    }
+
+    public void setWordImageMode(String wordImageMode) {
+        this.wordImageMode = wordImageMode;
     }
 }
