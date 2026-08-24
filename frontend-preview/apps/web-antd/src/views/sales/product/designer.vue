@@ -128,10 +128,11 @@ const selectedMapResourceId = ref<number>();
 const highlightedDayResourceId = ref<number>();
 const loadError = ref('');
 const drawerOpen = ref(false);
-const supplierConfigOpen = ref(false);
 const wordPlanOpen = ref(false);
 const wordPlanLoading = ref(false);
 const wordPlanSaving = ref(false);
+const wordPlanEditorMode = ref<'select' | 'sort'>('select');
+const wordPlanImageSettingsOpen = ref(false);
 const hotelBreakfastSaving = ref(false);
 const dayDestinationSaving = ref(false);
 const dayDestinationCityInput = ref('');
@@ -172,7 +173,7 @@ const amapScriptSelector = 'script[data-mtravel-amap="true"]';
 const materialSortableContainerRef = ref<HTMLElement>();
 const wordPlanSortableContainerRef = ref<HTMLElement>();
 let materialSortableInstance: Sortable | undefined;
-let wordPlanSortableInstance: Sortable | undefined;
+let wordPlanSortableInstances: Sortable[] = [];
 let materialSortableVersion = 0;
 let wordPlanSortableVersion = 0;
 let productWordPreviewLoadVersion = 0;
@@ -202,11 +203,6 @@ const editor = reactive({
   supplierId: undefined as number | undefined,
 });
 const editorPriceEditingIds = ref<Set<number>>(new Set());
-const supplierConfig = reactive({
-  dayResource: undefined as SalesProductDesignerApi.DayResource | undefined,
-  resource: undefined as SalesProductDesignerApi.ResourceDetail | undefined,
-  supplierId: undefined as number | undefined,
-});
 const wordPlan = ref<SalesProductDesignerApi.DayWordPlan>();
 const wordPlanSelected = ref<SalesProductDesignerApi.DayWordPlanMaterialSaveRequest[]>([]);
 const wordPlanImageMode = ref<'follow_resource' | 'day_end' | 'hidden'>('follow_resource');
@@ -221,7 +217,6 @@ const wordPlanSelectedImageIds = reactive<Record<number, number[]>>({});
 const wordPlanDayEndImageSelections = ref<DayEndImageSelection[]>([]);
 const WORD_IMAGE_MIN_COUNT = 2;
 const WORD_IMAGE_MAX_COUNT = 3;
-const wordPlanEditingPriceKeys = ref<Set<string>>(new Set());
 const savedWordPlanFingerprint = ref('');
 const quoteForm = reactive({
   adultSaleAmount: undefined as number | undefined,
@@ -1048,52 +1043,6 @@ async function openResource(resource: SalesProductDesignerApi.MapResource) {
   }
 }
 
-/** 供应商配置只保存成本来源，不携带 selectedMaterials，避免覆盖已编排的 Word 素材。 */
-async function openSupplierConfig(dayResource: SalesProductDesignerApi.DayResource) {
-  supplierConfigOpen.value = true;
-  supplierConfig.dayResource = dayResource;
-  supplierConfig.resource = undefined;
-  supplierConfig.supplierId = dayResource.supplierId;
-  try {
-    supplierConfig.resource = await getSalesProductDesignerResourceDetail(dayResource.resourceId);
-    supplierConfig.supplierId ??= supplierConfig.resource.defaultSupplierId;
-  } catch (error) {
-    supplierConfigOpen.value = false;
-    message.error(designerErrorMessage(error, '供应商配置加载失败'));
-  }
-}
-
-async function saveSupplierConfig() {
-  const dayResource = supplierConfig.dayResource;
-  const resource = supplierConfig.resource;
-  if (!dayResource || !resource) return;
-  const supplierId = supplierConfig.supplierId;
-  saving.value = true;
-  try {
-    await saveSalesProductDesignerDayResource({
-      dayNo: dayResource.dayNo,
-      id: dayResource.id,
-      includeInWord: dayResource.includeInWord,
-      productId: productId.value,
-      quantity: dayResource.quantity,
-      remark: dayResource.remark,
-      resourceId: dayResource.resourceId,
-      sortOrder: dayResource.sortOrder,
-      stayMinutes: dayResource.stayMinutes,
-      supplierId,
-    });
-    syncOpenWordPlanSupplier(dayResource.id, supplierId, resource);
-    supplierConfigOpen.value = false;
-    message.success('供应商配置已保存，Word 素材未修改');
-    await loadDetail();
-    await generateProductWordPreviewVersion();
-  } catch (error) {
-    message.error(designerErrorMessage(error, '供应商配置保存失败'));
-  } finally {
-    saving.value = false;
-  }
-}
-
 function wordPlanMaterialKey(item: SalesProductDesignerApi.DayWordPlanMaterialSaveRequest) {
   return `${item.dayResourceId}:${item.materialType}:${item.introductionId || item.resourceOptionalItemId || ''}`;
 }
@@ -1105,8 +1054,6 @@ function wordPlanFingerprint(items = wordPlanSelected.value) {
     introductionId: item.introductionId,
     materialType: item.materialType,
     resourceOptionalItemId: item.resourceOptionalItemId,
-    salePrice: item.salePrice,
-    supplierOptionalItemId: item.supplierOptionalItemId,
     })),
     imageMode: wordPlanImageMode.value,
     images: Object.entries(wordPlanSelectedImageIds)
@@ -1143,47 +1090,6 @@ function wordPlanCurrentSupplierOptionalItem(item: SalesProductDesignerApi.DayWo
     .find((candidate) => candidate.resourceOptionalItemId === item.resourceOptionalItemId);
 }
 
-/**
- * 供应商切换后同步打开中的 Word 方案，避免原供应商的自费报价残留在提交数据中。
- * 未手动改价的项目跟随新供应商默认价；已改价的项目仍保留用户的对外价。
- */
-function syncOpenWordPlanSupplier(
-  dayResourceId: number,
-  supplierId: number | undefined,
-  resourceDetail: SalesProductDesignerApi.ResourceDetail,
-) {
-  const planResource = wordPlanResource(dayResourceId);
-  if (!planResource) return;
-  const previousSupplierId = planResource.dayResource.supplierId;
-  const previousOptionalItems = resourceDetail.suppliers.find(
-    (supplier) => supplier.supplierId === previousSupplierId,
-  )?.optionalItems || [];
-  const currentSupplier = resourceDetail.suppliers.find((supplier) => supplier.supplierId === supplierId);
-  const currentOptionalItems = currentSupplier?.optionalItems || [];
-  planResource.dayResource.supplierId = supplierId;
-  planResource.dayResource.supplierName = currentSupplier?.supplierName;
-  wordPlanSelected.value = wordPlanSelected.value.map((item) => {
-    if (item.dayResourceId !== dayResourceId || item.materialType !== 'optional_item' || !item.resourceOptionalItemId) {
-      return item;
-    }
-    const previousSuggested = previousOptionalItems.find(
-      (candidate) => candidate.resourceOptionalItemId === item.resourceOptionalItemId,
-    )?.suggestedSalePrice;
-    const currentSupplierItem = currentOptionalItems.find(
-      (candidate) => candidate.resourceOptionalItemId === item.resourceOptionalItemId,
-    );
-    const followsPreviousDefault = item.salePrice == null
-      || (previousSuggested != null && Math.abs(Number(item.salePrice) - Number(previousSuggested)) < 0.001);
-    return {
-      ...item,
-      salePrice: followsPreviousDefault && currentSupplierItem
-        ? currentSupplierItem.suggestedSalePrice
-        : item.salePrice,
-      supplierOptionalItemId: currentSupplierItem?.supplierOptionalItemId,
-    };
-  });
-}
-
 function wordPlanSelectedImages(resource: SalesProductDesignerApi.DayWordPlanResource) {
   return wordPlanSelectedImageIds[resource.dayResource.id] || [];
 }
@@ -1201,6 +1107,41 @@ function wordPlanImageTagText(resource: SalesProductDesignerApi.DayWordPlanResou
     ? '图片需选 2-3 张'
     : `图片 ${count} 张`;
 }
+
+function wordPlanSelectedCountForResource(resource: SalesProductDesignerApi.DayWordPlanResource) {
+  return wordPlanSelected.value.filter((item) => item.dayResourceId === resource.dayResource.id).length;
+}
+
+function wordPlanIntroductionOptions(resource: SalesProductDesignerApi.DayWordPlanResource) {
+  return resource.resourceDetail.introductions.filter((item) => !item.isOptionalItem);
+}
+
+function formatWordPlanTags(tags?: string) {
+  if (!tags?.trim()) return '';
+  try {
+    const parsed = JSON.parse(tags);
+    return Array.isArray(parsed) ? parsed.filter(Boolean).join('、') : String(parsed || '');
+  } catch {
+    return tags;
+  }
+}
+
+const wordPlanImageConfigurationInvalid = computed(() => {
+  if (!wordPlan.value || wordPlanImageMode.value === 'hidden') return false;
+  if (wordPlanImageMode.value === 'day_end') return wordPlanDayEndImageSelectionState() !== 'valid';
+  return wordPlan.value.resources.some((resource) => wordPlanImageSelectionState(resource) === 'invalid');
+});
+
+const wordPlanImageSummary = computed(() => {
+  if (wordPlanImageMode.value === 'hidden') return '不展示图片';
+  if (wordPlanImageMode.value === 'day_end') {
+    const count = wordPlanDayEndImageSelections.value.length;
+    if (count === 1 || count > WORD_IMAGE_MAX_COUNT) return `当天末尾 · 需调整（${count} 张）`;
+    return count ? `当天末尾 · ${count} 张` : '当天末尾 · 未选图片';
+  }
+  const count = Object.values(wordPlanSelectedImageIds).reduce((sum, imageIds) => sum + imageIds.length, 0);
+  return count ? `跟随景区 · ${count} 张` : '跟随景区 · 未选图片';
+});
 
 function wordPlanDayEndImageSelectionState() {
   const { valid, code } = validateWordPlanImageSelections({
@@ -1404,16 +1345,34 @@ function initializeWordPlanImages(data: SalesProductDesignerApi.DayWordPlan) {
     })));
 }
 
-/** Word 素材的拖动分组与预览分组保持一致，同一景区名称视为同一组。 */
+/** Word 素材以当天行程资源 ID 分组，避免两条同名景区被误合并。 */
 function wordPlanScenicGroupKey(item: SalesProductDesignerApi.DayWordPlanMaterialSaveRequest) {
-  return wordPlanResource(item.dayResourceId)?.dayResource.resourceName.trim() || String(item.dayResourceId);
+  return String(item.dayResourceId);
 }
 
-function canMoveWordPlanMaterial(from: number, to: number) {
-  const current = wordPlanSelected.value[from];
-  const target = wordPlanSelected.value[to];
-  return Boolean(current && target && wordPlanScenicGroupKey(current) === wordPlanScenicGroupKey(target));
-}
+const wordPlanSelectedGroups = computed(() => {
+  const groups: {
+    dayResourceId: number;
+    items: SalesProductDesignerApi.DayWordPlanMaterialSaveRequest[];
+    key: string;
+    resourceName: string;
+  }[] = [];
+  wordPlanSelected.value.forEach((item) => {
+    const key = wordPlanScenicGroupKey(item);
+    const current = groups.at(-1);
+    if (current?.key === key) {
+      current.items.push(item);
+      return;
+    }
+    groups.push({
+      dayResourceId: item.dayResourceId,
+      items: [item],
+      key,
+      resourceName: wordPlanResource(item.dayResourceId)?.dayResource.resourceName || '未命名景区',
+    });
+  });
+  return groups;
+});
 
 function wordPlanScenicGroupRange(index: number) {
   const item = wordPlanSelected.value[index];
@@ -1424,13 +1383,6 @@ function wordPlanScenicGroupRange(index: number) {
   while (start > 0 && wordPlanScenicGroupKey(wordPlanSelected.value[start - 1]!) === groupKey) start -= 1;
   while (end < wordPlanSelected.value.length - 1 && wordPlanScenicGroupKey(wordPlanSelected.value[end + 1]!) === groupKey) end += 1;
   return { end, start };
-}
-
-/** 单条只能在组内移动；位于组边界时，上下按钮会整体移动该景区组。 */
-function canStepWordPlanMaterial(from: number, to: number) {
-  if (canMoveWordPlanMaterial(from, to)) return true;
-  const group = wordPlanScenicGroupRange(from);
-  return Boolean(group && (to === group.start - 1 || to === group.end + 1));
 }
 
 /** 新勾选的素材自动放到同景区组的末尾，避免用户无法跨组拖动后出现散组。 */
@@ -1502,34 +1454,28 @@ function toggleWordPlanSupplierOptionalItem(
   toggleWordPlanOptionalItem(resource, optionalItem);
 }
 
-function moveWordPlanMaterial(from: number, to: number) {
-  if (to < 0 || to >= wordPlanSelected.value.length || from === to) return;
-  if (!canMoveWordPlanMaterial(from, to)) {
-    const group = wordPlanScenicGroupRange(from);
-    const targetGroup = wordPlanScenicGroupRange(to);
-    if (!group || !targetGroup || (to !== group.start - 1 && to !== group.end + 1)) return;
-    const next = [...wordPlanSelected.value];
-    const movedGroup = next.splice(group.start, group.end - group.start + 1);
-    const insertAt = to === group.start - 1
-      ? targetGroup.start
-      : targetGroup.end - movedGroup.length + 1;
-    next.splice(insertAt, 0, ...movedGroup);
-    wordPlanSelected.value = next;
-    return;
-  }
-  const next = [...wordPlanSelected.value];
-  const [moved] = next.splice(from, 1);
+function moveWordPlanGroup(from: number, to: number) {
+  if (from === to || from < 0 || to < 0) return;
+  const groups = wordPlanSelectedGroups.value.map((group) => [...group.items]);
+  const [moved] = groups.splice(from, 1);
   if (!moved) return;
-  next.splice(to, 0, moved);
-  wordPlanSelected.value = next;
+  groups.splice(to, 0, moved);
+  wordPlanSelected.value = groups.flat();
 }
 
-function updateWordPlanSalePrice(index: number, value: number | string | null) {
-  const item = wordPlanSelected.value[index];
-  if (!item) return;
-  wordPlanSelected.value = wordPlanSelected.value.map((candidate, candidateIndex) => (
-    candidateIndex === index ? { ...candidate, salePrice: value == null || value === '' ? undefined : Number(value) } : candidate
-  ));
+function moveWordPlanMaterialWithinGroup(groupKey: string, from: number, to: number) {
+  if (from === to || from < 0 || to < 0) return;
+  const group = wordPlanSelectedGroups.value.find((item) => item.key === groupKey);
+  if (!group) return;
+  const range = wordPlanScenicGroupRange(
+    wordPlanSelected.value.findIndex((item) => wordPlanScenicGroupKey(item) === groupKey),
+  );
+  if (!range) return;
+  const next = [...wordPlanSelected.value];
+  const [moved] = next.splice(range.start + from, 1);
+  if (!moved) return;
+  next.splice(range.start + to, 0, moved);
+  wordPlanSelected.value = next;
 }
 
 function wordPlanSuggestedSalePrice(item: SalesProductDesignerApi.DayWordPlanMaterialSaveRequest) {
@@ -1540,94 +1486,73 @@ function wordPlanSuggestedSalePrice(item: SalesProductDesignerApi.DayWordPlanMat
     .find((candidate) => candidate.resourceOptionalItemId === item.resourceOptionalItemId)?.suggestedSalePrice;
 }
 
-function wordPlanPriceKey(item: SalesProductDesignerApi.DayWordPlanMaterialSaveRequest) {
-  return wordPlanMaterialKey(item);
-}
-
-function isWordPlanPriceEditing(item: SalesProductDesignerApi.DayWordPlanMaterialSaveRequest) {
-  return wordPlanEditingPriceKeys.value.has(wordPlanPriceKey(item));
-}
-
-function isWordPlanPriceOverride(item: SalesProductDesignerApi.DayWordPlanMaterialSaveRequest) {
-  const suggested = wordPlanSuggestedSalePrice(item);
-  return item.salePrice != null && (suggested == null || Math.abs(Number(item.salePrice) - Number(suggested)) > 0.001);
-}
-
 function wordPlanDisplaySalePrice(item: SalesProductDesignerApi.DayWordPlanMaterialSaveRequest) {
-  const value = item.salePrice ?? wordPlanSuggestedSalePrice(item);
+  const value = wordPlanSuggestedSalePrice(item);
   return value == null ? '未配置默认价' : formatYuanPerPerson(value);
-}
-
-function editWordPlanPrice(item: SalesProductDesignerApi.DayWordPlanMaterialSaveRequest) {
-  const next = new Set(wordPlanEditingPriceKeys.value);
-  next.add(wordPlanPriceKey(item));
-  wordPlanEditingPriceKeys.value = next;
-}
-
-function resetWordPlanPrice(index: number) {
-  const item = wordPlanSelected.value[index];
-  if (!item) return;
-  updateWordPlanSalePrice(index, null);
-  const next = new Set(wordPlanEditingPriceKeys.value);
-  next.delete(wordPlanPriceKey(item));
-  wordPlanEditingPriceKeys.value = next;
-}
-
-function isWordPlanGroupStart(index: number) {
-  if (index === 0) return true;
-  const current = wordPlanSelected.value[index];
-  const previous = wordPlanSelected.value[index - 1];
-  return !current || !previous || wordPlanScenicGroupKey(current) !== wordPlanScenicGroupKey(previous);
-}
-
-function wordPlanGroupSize(index: number) {
-  const item = wordPlanSelected.value[index];
-  if (!item) return 0;
-  const groupKey = wordPlanScenicGroupKey(item);
-  let size = 0;
-  for (let cursor = index; cursor < wordPlanSelected.value.length; cursor += 1) {
-    if (wordPlanScenicGroupKey(wordPlanSelected.value[cursor]!) !== groupKey) break;
-    size += 1;
-  }
-  return size;
 }
 
 function destroyWordPlanSortable() {
   wordPlanSortableVersion += 1;
-  wordPlanSortableInstance?.destroy();
-  wordPlanSortableInstance = undefined;
+  wordPlanSortableInstances.forEach((instance) => instance.destroy());
+  wordPlanSortableInstances = [];
 }
 
 async function initializeWordPlanSortable() {
   destroyWordPlanSortable();
   await nextTick();
   const container = wordPlanSortableContainerRef.value;
-  if (!container || !wordPlanOpen.value || wordPlanSelected.value.length < 2) return;
+  if (!container || !wordPlanOpen.value || wordPlanEditorMode.value !== 'sort' || !wordPlanSelected.value.length) return;
   const version = ++wordPlanSortableVersion;
-  const { initializeSortable } = useSortable(container, {
-    animation: 160,
-    chosenClass: 'material-sort-chosen',
-    dragClass: 'material-sort-dragging',
-    draggable: '.word-plan-selected-row',
-    ghostClass: 'material-sort-ghost',
-    handle: '.material-drag-handle',
-    onMove: (event) => event.dragged.dataset.scenicGroup === event.related?.dataset.scenicGroup,
-    onEnd: (event: { newIndex?: number; oldIndex?: number }) => {
-      if (event.newIndex == null || event.oldIndex == null) return;
-      moveWordPlanMaterial(event.oldIndex, event.newIndex);
-    },
-  });
-  const sortable = await initializeSortable();
+  const initialized: Sortable[] = [];
+
+  if (wordPlanSelectedGroups.value.length > 1) {
+    const { initializeSortable } = useSortable(container, {
+      animation: 160,
+      chosenClass: 'material-sort-chosen',
+      dragClass: 'material-sort-dragging',
+      draggable: '.word-plan-selected-group',
+      ghostClass: 'material-sort-ghost',
+      handle: '.word-plan-group-drag-handle',
+      onEnd: (event: { newIndex?: number; oldIndex?: number }) => {
+        if (event.newIndex == null || event.oldIndex == null) return;
+        moveWordPlanGroup(event.oldIndex, event.newIndex);
+      },
+    });
+    initialized.push(await initializeSortable());
+  }
+
+  const groupLists = Array.from(container.querySelectorAll<HTMLElement>('.word-plan-selected-group-list'));
+  for (const groupList of groupLists) {
+    if (groupList.querySelectorAll('.word-plan-selected-row').length < 2) continue;
+    const groupKey = groupList.dataset.scenicGroup;
+    if (!groupKey) continue;
+    const { initializeSortable } = useSortable(groupList, {
+      animation: 160,
+      chosenClass: 'material-sort-chosen',
+      dragClass: 'material-sort-dragging',
+      draggable: '.word-plan-selected-row',
+      ghostClass: 'material-sort-ghost',
+      handle: '.material-drag-handle',
+      onEnd: (event: { newIndex?: number; oldIndex?: number }) => {
+        if (event.newIndex == null || event.oldIndex == null) return;
+        moveWordPlanMaterialWithinGroup(groupKey, event.oldIndex, event.newIndex);
+      },
+    });
+    initialized.push(await initializeSortable());
+  }
+
   if (version !== wordPlanSortableVersion || container !== wordPlanSortableContainerRef.value || !wordPlanOpen.value) {
-    sortable.destroy();
+    initialized.forEach((instance) => instance.destroy());
     return;
   }
-  wordPlanSortableInstance = sortable;
+  wordPlanSortableInstances = initialized;
 }
 
 async function openDayWordPlan() {
   wordPlanOpen.value = true;
   wordPlanLoading.value = true;
+  wordPlanEditorMode.value = 'select';
+  wordPlanImageSettingsOpen.value = false;
   try {
     const data = await getSalesProductDesignerDayWordPlan(productId.value, activeDayNo.value);
     wordPlan.value = data;
@@ -1655,6 +1580,7 @@ async function openDayWordPlan() {
 
 function closeDayWordPlan() {
   destroyWordPlanSortable();
+  wordPlanImageSettingsOpen.value = false;
   wordPlanOpen.value = false;
   wordPlan.value = undefined;
   wordPlanSelected.value = [];
@@ -1662,7 +1588,7 @@ function closeDayWordPlan() {
   Object.keys(wordPlanSelectedImageIds).forEach((key) => delete wordPlanSelectedImageIds[Number(key)]);
   wordPlanDayEndImageSelections.value = [];
   wordPlanDayEndImagePickerSelected.value = [];
-  wordPlanEditingPriceKeys.value = new Set();
+  wordPlanEditorMode.value = 'select';
 }
 
 function requestCloseDayWordPlan() {
@@ -1672,7 +1598,7 @@ function requestCloseDayWordPlan() {
   }
   Modal.confirm({
     cancelText: '继续编辑',
-    content: '当前素材选择或顺序尚未保存，关闭后将丢失这些调整。',
+    content: '当前内容编排或图片设置尚未保存，关闭后将丢失这些调整。',
     okText: '放弃修改',
     okType: 'danger',
     title: '确认关闭 Word 方案？',
@@ -1703,9 +1629,7 @@ async function saveDayWordPlan() {
       selectedMaterials: wordPlanSelected.value.map((item) => ({
         ...item,
         supplierOptionalItemId: wordPlanCurrentSupplierOptionalItem(item)?.supplierOptionalItemId,
-        salePrice: item.materialType === 'optional_item' && !isWordPlanPriceOverride(item)
-          ? undefined
-          : item.salePrice,
+        salePrice: item.materialType === 'optional_item' ? undefined : item.salePrice,
       })),
     });
     wordPlan.value = saved;
@@ -1720,9 +1644,12 @@ async function saveDayWordPlan() {
       supplierOptionalItemId: item.material.supplierOptionalItemId,
     }));
     savedWordPlanFingerprint.value = wordPlanFingerprint();
-    message.success('当天景区 Word 方案已保存');
     await loadDetail();
-    await generateProductWordPreviewVersion();
+    const version = await generateProductWordPreviewVersion();
+    if (version?.generateStatus === 'success') message.success('当天 Word 方案已保存，预览已刷新');
+    else message.warning('当天 Word 方案已保存，预览生成失败，可稍后重试');
+  } catch (error) {
+    message.error(designerErrorMessage(error, 'Word 方案保存失败，请稍后重试'));
   } finally {
     wordPlanSaving.value = false;
   }
@@ -2132,7 +2059,6 @@ function revokeProductWordPreviewUrl() {
 async function loadProductWordPreview(version?: SalesProductDesignerApi.DocumentVersion) {
   const requestVersion = ++productWordPreviewLoadVersion;
   productWordPreviewError.value = '';
-  productWordPreviewVersion.value = version;
   if (!version || version.documentType !== 'product_word') {
     revokeProductWordPreviewUrl();
     productWordPreviewVersion.value = undefined;
@@ -2147,16 +2073,24 @@ async function loadProductWordPreview(version?: SalesProductDesignerApi.Document
     return;
   }
   productWordPreviewLoading.value = true;
-  if (productWordPreviewUrl.value) {
-    URL.revokeObjectURL(productWordPreviewUrl.value);
-    productWordPreviewUrl.value = '';
-  }
+  const previousUrl = productWordPreviewUrl.value;
   try {
     const blob = await previewSalesProductDesignerDocument(version.id);
     if (requestVersion !== productWordPreviewLoadVersion) return;
-    const nextUrl = URL.createObjectURL(blob);
-    if (productWordPreviewUrl.value) URL.revokeObjectURL(productWordPreviewUrl.value);
+    const contentType = blob.type.toLowerCase();
+    if (!blob.size) throw new Error('Word 预览文件为空');
+    if (contentType && contentType !== 'application/octet-stream' && !contentType.includes('application/pdf')) {
+      throw new Error('Word 预览接口未返回 PDF 文件');
+    }
+    const pdfBlob = contentType.includes('application/pdf')
+      ? blob
+      : new Blob([blob], { type: 'application/pdf' });
+    const nextUrl = URL.createObjectURL(pdfBlob);
     productWordPreviewUrl.value = nextUrl;
+    productWordPreviewVersion.value = version;
+    if (previousUrl && previousUrl !== nextUrl) {
+      window.setTimeout(() => URL.revokeObjectURL(previousUrl), 0);
+    }
   } catch (error) {
     if (requestVersion === productWordPreviewLoadVersion) {
       productWordPreviewError.value = designerErrorMessage(error, 'Word 预览加载失败，请稍后重试');
@@ -2348,6 +2282,10 @@ watch(
     void initializeWordPlanSortable();
   },
 );
+watch(wordPlanEditorMode, () => {
+  if (!wordPlanOpen.value) return;
+  void initializeWordPlanSortable();
+});
 
 onMounted(async () => {
   await loadStarLevelOptions();
@@ -2851,230 +2789,209 @@ onBeforeUnmount(() => {
       </template>
     </Drawer>
 
-    <Modal
-      v-model:open="supplierConfigOpen"
-      :confirm-loading="saving"
-      title="供应商配置"
-      width="460px"
-      :z-index="1100"
-      ok-text="保存"
-      cancel-text="取消"
-      @ok="saveSupplierConfig"
-    >
-      <template v-if="supplierConfig.dayResource">
-        <p class="supplier-config-description">{{ supplierConfig.dayResource.resourceName }}。仅修改该景区的供应商和成本来源，不会清空或调整 Word 素材。</p>
-        <Form layout="vertical">
-          <Form.Item label="供应商">
-            <Select
-              v-model:value="supplierConfig.supplierId"
-              :disabled="supplierConfig.dayResource.procurementMode === 'not_required'"
-              allow-clear
-              placeholder="选择当前资源的有效供应商"
-            >
-              <Select.Option v-for="supplier in supplierConfig.resource?.suppliers || []" :key="supplier.supplierId" :value="supplier.supplierId">
-                {{ supplier.supplierName }} · {{ supplierPriceText(supplier) }}<template v-if="supplier.isDefault">（默认）</template>
-              </Select.Option>
-            </Select>
-          </Form.Item>
-        </Form>
-        <Alert v-if="supplierConfig.dayResource.procurementMode === 'not_required'" message="该资源无需采购，成本固定为 0 元，不需要供应商。" type="info" show-icon />
-      </template>
-    </Modal>
-
     <Drawer
       :destroy-on-close="true"
       :open="wordPlanOpen"
-      :width="'min(1680px, 98vw)'"
+      :width="'100vw'"
       class="day-word-plan-drawer"
       title="制作 Word 方案"
       @close="requestCloseDayWordPlan"
     >
       <Spin :spinning="wordPlanLoading">
         <template v-if="wordPlan">
-          <div class="day-word-plan-head">
-            <div>
-              <strong>第 {{ wordPlan.dayNo }} 天景区组合</strong>
-              <span>从左侧勾选内容，在中间调整跨景区顺序，右侧实时查看 Word 行程效果。</span>
-            </div>
-            <div class="word-plan-head-actions">
-              <Tag color="blue">已选 {{ wordPlanSelected.length }} 项</Tag>
-            </div>
-          </div>
-          <section class="word-plan-image-setting" aria-label="Word 图片设置">
-            <div class="word-plan-settings">
-              <div class="word-plan-settings-copy">
-                <IconifyIcon icon="lucide:image" />
-                <div>
-                  <strong>图片展示位置</strong>
-                  <span>控制当天景区图片在 Word 中的展示方式</span>
-                </div>
+          <div class="word-plan-workspace">
+            <header class="word-plan-toolbar">
+              <div class="word-plan-toolbar-title">
+                <strong>D{{ wordPlan.dayNo }} · Word 内容编排</strong>
+                <span>{{ wordPlan.resources.length }} 个景区 · 已选 {{ wordPlanSelected.length }} 项内容</span>
               </div>
-              <div class="word-image-mode-control">
-                <Radio.Group v-model:value="wordPlanImageMode" size="small" button-style="solid">
-                  <Radio.Button value="follow_resource">跟随景区</Radio.Button>
-                  <Radio.Button value="day_end">当天末尾</Radio.Button>
-                  <Radio.Button value="hidden">不展示</Radio.Button>
-                </Radio.Group>
-              </div>
-            </div>
-            <div v-if="wordPlanImageMode === 'day_end'" class="day-end-image-control">
-              <div class="day-end-image-copy">
-                <strong>当天末尾图片</strong>
-                <span>从当天各景区图片中统一挑选，按拖动顺序在当天行程末尾输出。</span>
-              </div>
-              <div class="day-end-image-actions">
-                <Tag :color="wordPlanDayEndImageSelectionState() === 'valid' ? (wordPlanDayEndImageSelections.length ? 'blue' : 'default') : 'error'">
-                  {{ wordPlanDayEndImageTagText() }}
-                </Tag>
-                <Button type="primary" size="small" @click="openDayEndWordPlanImagePicker">
-                  <IconifyIcon icon="lucide:images" />选择当天图片
+              <div class="word-plan-toolbar-actions">
+                <button
+                  type="button"
+                  class="word-plan-image-summary"
+                  :class="{ 'is-invalid': wordPlanImageConfigurationInvalid }"
+                  :aria-expanded="wordPlanImageSettingsOpen || wordPlanImagePickerOpen"
+                  @click="wordPlanImageSettingsOpen = true"
+                >
+                  <IconifyIcon icon="lucide:images" />
+                  <span><strong>图片设置</strong><small>{{ wordPlanImageSummary }}</small></span>
+                  <IconifyIcon icon="lucide:chevron-right" />
+                </button>
+                <Button
+                  type="primary"
+                  :loading="wordPlanSaving || productWordGenerating"
+                  @click="saveDayWordPlan"
+                >
+                  <IconifyIcon icon="lucide:save" />保存并刷新预览
                 </Button>
               </div>
-            </div>
-          </section>
-          <div class="day-word-plan-layout">
-            <section class="word-plan-source-pane" aria-label="景区素材库">
-              <div class="word-plan-pane-heading">
-                <div><strong>可选素材</strong><span>{{ wordPlanImageMode === 'day_end' ? '介绍按景区选择，图片在上方统一配置' : '按景区分别选择' }}</span></div>
-              </div>
-              <div class="word-plan-source-scroll">
-                <section v-for="resource in wordPlan.resources" :key="resource.dayResource.id" class="word-plan-resource-group">
-                  <header>
-                    <div><strong>{{ resource.dayResource.resourceName }}</strong><span>{{ resource.dayResource.supplierName || '未配置供应商' }}</span></div>
-                    <Space size="small">
-                      <template v-if="wordPlanImageMode === 'follow_resource'">
-                      <Tag :color="wordPlanImageSelectionState(resource) === 'invalid' ? 'error' : wordPlanSelectedImages(resource).length ? 'blue' : 'default'">
-                        {{ wordPlanImageTagText(resource) }}
+            </header>
+
+            <div class="day-word-plan-layout">
+              <section class="word-plan-editor-pane" aria-label="Word 内容编排">
+                <div class="word-plan-editor-switcher">
+                  <Radio.Group v-model:value="wordPlanEditorMode" size="small" button-style="solid">
+                    <Radio.Button value="select">选择内容</Radio.Button>
+                    <Radio.Button value="sort">调整顺序</Radio.Button>
+                  </Radio.Group>
+                  <span>{{ wordPlanEditorMode === 'select' ? '勾选要写入当天行程的素材' : '拖动景区或素材调整 Word 输出顺序' }}</span>
+                </div>
+
+                <div v-if="wordPlanEditorMode === 'select'" class="word-plan-source-scroll">
+                  <section v-for="resource in wordPlan.resources" :key="resource.dayResource.id" class="word-plan-resource-group">
+                    <header>
+                      <strong>{{ resource.dayResource.resourceName }}</strong>
+                      <Tag :color="wordPlanSelectedCountForResource(resource) ? 'blue' : 'default'">
+                        已选 {{ wordPlanSelectedCountForResource(resource) }} 项
                       </Tag>
-                      <Button size="small" type="link" @click="openWordPlanImagePicker(resource)">配置图片</Button>
-                      </template>
-                      <Button v-if="resource.dayResource.procurementMode !== 'not_required'" size="small" type="link" @click="openSupplierConfig(resource.dayResource)">供应商配置</Button>
-                    </Space>
-                  </header>
-                  <div class="word-plan-candidate-title">介绍素材</div>
-                  <div v-if="resource.resourceDetail.introductions.filter((item) => !item.isOptionalItem).length" class="word-plan-candidate-list">
-                    <Checkbox
-                      v-for="introduction in resource.resourceDetail.introductions.filter((item) => !item.isOptionalItem)"
-                      :key="introduction.id"
-                      :checked="isWordPlanSelected({ dayResourceId: resource.dayResource.id, introductionId: introduction.id, materialType: 'introduction' })"
-                      @change="toggleWordPlanIntroduction(resource, introduction)"
-                    >
-                      <span class="word-plan-candidate-name">{{ introduction.title }}</span>
-                      <span v-if="introduction.tags" class="word-plan-candidate-meta">{{ introduction.tags }}</span>
-                    </Checkbox>
-                  </div>
-                  <Empty v-else :image="Empty.PRESENTED_IMAGE_SIMPLE" description="暂无已发布介绍素材" class="word-plan-empty" />
-                  <div class="word-plan-candidate-title word-plan-optional-title">自费项目</div>
-                  <div v-if="wordPlanSupplierOptionalItems(resource).length" class="word-plan-candidate-list">
-                    <Checkbox
-                      v-for="supplierItem in wordPlanSupplierOptionalItems(resource)"
-                      :key="supplierItem.supplierOptionalItemId"
-                      :checked="isWordPlanSelected({ dayResourceId: resource.dayResource.id, materialType: 'optional_item', resourceOptionalItemId: supplierItem.resourceOptionalItemId })"
-                      @change="toggleWordPlanSupplierOptionalItem(resource, supplierItem)"
-                    >
-                      <span class="word-plan-candidate-name">{{ supplierItem.projectName }}</span>
-                      <span class="word-plan-candidate-meta">系统默认 {{ formatYuanPerPerson(supplierItem.suggestedSalePrice) }}</span>
-                    </Checkbox>
-                  </div>
-                  <div v-else class="word-plan-no-optional">当前供应商没有可用自费报价</div>
-                </section>
-              </div>
-            </section>
+                    </header>
 
-            <section class="word-plan-selected-pane" aria-label="已选内容与排序">
-              <div class="word-plan-pane-heading">
-                <div><strong>编排行程</strong><span>拖动左侧手柄调整顺序；同一景区连续输出</span></div>
-                <span class="word-plan-pane-count">{{ wordPlanSelected.length }} 项</span>
-              </div>
-              <div ref="wordPlanSortableContainerRef" class="word-plan-selected-list">
-                <Empty v-if="!wordPlanSelected.length" description="从左侧勾选要写入 Word 的素材" />
-                <template v-for="(item, index) in wordPlanSelected" :key="wordPlanMaterialKey(item)">
-                  <div v-if="isWordPlanGroupStart(index)" class="word-plan-selected-group-heading">
-                    <div class="word-plan-group-title">
-                      <span class="word-plan-group-dot" aria-hidden="true" />
-                      <strong>{{ wordPlanResource(item.dayResourceId)?.dayResource.resourceName }}</strong>
-                    </div>
-                    <span>{{ wordPlanGroupSize(index) }} 项</span>
-                  </div>
-                  <div :data-scenic-group="wordPlanScenicGroupKey(item)" class="word-plan-selected-row">
-                    <span class="material-order">{{ index + 1 }}</span>
-                    <button class="material-drag-handle" type="button" aria-label="拖动排序" title="按住拖动排序"><IconifyIcon icon="lucide:grip-vertical" /></button>
-                    <div class="word-plan-selected-main">
-                      <div class="word-plan-selected-line">
-                        <Tag :color="item.materialType === 'optional_item' ? 'red' : 'blue'">{{ item.materialType === 'optional_item' ? '自费项目' : '介绍素材' }}</Tag>
-                        <strong :title="item.materialType === 'optional_item' ? wordPlanOptionalItem(item)?.projectName : wordPlanIntroduction(item)?.title">{{ item.materialType === 'optional_item' ? wordPlanOptionalItem(item)?.projectName : wordPlanIntroduction(item)?.title }}</strong>
-                      </div>
-                      <div v-if="item.materialType === 'optional_item'" class="word-plan-sale-price">
-                        <template v-if="!isWordPlanPriceEditing(item)">
-                          <span :class="{ 'is-override': isWordPlanPriceOverride(item) }">
-                            {{ isWordPlanPriceOverride(item) ? '本产品报价' : '系统默认价' }}：{{ wordPlanDisplaySalePrice(item) }}
+                    <div class="word-plan-candidate-section">
+                      <div class="word-plan-candidate-title">介绍素材</div>
+                      <div v-if="wordPlanIntroductionOptions(resource).length" class="word-plan-candidate-list">
+                        <Checkbox
+                          v-for="introduction in wordPlanIntroductionOptions(resource)"
+                          :key="introduction.id"
+                          :checked="isWordPlanSelected({ dayResourceId: resource.dayResource.id, introductionId: introduction.id, materialType: 'introduction' })"
+                          @change="toggleWordPlanIntroduction(resource, introduction)"
+                        >
+                          <span class="word-plan-candidate-copy">
+                            <strong class="word-plan-candidate-name">{{ introduction.title }}</strong>
+                            <small v-if="formatWordPlanTags(introduction.tags)" class="word-plan-candidate-meta">{{ formatWordPlanTags(introduction.tags) }}</small>
                           </span>
-                          <Button type="link" size="small" @click="editWordPlanPrice(item)">修改</Button>
-                        </template>
-                        <template v-else>
-                          <InputNumber
-                            :min="0"
-                            :precision="2"
-                            :value="item.salePrice"
-                            addon-after="元/人"
-                            placeholder="使用系统默认价"
-                            @update:value="(value) => updateWordPlanSalePrice(index, value)"
-                          />
-                          <Button type="link" size="small" @click="resetWordPlanPrice(index)">恢复默认</Button>
-                        </template>
+                        </Checkbox>
+                      </div>
+                      <div v-else-if="!wordPlanSupplierOptionalItems(resource).length" class="word-plan-candidate-empty">暂无可写入 Word 的内容</div>
+                    </div>
+
+                    <div v-if="wordPlanSupplierOptionalItems(resource).length" class="word-plan-candidate-section word-plan-optional-section">
+                      <div class="word-plan-candidate-title">自费项目</div>
+                      <div class="word-plan-candidate-list">
+                        <Checkbox
+                          v-for="supplierItem in wordPlanSupplierOptionalItems(resource)"
+                          :key="supplierItem.supplierOptionalItemId"
+                          :checked="isWordPlanSelected({ dayResourceId: resource.dayResource.id, materialType: 'optional_item', resourceOptionalItemId: supplierItem.resourceOptionalItemId })"
+                          @change="toggleWordPlanSupplierOptionalItem(resource, supplierItem)"
+                        >
+                          <span class="word-plan-candidate-copy">
+                            <strong class="word-plan-candidate-name">{{ supplierItem.projectName }}</strong>
+                            <small class="word-plan-candidate-meta">系统默认 {{ formatYuanPerPerson(supplierItem.suggestedSalePrice) }}</small>
+                          </span>
+                        </Checkbox>
                       </div>
                     </div>
-                    <div class="word-plan-row-actions">
-                      <Button type="text" size="small" :disabled="index === 0 || !canStepWordPlanMaterial(index, index - 1)" aria-label="上移" @click="moveWordPlanMaterial(index, index - 1)"><IconifyIcon icon="lucide:chevron-up" /></Button>
-                      <Button type="text" size="small" :disabled="index === wordPlanSelected.length - 1 || !canStepWordPlanMaterial(index, index + 1)" aria-label="下移" @click="moveWordPlanMaterial(index, index + 1)"><IconifyIcon icon="lucide:chevron-down" /></Button>
-                      <Button danger type="text" size="small" aria-label="移除" @click="wordPlanSelected = wordPlanSelected.filter((_, candidateIndex) => candidateIndex !== index)"><IconifyIcon icon="lucide:x" /></Button>
-                    </div>
-                  </div>
-                </template>
-              </div>
-            </section>
+                  </section>
+                </div>
 
-            <aside class="word-plan-preview-pane" aria-label="Word 实时预览">
+                <div v-else ref="wordPlanSortableContainerRef" class="word-plan-selected-list">
+                  <Empty v-if="!wordPlanSelected.length" description="请先到“选择内容”勾选素材" />
+                  <section
+                    v-for="group in wordPlanSelectedGroups"
+                    v-else
+                    :key="group.key"
+                    :data-scenic-group="group.key"
+                    class="word-plan-selected-group"
+                  >
+                    <header class="word-plan-selected-group-heading">
+                      <button class="word-plan-group-drag-handle" type="button" :aria-label="`拖动「${group.resourceName}」调整景区顺序`" title="拖动整个景区">
+                        <IconifyIcon icon="lucide:grip-vertical" />
+                      </button>
+                      <div class="word-plan-group-title">
+                        <strong>{{ group.resourceName }}</strong>
+                        <span>整组拖动，不会把其他景区插入本组</span>
+                      </div>
+                      <Tag>{{ group.items.length }} 项</Tag>
+                    </header>
+                    <div class="word-plan-selected-group-list" :data-scenic-group="group.key">
+                      <div v-for="item in group.items" :key="wordPlanMaterialKey(item)" class="word-plan-selected-row">
+                        <button class="material-drag-handle" type="button" aria-label="拖动素材排序" title="在当前景区内拖动排序"><IconifyIcon icon="lucide:grip-vertical" /></button>
+                        <div class="word-plan-selected-main">
+                          <div class="word-plan-selected-line">
+                            <Tag :color="item.materialType === 'optional_item' ? 'red' : 'blue'">{{ item.materialType === 'optional_item' ? '自费' : '介绍' }}</Tag>
+                            <strong :title="item.materialType === 'optional_item' ? wordPlanOptionalItem(item)?.projectName : wordPlanIntroduction(item)?.title">{{ item.materialType === 'optional_item' ? wordPlanOptionalItem(item)?.projectName : wordPlanIntroduction(item)?.title }}</strong>
+                          </div>
+                          <span v-if="item.materialType === 'optional_item'" class="word-plan-sale-price">系统默认 {{ wordPlanDisplaySalePrice(item) }}</span>
+                        </div>
+                        <Button danger type="text" size="small" aria-label="移除" @click="wordPlanSelected = wordPlanSelected.filter((candidate) => wordPlanMaterialKey(candidate) !== wordPlanMaterialKey(item))"><IconifyIcon icon="lucide:x" /></Button>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </section>
+
+              <aside class="word-plan-preview-pane" aria-label="Word 真实预览">
               <div class="word-plan-pane-heading">
                 <div><strong>产品 Word 预览</strong><span>与下载文件使用同一版本</span></div>
                 <div class="word-plan-preview-actions">
                   <Tag v-if="productWordPreviewVersion" color="blue">v{{ productWordPreviewVersion.versionNo }}</Tag>
                   <Button v-if="productWordPreviewVersion?.generateStatus === 'success'" size="small" @click="downloadProductWordPreview">下载 Word</Button>
-                  <Button
-                    type="primary"
-                    size="small"
-                    :loading="wordPlanSaving || productWordGenerating"
-                    @click="saveDayWordPlan"
-                  >
-                    实时预览
-                  </Button>
                 </div>
               </div>
               <div class="product-word-preview-status">
                 <span v-if="productWordGenerating">正在生成最新 Word 版本，请稍候…</span>
                 <span v-else-if="productWordPreviewDirty">存在未保存修改，当前显示最近生成的版本。</span>
                 <span v-else-if="productWordPreviewError" class="is-error">{{ productWordPreviewError }}</span>
-                <span v-else-if="productWordPreviewVersion">生成时间以版本记录为准 · 下载与此预览一致</span>
+                <span v-else-if="productWordPreviewVersion">当前预览与下载 Word 一致</span>
                 <span v-else>尚未生成产品介绍 Word</span>
                 <Button v-if="productWordPreviewError && !productWordGenerating" type="link" size="small" @click="generateProductWordPreviewVersion(true)">重新生成</Button>
               </div>
               <div class="word-pdf-preview-scroll word-plan-preview-scroll">
                 <Spin :spinning="productWordPreviewLoading || productWordGenerating">
                   <iframe v-if="productWordPreviewUrl" class="word-pdf-preview-frame" :src="productWordPreviewUrl" title="产品 Word PDF 预览" />
-                  <Empty v-else description="保存当天方案并生成 Word 后，这里显示真实模板预览" />
+                  <Empty v-else description="点击“保存并刷新预览”后，这里显示真实模板效果" />
                 </Spin>
               </div>
-            </aside>
+              </aside>
+            </div>
           </div>
         </template>
       </Spin>
-      <template #footer>
-        <div class="drawer-actions">
-          <Button @click="requestCloseDayWordPlan">取消</Button>
-          <Button type="primary" :loading="wordPlanSaving" @click="saveDayWordPlan">保存当天方案</Button>
-        </div>
-      </template>
     </Drawer>
+
+    <Modal
+      v-model:open="wordPlanImageSettingsOpen"
+      title="Word 图片设置"
+      width="760px"
+      :footer="null"
+    >
+      <div class="word-plan-image-settings-modal">
+        <div class="word-plan-image-mode-row">
+          <div><strong>图片展示方式</strong><span>只影响 Word 输出，不修改资源图片库。</span></div>
+          <Radio.Group v-model:value="wordPlanImageMode" button-style="solid">
+            <Radio.Button value="follow_resource">跟随景区</Radio.Button>
+            <Radio.Button value="day_end">当天末尾</Radio.Button>
+            <Radio.Button value="hidden">不展示</Radio.Button>
+          </Radio.Group>
+        </div>
+
+        <div v-if="wordPlanImageMode === 'follow_resource'" class="word-plan-image-resource-settings">
+          <div v-for="resource in wordPlan?.resources || []" :key="resource.dayResource.id" class="word-plan-image-resource-row">
+            <div><strong>{{ resource.dayResource.resourceName }}</strong><span>图片紧跟该景区介绍输出</span></div>
+            <Space size="small">
+              <Tag :color="wordPlanImageSelectionState(resource) === 'invalid' ? 'error' : wordPlanSelectedImages(resource).length ? 'blue' : 'default'">
+                {{ wordPlanImageTagText(resource) }}
+              </Tag>
+              <Button size="small" @click="openWordPlanImagePicker(resource)">选择图片</Button>
+            </Space>
+          </div>
+        </div>
+
+        <div v-else-if="wordPlanImageMode === 'day_end'" class="word-plan-day-end-setting">
+          <div><strong>当天末尾统一图片</strong><span>从当天所有景区中选择 0、2 或 3 张，按拖动顺序输出。</span></div>
+          <Space size="small">
+            <Tag :color="wordPlanDayEndImageSelectionState() === 'valid' ? (wordPlanDayEndImageSelections.length ? 'blue' : 'default') : 'error'">
+              {{ wordPlanDayEndImageTagText() }}
+            </Tag>
+            <Button type="primary" @click="openDayEndWordPlanImagePicker">选择当天图片</Button>
+          </Space>
+        </div>
+
+        <Alert v-else message="本天行程只输出文字内容，不展示景区图片。" type="info" show-icon />
+        <div class="word-plan-image-settings-actions">
+          <Button type="primary" @click="wordPlanImageSettingsOpen = false">完成</Button>
+        </div>
+      </div>
+    </Modal>
 
     <Modal
       v-model:open="wordPlanImagePickerOpen"
@@ -3095,12 +3012,17 @@ onBeforeUnmount(() => {
                 : '可不选；如需展示请选 2 或 3 张，勾选后可在“已选图片”中拖动排序。' }}</span>
             </div>
             <Space size="small">
-              <Tag :color="wordPlanImagePickerSelectionCount() === 1 ? 'error' : 'blue'">已选 {{ wordPlanImagePickerSelectionCount() }} / {{ WORD_IMAGE_MAX_COUNT }} 张</Tag>
+              <Tag :color="wordPlanImagePickerSelectionCount() === 1 || wordPlanImagePickerSelectionCount() > WORD_IMAGE_MAX_COUNT ? 'error' : 'blue'">已选 {{ wordPlanImagePickerSelectionCount() }} / {{ WORD_IMAGE_MAX_COUNT }} 张</Tag>
               <Button size="small" @click="clearWordPlanImages">清空选择</Button>
             </Space>
           </div>
-          <div v-if="wordPlanImagePickerSelectionCount() === 1" class="word-image-selection-warning">
-            单张图片无法保存到 Word 方案，请再选择 1 至 2 张图片，或清空当前选择。
+          <div v-if="wordPlanImagePickerSelectionCount() === 1 || wordPlanImagePickerSelectionCount() > WORD_IMAGE_MAX_COUNT" class="word-image-selection-warning">
+            <template v-if="wordPlanImagePickerSelectionCount() > WORD_IMAGE_MAX_COUNT">
+              历史方案已选 {{ wordPlanImagePickerSelectionCount() }} 张图片，超过当前 3 张上限。请精简到 2 或 3 张，或清空后再保存。
+            </template>
+            <template v-else>
+              单张图片无法保存到 Word 方案，请再选择 1 至 2 张图片，或清空当前选择。
+            </template>
           </div>
           <div v-if="wordPlanImagePickerSelectedItems().length" class="word-image-selected-list">
             <div class="word-image-section-label">已选图片顺序</div>
@@ -3462,84 +3384,93 @@ onBeforeUnmount(() => {
 .word-preview-image-placeholder { display: grid; place-items: center; gap: 6px; padding: 10px; color: #8c8c8c; font-size: 12px; text-align: center; }
 .word-preview-disclaimer { margin: 8px 0 0; color: #8c8c8c; font-size: 12px; line-height: 1.6; }
 .drawer-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.supplier-config-description { margin: 0 0 18px; color: #64748b; line-height: 1.7; }
-.day-word-plan-drawer :deep(.ant-drawer-header) { padding: 17px 24px; border-bottom-color: #e5e7eb; }
+.day-word-plan-drawer :deep(.ant-drawer-content-wrapper) { width: 100vw !important; max-width: 100vw; }
+.day-word-plan-drawer :deep(.ant-drawer-header) { min-height: 54px; padding: 13px 20px; border-bottom-color: #e5e7eb; }
 .day-word-plan-drawer :deep(.ant-drawer-title) { color: #1f2937; font-size: 16px; font-weight: 650; }
-.day-word-plan-drawer :deep(.ant-drawer-body) { padding: 18px 24px 20px; background: #f8fafc; }
-.day-word-plan-drawer :deep(.ant-drawer-footer) { padding: 12px 24px; background: #fff; border-top-color: #e5e7eb; }
-.day-word-plan-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 2px 2px 6px; }
-.word-plan-head-actions { display: flex; align-items: center; gap: 14px; flex: 0 0 auto; }
-.word-plan-image-setting { margin-top: 10px; overflow: hidden; background: #fff; border: 1px solid #dbe4ee; border-radius: 8px; }
-.word-plan-settings { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 14px; }
-.word-plan-settings-copy { display: flex; min-width: 0; align-items: center; gap: 9px; }
-.word-plan-settings-copy > :deep(.anticon), .word-plan-settings-copy > svg { flex: 0 0 auto; color: #1677ff; font-size: 16px; }
-.word-plan-settings-copy strong, .word-plan-settings-copy span { display: block; }
-.word-plan-settings-copy strong { color: #334155; font-size: 13px; font-weight: 650; }
-.word-plan-settings-copy span { margin-top: 3px; color: #64748b; font-size: 12px; line-height: 1.5; }
-.day-end-image-control { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 14px; border-top: 1px solid #edf2f7; background: #f8fbff; }
-.day-end-image-copy { min-width: 0; }
-.day-end-image-copy strong, .day-end-image-copy span { display: block; }
-.day-end-image-copy strong { color: #334155; font-size: 13px; font-weight: 650; }
-.day-end-image-copy span { margin-top: 3px; color: #64748b; font-size: 12px; line-height: 1.5; }
-.day-end-image-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
-.day-end-image-actions :deep(.ant-tag) { margin-inline-end: 0; }
-.word-image-mode-control { display: flex; align-items: center; gap: 8px; color: #64748b; font-size: 12px; }
-.word-image-mode-control :deep(.ant-radio-button-wrapper) { padding: 0 10px; font-size: 12px; }
-.day-word-plan-head strong, .day-word-plan-head span { display: block; }
-.day-word-plan-head strong { color: #1f2937; font-size: 15px; font-weight: 650; }
-.day-word-plan-head span { margin-top: 4px; color: #64748b; font-size: 12px; line-height: 1.6; }
-.day-word-plan-layout { display: grid; grid-template-columns: minmax(290px, .78fr) minmax(360px, 1fr) minmax(620px, 1.48fr); gap: 16px; min-height: 0; padding-top: 14px; }
-.word-plan-source-pane, .word-plan-selected-pane, .word-plan-preview-pane { display: flex; min-width: 0; flex-direction: column; }
-.word-plan-pane-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 38px; padding: 0 2px 9px; margin-bottom: 0; border-bottom: 1px solid #dbe4ee; }
+.day-word-plan-drawer :deep(.ant-drawer-body) { padding: 0; overflow: hidden; background: #f4f6f8; }
+.day-word-plan-drawer :deep(.ant-spin-nested-loading), .day-word-plan-drawer :deep(.ant-spin-container) { height: 100%; }
+.word-plan-workspace { display: flex; height: calc(100vh - 55px); min-height: 0; flex-direction: column; }
+.word-plan-toolbar { display: flex; min-height: 66px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 20px; padding: 10px 20px; background: #fff; border-bottom: 1px solid #e5e7eb; }
+.word-plan-toolbar-title { min-width: 0; }
+.word-plan-toolbar-title strong, .word-plan-toolbar-title span { display: block; }
+.word-plan-toolbar-title strong { color: #1f2937; font-size: 15px; font-weight: 650; }
+.word-plan-toolbar-title span { margin-top: 3px; color: #64748b; font-size: 12px; }
+.word-plan-toolbar-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; }
+.word-plan-image-summary { display: flex; min-width: 204px; align-items: center; gap: 9px; padding: 6px 10px; color: #475569; text-align: left; background: #fff; border: 1px solid #d9d9d9; border-radius: 6px; cursor: pointer; transition: border-color .16s ease, color .16s ease, background .16s ease; }
+.word-plan-image-summary:hover, .word-plan-image-summary:focus-visible { color: #1677ff; background: #f7fbff; border-color: #4096ff; outline: none; }
+.word-plan-image-summary.is-invalid { color: #cf1322; background: #fff7f6; border-color: #ffccc7; }
+.word-plan-image-summary.is-invalid small { color: #cf1322; }
+.word-plan-image-summary > svg:first-child { flex: 0 0 auto; font-size: 17px; }
+.word-plan-image-summary > svg:last-child { flex: 0 0 auto; margin-left: auto; color: #94a3b8; }
+.word-plan-image-summary span { display: grid; min-width: 0; flex: 1; gap: 1px; }
+.word-plan-image-summary strong { color: #334155; font-size: 12px; font-weight: 600; }
+.word-plan-image-summary small { overflow: hidden; color: #64748b; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.day-word-plan-layout { display: grid; min-height: 0; flex: 1; grid-template-columns: minmax(460px, 42%) minmax(620px, 58%); }
+.word-plan-editor-pane, .word-plan-preview-pane { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
+.word-plan-editor-pane { padding: 14px 16px 16px; background: #fff; border-right: 1px solid #dfe4ea; }
+.word-plan-preview-pane { padding: 14px 18px 16px; background: #f4f6f8; }
+.word-plan-editor-switcher { display: flex; min-height: 40px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
+.word-plan-editor-switcher > span { overflow: hidden; color: #64748b; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.word-plan-editor-switcher :deep(.ant-radio-button-wrapper) { min-width: 92px; text-align: center; }
+.word-plan-pane-heading { display: flex; min-height: 40px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px 10px; border-bottom: 1px solid #dbe4ee; }
 .word-plan-pane-heading > div { min-width: 0; }
 .word-plan-pane-heading > div strong, .word-plan-pane-heading > div span { display: block; }
 .word-plan-pane-heading strong { color: #1e293b; font-size: 14px; font-weight: 650; }
 .word-plan-pane-heading > div span { margin-top: 3px; color: #64748b; font-size: 12px; line-height: 1.45; }
-.word-plan-pane-count { flex: 0 0 auto; color: #1677ff !important; font-weight: 600; }
 .word-plan-preview-actions { display: flex; align-items: center; gap: 8px; }
-.word-plan-source-scroll, .word-plan-selected-list { max-height: calc(100vh - 250px); min-height: 500px; margin-top: 10px; overflow: auto; border: 1px solid #dbe4ee; border-radius: 8px; background: #fff; }
-.word-plan-resource-group { padding: 13px 14px; border-bottom: 1px solid #e8eef5; }
+.word-plan-source-scroll, .word-plan-selected-list { min-height: 0; flex: 1; padding: 0 4px 12px 0; overflow: auto; background: #fff; scrollbar-color: #cbd5e1 transparent; scrollbar-width: thin; }
+.word-plan-source-scroll { padding-top: 2px; }
+.word-plan-resource-group { padding: 16px 4px; border-bottom: 1px solid #e8eef5; }
 .word-plan-resource-group:last-child { border-bottom: 0; }
-.word-plan-resource-group > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding-bottom: 9px; margin-bottom: 10px; border-bottom: 1px solid #eef2f7; }
-.word-plan-resource-group > header :deep(.ant-space) { flex: 0 0 auto; }
-.word-plan-resource-group > header :deep(.ant-tag) { margin-inline-end: 0; font-size: 11px; }
-.word-plan-resource-group header strong, .word-plan-resource-group header span { display: block; }
-.word-plan-resource-group header strong { color: #1e293b; font-size: 13px; font-weight: 650; }
-.word-plan-resource-group header span { margin-top: 2px; color: #8c8c8c; font-size: 12px; }
-.word-plan-candidate-title { margin: 10px 0 6px; color: #64748b; font-size: 12px; font-weight: 650; }
-.word-plan-optional-title { padding-top: 10px; border-top: 1px dashed #dce5ef; }
+.word-plan-resource-group > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 7px 10px; }
+.word-plan-resource-group > header :deep(.ant-tag) { flex: 0 0 auto; margin-inline-end: 0; font-size: 11px; }
+.word-plan-resource-group > header strong { overflow: hidden; color: #1e293b; font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.word-plan-candidate-section { padding: 0 2px; }
+.word-plan-optional-section { padding-top: 10px; margin-top: 8px; border-top: 1px dashed #e1e7ee; }
+.word-plan-candidate-title { margin: 0 5px 4px; color: #64748b; font-size: 12px; font-weight: 600; }
 .word-plan-candidate-list { display: grid; gap: 3px; }
-.word-plan-candidate-list :deep(.ant-checkbox-wrapper) { display: flex; align-items: baseline; min-width: 0; padding: 6px 7px; border: 1px solid transparent; border-radius: 5px; }
+.word-plan-candidate-list :deep(.ant-checkbox-wrapper) { display: flex; min-width: 0; align-items: flex-start; padding: 7px; border: 1px solid transparent; border-radius: 5px; }
 .word-plan-candidate-list :deep(.ant-checkbox-wrapper:hover) { border-color: #d6e7ff; background: #f6faff; }
-.word-plan-candidate-name { overflow: hidden; color: #334155; text-overflow: ellipsis; white-space: nowrap; }
-.word-plan-candidate-meta { margin-left: 5px; color: #8c8c8c; font-size: 12px; }
-.word-plan-empty { margin: 4px 0; }
-.word-plan-no-optional { color: #8c8c8c; font-size: 12px; line-height: 28px; }
-.word-plan-selected-list { display: block; padding: 6px 10px 12px; background: #fff; }
-.word-plan-selected-group-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 5px 6px; color: #64748b; font-size: 11px; letter-spacing: .02em; }
-.word-plan-selected-group-heading + .word-plan-selected-row { border-top-left-radius: 7px; border-top-right-radius: 7px; }
-.word-plan-group-title { display: flex; min-width: 0; align-items: center; gap: 7px; }
-.word-plan-group-title strong { overflow: hidden; color: #334155; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.word-plan-group-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: #1677ff; box-shadow: 0 0 0 3px #e8f3ff; }
-.word-plan-selected-row { display: flex; align-items: center; gap: 6px; min-height: 50px; padding: 7px 7px; border: 1px solid #e5eaf0; border-bottom: 0; background: #fff; transition: background .18s ease, border-color .18s ease; }
-.word-plan-selected-row:last-child { border-bottom: 1px solid #e5eaf0; border-bottom-left-radius: 7px; border-bottom-right-radius: 7px; }
-.word-plan-selected-row:hover { position: relative; z-index: 1; border-color: #b9d7ff; background: #f8fbff; }
+.word-plan-candidate-list :deep(.ant-checkbox + span) { min-width: 0; flex: 1; }
+.word-plan-candidate-copy { display: flex; min-width: 0; align-items: baseline; gap: 7px; }
+.word-plan-candidate-name { min-width: 0; overflow: hidden; color: #334155; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.word-plan-candidate-meta { flex: 0 0 auto; color: #8c8c8c; font-size: 11px; }
+.word-plan-candidate-empty { padding: 5px 7px; color: #94a3b8; font-size: 12px; }
+.word-plan-selected-list { display: block; padding-top: 12px; }
+.word-plan-selected-group { margin-bottom: 12px; overflow: hidden; border: 1px solid #dfe5ec; border-radius: 7px; background: #fff; }
+.word-plan-selected-group:last-child { margin-bottom: 0; }
+.word-plan-selected-group-heading { display: flex; min-height: 46px; align-items: center; gap: 8px; padding: 7px 9px; background: #f7f9fb; border-bottom: 1px solid #e5eaf0; }
+.word-plan-selected-group-heading :deep(.ant-tag) { flex: 0 0 auto; margin-inline-end: 0; }
+.word-plan-group-title { display: grid; min-width: 0; flex: 1; gap: 1px; }
+.word-plan-group-title strong { overflow: hidden; color: #334155; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.word-plan-group-title span { color: #7b8794; font-size: 11px; }
+.word-plan-group-drag-handle, .material-drag-handle { display: grid; width: 26px; height: 28px; flex: 0 0 auto; place-items: center; padding: 0; color: #94a3b8; background: transparent; border: 0; border-radius: 4px; cursor: grab; }
+.word-plan-group-drag-handle:hover, .material-drag-handle:hover { color: #1677ff; background: #eaf3ff; }
+.word-plan-group-drag-handle:active, .material-drag-handle:active { cursor: grabbing; }
+.word-plan-selected-group-list { padding: 3px 9px; }
+.word-plan-selected-row { display: flex; min-height: 48px; align-items: center; gap: 7px; padding: 6px 2px; border-bottom: 1px solid #edf0f3; background: #fff; transition: background .16s ease; }
+.word-plan-selected-row:last-child { border-bottom: 0; }
+.word-plan-selected-row:hover { background: #f8fbff; }
 .word-plan-selected-main { min-width: 0; flex: 1; }
 .word-plan-selected-line { display: flex; min-width: 0; align-items: center; gap: 7px; }
 .word-plan-selected-line :deep(.ant-tag) { flex: 0 0 auto; margin-inline-end: 0; font-size: 11px; line-height: 20px; }
 .word-plan-selected-main strong { display: block; overflow: hidden; color: #334155; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.word-plan-sale-price { display: flex; align-items: center; gap: 5px; margin-top: 3px; color: #64748b; font-size: 11px; line-height: 24px; }
-.word-plan-sale-price > span { flex: 0 0 auto; white-space: nowrap; }
-.word-plan-sale-price > span.is-override { color: #d46b08; }
-.word-plan-sale-price :deep(.ant-input-number) { width: 170px; }
-.word-plan-sale-price :deep(.ant-btn-link) { height: 22px; padding: 0 4px; font-size: 11px; }
-.word-plan-row-actions { display: flex; flex: 0 0 auto; }
-.word-plan-row-actions :deep(.ant-btn) { width: 24px; height: 26px; padding: 0; color: #94a3b8; }
-.word-plan-row-actions :deep(.ant-btn:hover) { color: #1677ff; background: #edf5ff; }
-.word-plan-preview-scroll { max-height: calc(100vh - 250px); min-height: 500px; margin-top: 10px; border-color: #dbe4ee; border-radius: 8px; background: #eef2f6; }
-.word-plan-preview-scroll.word-pdf-preview-scroll { margin-top: 10px; }
-.word-plan-preview-pane .word-preview-sheet { width: min(100%, 590px); min-height: 720px; padding: 40px 46px; box-shadow: 0 2px 10px rgb(15 23 42 / 14%); }
-.word-plan-preview-pane .word-preview-disclaimer { padding-left: 3px; }
+.word-plan-sale-price { display: block; margin-top: 2px; color: #64748b; font-size: 11px; line-height: 18px; }
+.word-plan-selected-row > :deep(.ant-btn) { flex: 0 0 auto; color: #94a3b8; }
+.word-plan-preview-scroll { min-height: 0; flex: 1; margin-top: 0; border-color: #dbe4ee; border-radius: 6px; background: #e9edf2; }
+.word-plan-preview-scroll.word-pdf-preview-scroll { margin-top: 0; }
+.word-plan-preview-scroll :deep(.ant-spin-nested-loading), .word-plan-preview-scroll :deep(.ant-spin-container) { height: 100%; min-height: 0; }
+.word-plan-preview-pane .word-pdf-preview-frame { height: 100%; min-height: 100%; }
+.word-plan-image-settings-modal { display: grid; gap: 16px; }
+.word-plan-image-mode-row, .word-plan-day-end-setting { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding-bottom: 16px; border-bottom: 1px solid #edf0f3; }
+.word-plan-image-mode-row > div, .word-plan-day-end-setting > div, .word-plan-image-resource-row > div { min-width: 0; }
+.word-plan-image-mode-row strong, .word-plan-image-mode-row span, .word-plan-day-end-setting strong, .word-plan-day-end-setting span, .word-plan-image-resource-row strong, .word-plan-image-resource-row span { display: block; }
+.word-plan-image-mode-row strong, .word-plan-day-end-setting strong, .word-plan-image-resource-row strong { color: #334155; font-size: 13px; font-weight: 650; }
+.word-plan-image-mode-row span, .word-plan-day-end-setting span, .word-plan-image-resource-row span { margin-top: 3px; color: #64748b; font-size: 12px; }
+.word-plan-image-resource-settings { display: grid; max-height: 430px; overflow: auto; border-top: 1px solid #edf0f3; }
+.word-plan-image-resource-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 2px; border-bottom: 1px solid #edf0f3; }
+.word-plan-image-resource-row :deep(.ant-tag) { margin-inline-end: 0; }
+.word-plan-image-settings-actions { display: flex; justify-content: flex-end; padding-top: 4px; }
 .word-image-picker-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0 14px; margin-bottom: 2px; border-bottom: 1px solid #e8eef5; }
 .word-image-picker-toolbar strong, .word-image-picker-toolbar span { display: block; }
 .word-image-picker-toolbar strong { color: #1f2937; font-size: 14px; }
@@ -3598,9 +3529,7 @@ onBeforeUnmount(() => {
   .plan-panel :deep(.ant-card-body) { flex: initial; max-height: none; }
   .drop-zone { min-height: 180px; }
   .plan-empty { min-height: 160px; }
-  .day-word-plan-layout { grid-template-columns: minmax(280px, .9fr) minmax(330px, 1.1fr); }
-  .word-plan-preview-pane { grid-column: 1 / -1; }
-  .word-plan-preview-scroll { min-height: 420px; }
+  .day-word-plan-layout { grid-template-columns: minmax(390px, 44%) minmax(0, 56%); }
 }
 @media (max-width: 900px) {
   .designer-shell { --designer-map-height: 430px; }
@@ -3612,14 +3541,13 @@ onBeforeUnmount(() => {
   .word-pdf-preview-scroll :deep(.ant-spin-nested-loading), .word-pdf-preview-scroll :deep(.ant-spin-container) { min-height: 400px; }
   .word-pdf-preview-frame { min-height: 620px; }
   .optional-item-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .day-word-plan-layout { grid-template-columns: 1fr; }
-  .word-plan-preview-pane { grid-column: auto; }
-  .word-plan-source-scroll, .word-plan-selected-list, .word-plan-preview-scroll { max-height: 500px; min-height: 320px; }
-  .day-word-plan-head, .word-plan-settings, .day-end-image-control, .word-image-picker-toolbar { align-items: flex-start; flex-direction: column; }
-  .word-plan-head-actions { width: 100%; justify-content: space-between; }
-  .word-plan-settings { gap: 10px; }
-  .word-plan-settings .word-image-mode-control { width: 100%; justify-content: space-between; }
-  .day-end-image-actions { width: 100%; justify-content: space-between; }
+  .word-plan-workspace { overflow: auto; }
+  .word-plan-toolbar { align-items: flex-start; flex-wrap: wrap; }
+  .word-plan-toolbar-actions { width: 100%; justify-content: space-between; }
+  .day-word-plan-layout { display: flex; flex: initial; flex-direction: column; }
+  .word-plan-editor-pane { min-height: 560px; border-right: 0; border-bottom: 1px solid #dfe4ea; }
+  .word-plan-preview-pane { min-height: 680px; }
+  .word-plan-image-mode-row, .word-plan-day-end-setting, .word-image-picker-toolbar { align-items: flex-start; flex-direction: column; }
   .word-image-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 760px) {
@@ -3640,7 +3568,12 @@ onBeforeUnmount(() => {
   .detail-config-grid { grid-template-columns: 1fr; }
   .optional-item-form { grid-template-columns: 1fr; }
   .word-preview-sheet { min-height: 0; padding: 28px 24px; }
-  .word-plan-head-actions { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .word-plan-toolbar-actions { align-items: stretch; flex-direction: column; }
+  .word-plan-image-summary { width: 100%; }
+  .word-plan-editor-switcher { align-items: flex-start; flex-direction: column; }
+  .word-plan-editor-switcher :deep(.ant-radio-group) { display: flex; width: 100%; }
+  .word-plan-editor-switcher :deep(.ant-radio-button-wrapper) { flex: 1; }
+  .word-plan-image-resource-row { align-items: flex-start; flex-direction: column; }
   .word-image-selected-list { grid-template-columns: 1fr; }
   .word-image-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .latest-document-row { align-items: flex-start; flex-wrap: wrap; }

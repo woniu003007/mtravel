@@ -10,6 +10,17 @@ function readAppFile(path: string) {
   return readFileSync(resolve(appRoot, path), 'utf8');
 }
 
+/** 仅检查“制作 Word 方案”工作台，供应商配置等外层能力仍会保留在产品设计页。 */
+function getDayWordPlanWorkspaceSource(source: string) {
+  const workspaceStart = source.indexOf('class="day-word-plan-drawer"');
+  expect(workspaceStart).toBeGreaterThanOrEqual(0);
+
+  // 图片设置是独立二级弹窗，不把它混入工作台本体的断言范围。
+  const imageSettingModalStart = source.indexOf('<Modal', workspaceStart + 1);
+  expect(imageSettingModalStart).toBeGreaterThan(workspaceStart);
+  return source.slice(workspaceStart, imageSettingModalStart);
+}
+
 type WordPlanImageMode = 'follow_resource' | 'day_end' | 'hidden';
 
 type DayEndImageSelection = {
@@ -100,31 +111,25 @@ describe('sales product designer flow', () => {
     expect(workbenchSource).toContain('selectedMaterials: editor.selectedMaterials.map');
   });
 
-  it('keeps optional-item cost internal and saves the product final self-pay price separately', () => {
+  it('uses the system default self-pay price in the Word workbench without editing it there', () => {
     const workbenchSource = readAppFile('src/views/sales/product/designer.vue');
     const apiSource = readAppFile('src/api/sales/product-designer.ts');
+    const wordPlanWorkspaceSource = getDayWordPlanWorkspaceSource(workbenchSource);
 
     expect(apiSource).toContain("export type OptionalItemType = 'recommended_self_pay' | 'scenic_transport'");
     expect(apiSource).toContain('resourceOptionalItemId: number');
     expect(apiSource).toContain('supplierOptionalItemId?: number');
     expect(apiSource).toContain('salePrice?: number');
-    expect(workbenchSource).toContain('新选择只显示当前供应商已启用报价的项目');
-    expect(workbenchSource).toContain('系统默认价');
-    expect(workbenchSource).toContain('本产品报价');
-    expect(workbenchSource).toContain('salePrice: suggestedSalePrice');
-    expect(workbenchSource).toContain('selected.salePrice = value == null ? undefined : Number(value)');
-    expect(workbenchSource).toContain("materialType: 'optional_item'");
-    expect(workbenchSource).toContain('item.isOptionalItem && item.resourceOptionalItemId === optionalItemId');
-    expect(workbenchSource).toContain('activeIds.has(item.id)');
-    expect(workbenchSource).toContain('salePriceDirty: false');
-    expect(workbenchSource).toContain('if (!item.salePriceDirty) item.salePrice = nextSuggestedSalePrice');
-    expect(workbenchSource).toContain("item.materialType === 'optional_item' && item.salePriceDirty ? item.salePrice : undefined");
+    expect(wordPlanWorkspaceSource).toContain('系统默认');
+    expect(wordPlanWorkspaceSource).not.toContain('editWordPlanPrice');
+    expect(wordPlanWorkspaceSource).not.toContain('updateWordPlanSalePrice');
+    expect(wordPlanWorkspaceSource).not.toContain('本产品报价');
+    expect(wordPlanWorkspaceSource).not.toContain('最终对外价');
   });
 
-  it('does not submit a stale supplier quote after the supplier is cleared or changed', () => {
+  it('uses the current external supplier quote when saving a Word plan', () => {
     const workbenchSource = readAppFile('src/views/sales/product/designer.vue');
 
-    expect(workbenchSource).toContain('syncOpenWordPlanSupplier');
     expect(workbenchSource).toContain('function wordPlanCurrentSupplierOptionalItem');
     expect(workbenchSource).toContain('supplierOptionalItemId: wordPlanCurrentSupplierOptionalItem(item)?.supplierOptionalItemId');
   });
@@ -144,12 +149,49 @@ describe('sales product designer flow', () => {
 
   it('uses the generated product Word PDF instead of a second client-side document renderer', () => {
     const workbenchSource = readAppFile('src/views/sales/product/designer.vue');
+    const previewStart = workbenchSource.indexOf('async function loadProductWordPreview');
+    const previewEnd = workbenchSource.indexOf('function updateDocumentHistory', previewStart);
+    const previewSource = workbenchSource.slice(previewStart, previewEnd);
 
     expect(workbenchSource).toContain('previewSalesProductDesignerDocument');
     expect(workbenchSource).toContain('class="word-pdf-preview-frame"');
     expect(workbenchSource).toContain('title="产品 Word PDF 预览"');
     expect(workbenchSource).toContain('downloadProductWordPreview');
     expect(workbenchSource).not.toContain('selectedScenicIntroductionTitles');
+    expect(previewSource).toContain("!contentType.includes('application/pdf')");
+    expect(previewSource.indexOf('productWordPreviewUrl.value = nextUrl')).toBeLessThan(
+      previewSource.indexOf('URL.revokeObjectURL(previousUrl)'),
+    );
+  });
+
+  it('uses a focused two-column Word workbench without supplier configuration controls', () => {
+    const workbenchSource = readAppFile('src/views/sales/product/designer.vue');
+    const wordPlanWorkspaceSource = getDayWordPlanWorkspaceSource(workbenchSource);
+
+    expect(wordPlanWorkspaceSource).toContain('选择内容');
+    expect(wordPlanWorkspaceSource).toContain('调整顺序');
+    expect(wordPlanWorkspaceSource).toContain('保存并刷新预览');
+    expect(wordPlanWorkspaceSource).not.toContain('实时预览');
+    expect(wordPlanWorkspaceSource).not.toContain('保存当天方案');
+    expect(wordPlanWorkspaceSource).toContain('图片设置');
+    expect(wordPlanWorkspaceSource).toContain('wordPlanImagePickerOpen');
+    expect(wordPlanWorkspaceSource).toContain('class="word-pdf-preview-frame"');
+    expect(wordPlanWorkspaceSource).toContain('downloadProductWordPreview');
+    expect(wordPlanWorkspaceSource).not.toContain('openSupplierConfig(resource.dayResource)');
+    expect(wordPlanWorkspaceSource).not.toContain('未配置供应商');
+    expect(wordPlanWorkspaceSource).not.toContain('供应商配置');
+  });
+
+  it('keeps scenic groups isolated by the day resource id and explains incompatible legacy image counts', () => {
+    const workbenchSource = readAppFile('src/views/sales/product/designer.vue');
+    const groupKeyStart = workbenchSource.indexOf('function wordPlanScenicGroupKey');
+    const groupKeyEnd = workbenchSource.indexOf('const wordPlanSelectedGroups', groupKeyStart);
+    const groupKeySource = workbenchSource.slice(groupKeyStart, groupKeyEnd);
+
+    expect(groupKeySource).toContain('return String(item.dayResourceId)');
+    expect(groupKeySource).not.toContain('resourceName');
+    expect(workbenchSource).toContain('历史方案已选');
+    expect(workbenchSource).toContain('超过当前 3 张上限');
   });
 
   it('builds the day-end image payload from global selections in mixed resource order', async () => {
