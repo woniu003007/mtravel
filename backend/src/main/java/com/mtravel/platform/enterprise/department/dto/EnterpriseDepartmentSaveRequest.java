@@ -20,6 +20,8 @@ public record EnterpriseDepartmentSaveRequest(
         @Size(max = 160, message = "部门名称最多160个字符")
         String departmentName,
 
+        Long managerEmployeeId,
+
         @Size(max = 80, message = "负责人最多80个字符")
         String managerName,
 
@@ -33,4 +35,19 @@ public record EnterpriseDepartmentSaveRequest(
         String status,
 
         String remark
-) {}
+) {
+
+    /** 兼容旧调用方，负责人仍可使用姓名快照。 */
+    public EnterpriseDepartmentSaveRequest(
+            Long parentId,
+            String departmentCode,
+            String departmentName,
+            String managerName,
+            String contactPhone,
+            Integer sortOrder,
+            String status,
+            String remark
+    ) {
+        this(parentId, departmentCode, departmentName, null, managerName, contactPhone, sortOrder, status, remark);
+    }
+}

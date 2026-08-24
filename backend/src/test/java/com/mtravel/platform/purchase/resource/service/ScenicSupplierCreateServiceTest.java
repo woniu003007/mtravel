@@ -174,7 +174,8 @@ class ScenicSupplierCreateServiceTest {
 
         ArgumentCaptor<PurchaseRelationEntity> relationCaptor = ArgumentCaptor.forClass(PurchaseRelationEntity.class);
         verify(relationMapper).insert(relationCaptor.capture());
-        assertThat(relationCaptor.getValue().getUnifiedPrice()).isNull();
+        assertThat(relationCaptor.getValue().getPriceMode()).isEqualTo("unified");
+        assertThat(relationCaptor.getValue().getUnifiedPrice()).isEqualByComparingTo(BigDecimal.ZERO);
         verify(optionalMapper).insertBatch(any());
         verify(priceMapper, never()).insertBatch(any());
     }

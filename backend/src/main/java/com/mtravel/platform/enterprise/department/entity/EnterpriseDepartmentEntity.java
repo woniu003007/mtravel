@@ -29,6 +29,10 @@ public class EnterpriseDepartmentEntity extends TenantSoftDeleteEntity {
     @TableField("manager_name")
     private String managerName;
 
+    /** 部门负责人对应的企业员工 ID，用于审批流按账号路由。 */
+    @TableField("manager_employee_id")
+    private Long managerEmployeeId;
+
     /** 部门联系电话或负责人联系电话。 */
     @TableField("contact_phone")
     private String contactPhone;
@@ -71,6 +75,14 @@ public class EnterpriseDepartmentEntity extends TenantSoftDeleteEntity {
 
     public void setManagerName(String managerName) {
         this.managerName = managerName;
+    }
+
+    public Long getManagerEmployeeId() {
+        return managerEmployeeId;
+    }
+
+    public void setManagerEmployeeId(Long managerEmployeeId) {
+        this.managerEmployeeId = managerEmployeeId;
     }
 
     public String getContactPhone() {

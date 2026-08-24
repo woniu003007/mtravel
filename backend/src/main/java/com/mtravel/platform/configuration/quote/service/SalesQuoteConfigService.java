@@ -17,16 +17,19 @@ import com.mtravel.platform.configuration.quote.dto.SalesQuoteGuideRuleResponse;
 import com.mtravel.platform.configuration.quote.dto.SalesQuoteGuideRuleSaveRequest;
 import com.mtravel.platform.configuration.quote.dto.SalesQuoteResourceRuleResponse;
 import com.mtravel.platform.configuration.quote.dto.SalesQuoteResourceRuleSaveRequest;
+import com.mtravel.platform.configuration.quote.entity.SalesQuoteApprovalConfigEntity;
 import com.mtravel.platform.configuration.quote.entity.SalesQuoteApprovalMemberEntity;
 import com.mtravel.platform.configuration.quote.entity.SalesQuoteGroundAgentRuleEntity;
 import com.mtravel.platform.configuration.quote.entity.SalesQuoteGuideLevelEntity;
 import com.mtravel.platform.configuration.quote.entity.SalesQuoteGuideRuleEntity;
 import com.mtravel.platform.configuration.quote.entity.SalesQuoteResourceRuleEntity;
 import com.mtravel.platform.configuration.quote.enums.QuoteApprovalMemberType;
+import com.mtravel.platform.configuration.quote.enums.QuoteApprovalMode;
 import com.mtravel.platform.configuration.quote.enums.QuoteConfigStatus;
 import com.mtravel.platform.configuration.quote.enums.SalesQuoteResourceQuoteMode;
 import com.mtravel.platform.configuration.quote.enums.SalesQuoteResourceType;
 import com.mtravel.platform.configuration.quote.mapper.SalesQuoteApprovalMemberMapper;
+import com.mtravel.platform.configuration.quote.mapper.SalesQuoteApprovalConfigMapper;
 import com.mtravel.platform.configuration.quote.mapper.SalesQuoteGroundAgentRuleMapper;
 import com.mtravel.platform.configuration.quote.mapper.SalesQuoteGuideLevelMapper;
 import com.mtravel.platform.configuration.quote.mapper.SalesQuoteGuideRuleMapper;
@@ -51,6 +54,7 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * 销售报价配置业务服务。
@@ -68,11 +72,36 @@ public class SalesQuoteConfigService {
     private final SalesQuoteGuideLevelMapper guideLevelMapper;
     private final SalesQuoteGuideRuleMapper guideRuleMapper;
     private final SalesQuoteGroundAgentRuleMapper groundAgentRuleMapper;
+    private final SalesQuoteApprovalConfigMapper approvalConfigMapper;
     private final SalesQuoteApprovalMemberMapper approvalMemberMapper;
     private final CustomerCategoryMapper customerCategoryMapper;
     private final SystemUserMapper systemUserMapper;
     private final EnterpriseGuideMapper enterpriseGuideMapper;
 
+    @Autowired
+    public SalesQuoteConfigService(
+            SalesQuoteResourceRuleMapper resourceRuleMapper,
+            SalesQuoteGuideLevelMapper guideLevelMapper,
+            SalesQuoteGuideRuleMapper guideRuleMapper,
+            SalesQuoteGroundAgentRuleMapper groundAgentRuleMapper,
+            SalesQuoteApprovalConfigMapper approvalConfigMapper,
+            SalesQuoteApprovalMemberMapper approvalMemberMapper,
+            CustomerCategoryMapper customerCategoryMapper,
+            SystemUserMapper systemUserMapper,
+            EnterpriseGuideMapper enterpriseGuideMapper
+    ) {
+        this.resourceRuleMapper = resourceRuleMapper;
+        this.guideLevelMapper = guideLevelMapper;
+        this.guideRuleMapper = guideRuleMapper;
+        this.groundAgentRuleMapper = groundAgentRuleMapper;
+        this.approvalConfigMapper = approvalConfigMapper;
+        this.approvalMemberMapper = approvalMemberMapper;
+        this.customerCategoryMapper = customerCategoryMapper;
+        this.systemUserMapper = systemUserMapper;
+        this.enterpriseGuideMapper = enterpriseGuideMapper;
+    }
+
+    /** 兼容只覆盖报价规则的旧测试构造方式。 */
     public SalesQuoteConfigService(
             SalesQuoteResourceRuleMapper resourceRuleMapper,
             SalesQuoteGuideLevelMapper guideLevelMapper,
@@ -83,14 +112,17 @@ public class SalesQuoteConfigService {
             SystemUserMapper systemUserMapper,
             EnterpriseGuideMapper enterpriseGuideMapper
     ) {
-        this.resourceRuleMapper = resourceRuleMapper;
-        this.guideLevelMapper = guideLevelMapper;
-        this.guideRuleMapper = guideRuleMapper;
-        this.groundAgentRuleMapper = groundAgentRuleMapper;
-        this.approvalMemberMapper = approvalMemberMapper;
-        this.customerCategoryMapper = customerCategoryMapper;
-        this.systemUserMapper = systemUserMapper;
-        this.enterpriseGuideMapper = enterpriseGuideMapper;
+        this(
+                resourceRuleMapper,
+                guideLevelMapper,
+                guideRuleMapper,
+                groundAgentRuleMapper,
+                null,
+                approvalMemberMapper,
+                customerCategoryMapper,
+                systemUserMapper,
+                enterpriseGuideMapper
+        );
     }
 
     /**
@@ -407,6 +439,10 @@ public class SalesQuoteConfigService {
      * 查询销售报价统一低价审批配置。
      */
     public QuoteApprovalConfigResponse approvalConfig(Long tenantId) {
+        SalesQuoteApprovalConfigEntity config = approvalConfigMapper == null
+                ? null
+                : approvalConfigMapper.selectOne(approvalConfigQuery(tenantId));
+        QuoteApprovalMode mode = QuoteApprovalMode.fromValueOrDefault(config == null ? null : config.getApprovalMode());
         List<SalesQuoteApprovalMemberEntity> members = approvalMemberMapper.selectList(approvalMemberQuery(tenantId)
                 .orderByAsc("member_type")
                 .orderByAsc("step_order")
@@ -419,7 +455,10 @@ public class SalesQuoteConfigService {
         List<QuoteApprovalMemberResponse> ccUsers = responses.stream()
                 .filter(item -> QuoteApprovalMemberType.CC.getValue().equals(item.memberType()))
                 .toList();
-        return new QuoteApprovalConfigResponse(approvers, ccUsers);
+        if (mode == QuoteApprovalMode.DEPARTMENT_MANAGER) {
+            approvers = List.of();
+        }
+        return new QuoteApprovalConfigResponse(mode.getValue(), approvers, ccUsers);
     }
 
     /**
@@ -429,20 +468,38 @@ public class SalesQuoteConfigService {
     public QuoteApprovalConfigResponse saveApprovalConfig(
             QuoteApprovalConfigRequest request,
             Long tenantId,
-            String operator
+        String operator
     ) {
+        QuoteApprovalMode mode = QuoteApprovalMode.fromValueOrDefault(request == null ? null : request.approvalMode());
         List<Long> approverIds = cleanIds(request == null ? null : request.approvers());
-        if (approverIds.isEmpty()) {
-            throw new BizException("报价低价审批人不能为空");
+        if (mode == QuoteApprovalMode.SPECIFIED_PERSON && approverIds.isEmpty()) {
+            throw new BizException("指定人员模式下，报价低价审批人不能为空");
         }
-        List<Long> ccIds = cleanIds(request.ccUsers());
+        List<Long> ccIds = cleanIds(request == null ? null : request.ccUsers());
         assertSystemUsersActive(tenantId, concat(approverIds, ccIds));
 
         SalesQuoteApprovalMemberEntity deleted = new SalesQuoteApprovalMemberEntity();
         fillSoftDelete(deleted, operator);
         approvalMemberMapper.update(deleted, approvalMemberUpdate(tenantId));
-        insertApprovalMembers(tenantId, approverIds, QuoteApprovalMemberType.APPROVER.getValue(), operator);
+        if (mode == QuoteApprovalMode.SPECIFIED_PERSON) {
+            insertApprovalMembers(tenantId, approverIds, QuoteApprovalMemberType.APPROVER.getValue(), operator);
+        }
         insertApprovalMembers(tenantId, ccIds, QuoteApprovalMemberType.CC.getValue(), operator);
+        if (approvalConfigMapper != null) {
+            SalesQuoteApprovalConfigEntity config = approvalConfigMapper.selectOne(approvalConfigQuery(tenantId));
+            if (config == null) {
+                config = new SalesQuoteApprovalConfigEntity();
+                config.setTenantId(tenantId);
+                config.setCreatedBy(operator);
+                config.setIsDeleted(false);
+                config.setApprovalMode(mode.getValue());
+                approvalConfigMapper.insert(config);
+            } else {
+                approvalConfigMapper.update(null, approvalConfigUpdate(tenantId)
+                        .set("approval_mode", mode.getValue())
+                        .set("updated_at", OffsetDateTime.now()));
+            }
+        }
         return approvalConfig(tenantId);
     }
 
@@ -736,6 +793,18 @@ public class SalesQuoteConfigService {
 
     private QueryWrapper<SalesQuoteApprovalMemberEntity> approvalMemberQuery(Long tenantId) {
         return new QueryWrapper<SalesQuoteApprovalMemberEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false);
+    }
+
+    private QueryWrapper<SalesQuoteApprovalConfigEntity> approvalConfigQuery(Long tenantId) {
+        return new QueryWrapper<SalesQuoteApprovalConfigEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false);
+    }
+
+    private UpdateWrapper<SalesQuoteApprovalConfigEntity> approvalConfigUpdate(Long tenantId) {
+        return new UpdateWrapper<SalesQuoteApprovalConfigEntity>()
                 .eq("tenant_id", tenantId)
                 .eq("is_deleted", false);
     }

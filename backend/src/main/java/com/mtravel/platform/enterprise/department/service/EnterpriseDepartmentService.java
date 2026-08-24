@@ -9,6 +9,8 @@ import com.mtravel.platform.enterprise.department.dto.EnterpriseDepartmentSaveRe
 import com.mtravel.platform.enterprise.department.entity.EnterpriseDepartmentEntity;
 import com.mtravel.platform.enterprise.department.enums.EnterpriseDepartmentStatus;
 import com.mtravel.platform.enterprise.department.mapper.EnterpriseDepartmentMapper;
+import com.mtravel.platform.enterprise.employee.entity.EnterpriseEmployeeEntity;
+import com.mtravel.platform.enterprise.employee.mapper.EnterpriseEmployeeMapper;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -16,6 +18,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * 企业部门业务服务。
@@ -27,10 +30,20 @@ import org.springframework.util.StringUtils;
 public class EnterpriseDepartmentService extends BusinessCrudService<EnterpriseDepartmentEntity, EnterpriseDepartmentResponse> {
 
     private final EnterpriseDepartmentMapper mapper;
+    private final EnterpriseEmployeeMapper employeeMapper;
 
     public EnterpriseDepartmentService(EnterpriseDepartmentMapper mapper) {
+        this(mapper, null);
+    }
+
+    @Autowired
+    public EnterpriseDepartmentService(
+            EnterpriseDepartmentMapper mapper,
+            EnterpriseEmployeeMapper employeeMapper
+    ) {
         super(mapper);
         this.mapper = mapper;
+        this.employeeMapper = employeeMapper;
     }
 
     /**
@@ -87,6 +100,9 @@ public class EnterpriseDepartmentService extends BusinessCrudService<EnterpriseD
     ) {
         assertUnique(request, tenantId, null);
         assertParentValid(tenantId, request.parentId(), null);
+        if (request.managerEmployeeId() != null) {
+            throw new BizException("新增部门后才能选择本部门负责人");
+        }
 
         EnterpriseDepartmentEntity entity = new EnterpriseDepartmentEntity();
         entity.setTenantId(tenantId);
@@ -110,6 +126,7 @@ public class EnterpriseDepartmentService extends BusinessCrudService<EnterpriseD
     ) {
         assertUnique(request, tenantId, id);
         assertParentValid(tenantId, request.parentId(), id);
+        EnterpriseEmployeeEntity manager = findManagerEmployee(request.managerEmployeeId(), id, tenantId);
 
         EnterpriseDepartmentStatus status = EnterpriseDepartmentStatus.fromValueOrDefault(request.status());
         int updated = mapper.update(null, baseUpdate(tenantId)
@@ -117,7 +134,8 @@ public class EnterpriseDepartmentService extends BusinessCrudService<EnterpriseD
                 .set("parent_id", request.parentId())
                 .set("department_code", clean(request.departmentCode()))
                 .set("department_name", cleanRequired(request.departmentName()))
-                .set("manager_name", clean(request.managerName()))
+                .set("manager_employee_id", request.managerEmployeeId())
+                .set("manager_name", manager == null ? clean(request.managerName()) : manager.getEmployeeName())
                 .set("contact_phone", clean(request.contactPhone()))
                 .set("sort_order", number(request.sortOrder()))
                 .set("status", status.getValue())
@@ -188,11 +206,31 @@ public class EnterpriseDepartmentService extends BusinessCrudService<EnterpriseD
         entity.setParentId(request.parentId());
         entity.setDepartmentCode(clean(request.departmentCode()));
         entity.setDepartmentName(cleanRequired(request.departmentName()));
+        entity.setManagerEmployeeId(null);
         entity.setManagerName(clean(request.managerName()));
         entity.setContactPhone(clean(request.contactPhone()));
         entity.setSortOrder(number(request.sortOrder()));
         entity.setStatus(status.getValue());
         entity.setRemark(clean(request.remark()));
+    }
+
+    private EnterpriseEmployeeEntity findManagerEmployee(Long managerEmployeeId, Long departmentId, Long tenantId) {
+        if (managerEmployeeId == null) {
+            return null;
+        }
+        if (employeeMapper == null) {
+            throw new BizException("部门负责人账号功能未初始化");
+        }
+        EnterpriseEmployeeEntity manager = employeeMapper.selectOne(new QueryWrapper<EnterpriseEmployeeEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("id", managerEmployeeId)
+                .eq("department_id", departmentId)
+                .eq("status", "active")
+                .eq("is_deleted", false));
+        if (manager == null || manager.getSystemUserId() == null) {
+            throw new BizException("部门负责人必须是本部门的启用员工并已绑定登录账号");
+        }
+        return manager;
     }
 
     private List<EnterpriseDepartmentResponse> toResponses(List<EnterpriseDepartmentEntity> entities) {

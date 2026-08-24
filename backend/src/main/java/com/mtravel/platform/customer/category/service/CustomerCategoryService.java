@@ -68,8 +68,8 @@ public class CustomerCategoryService {
         LambdaQueryWrapper<CustomerCategoryEntity> wrapper = baseQuery(tenantId)
                 .like(StringUtils.hasText(keyword), CustomerCategoryEntity::getCategoryName, keyword)
                 .eq(StringUtils.hasText(status), CustomerCategoryEntity::getStatus, status)
-                .orderByAsc(CustomerCategoryEntity::getSortOrder)
-                .orderByDesc(CustomerCategoryEntity::getId);
+                .orderByAsc(CustomerCategoryEntity::getDefaultCreditLimit)
+                .orderByAsc(CustomerCategoryEntity::getId);
 
         Page<CustomerCategoryEntity> result = mapper.selectPage(Page.of(page, pageSize), wrapper);
         List<CustomerCategoryResponse> items = toResponses(result.getRecords(), tenantId);
@@ -84,8 +84,8 @@ public class CustomerCategoryService {
     public List<CustomerCategoryResponse> listActive(Long tenantId) {
         List<CustomerCategoryEntity> entities = mapper.selectList(baseQuery(tenantId)
                         .eq(CustomerCategoryEntity::getStatus, CustomerCategoryStatus.ACTIVE.getValue())
-                        .orderByAsc(CustomerCategoryEntity::getSortOrder)
-                        .orderByDesc(CustomerCategoryEntity::getId));
+                        .orderByAsc(CustomerCategoryEntity::getDefaultCreditLimit)
+                        .orderByAsc(CustomerCategoryEntity::getId));
         return toResponses(entities, tenantId);
     }
 

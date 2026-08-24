@@ -103,9 +103,10 @@ public class ResourceIntroductionExtensionBlockCodec {
         if (StringUtils.hasText(value) && value.trim().matches("#[0-9a-fA-F]{6}")) {
             return value.trim().toLowerCase();
         }
-        if (PHOTO_RECOMMENDATION.equals(legacyType)) return "#d97706";
+        // 未指定颜色时沿用产品 Word 母版的扩展模块标题橙色。
+        if (PHOTO_RECOMMENDATION.equals(legacyType)) return "#e36c09";
         if (WARM_TIP.equals(legacyType)) return "#0070c0";
-        return "#000000";
+        return "#e36c09";
     }
 
     private String joinItems(List<String> items) {

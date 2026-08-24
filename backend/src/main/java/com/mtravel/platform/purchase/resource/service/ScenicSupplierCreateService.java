@@ -136,7 +136,12 @@ public class ScenicSupplierCreateService {
         relation.setGroupQuantity(0);
         relation.setIsDefault(Boolean.TRUE.equals(request.isDefault()));
         relation.setPriceMode(request.priceMode());
-        applyRelationPrice(relation, request.priceMode(), request.unifiedPrice(), request.priceRemark());
+        applyRelationPrice(
+                relation,
+                request.priceMode(),
+                resolveRelationUnifiedPrice(resource, request.priceMode(), request.unifiedPrice()),
+                request.priceRemark()
+        );
         relation.setStatus("active");
         relation.setCreatedBy(operator);
         relation.setRemark(clean(request.remark()));
@@ -260,12 +265,17 @@ public class ScenicSupplierCreateService {
         relationUpdate.setIsDefault(Boolean.TRUE.equals(request.isDefault()));
         relationUpdate.setStatus("active".equals(supplierStatus) ? relation.getStatus() : "disabled");
         relationUpdate.setRemark(clean(request.remark()));
+        BigDecimal relationUnifiedPrice = resolveRelationUnifiedPrice(
+                resource,
+                request.priceMode(),
+                request.unifiedPrice()
+        );
         UpdateWrapper<PurchaseRelationEntity> relationWrapper = new UpdateWrapper<PurchaseRelationEntity>()
                 .eq("tenant_id", tenantId)
                 .eq("is_deleted", false)
                 .eq("id", relationId)
                 .set(VEHICLE_RESOURCE_TYPE.equals(resource.getResourceType()), "purchase_price", BigDecimal.ZERO)
-                .set("unified_price", "unified".equals(request.priceMode()) ? request.unifiedPrice() : null)
+                .set("unified_price", "unified".equals(request.priceMode()) ? relationUnifiedPrice : null)
                 .set("price_remark", "unified".equals(request.priceMode()) ? clean(request.priceRemark()) : null);
         int relationUpdated = relationMapper.update(relationUpdate, relationWrapper);
         if (relationUpdated == 0) {
@@ -374,6 +384,25 @@ public class ScenicSupplierCreateService {
         }
         relation.setUnifiedPrice(null);
         relation.setPriceRemark(null);
+    }
+
+    /**
+     * 景区只有自费项目而没有门票时，门票统一价按零元保存。
+     *
+     * <p>数据库要求统一报价必须有非负金额；零元明确表达“无门票成本”，自费项目仍在独立报价表保存，
+     * 避免把该供应商关系误判为待询价。</p>
+     */
+    private BigDecimal resolveRelationUnifiedPrice(
+            PurchaseResourceEntity resource,
+            String priceMode,
+            BigDecimal unifiedPrice
+    ) {
+        if (RESOURCE_TYPE.equals(resource.getResourceType())
+                && "unified".equals(priceMode)
+                && unifiedPrice == null) {
+            return BigDecimal.ZERO;
+        }
+        return unifiedPrice;
     }
 
     /** 仅分类报价写入费用项目明细。 */
