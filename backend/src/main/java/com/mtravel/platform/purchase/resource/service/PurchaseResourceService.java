@@ -312,13 +312,14 @@ public class PurchaseResourceService extends BusinessCrudService<PurchaseResourc
         entity.setResourceType(resourceType);
         entity.setProcurementMode(procurementMode(request.procurementMode()));
         entity.setResourceName(cleanRequired(request.resourceName()));
-        entity.setProvince(clean(request.province()));
-        entity.setCity(clean(request.city()));
-        entity.setDistrict(clean(request.district()));
+        boolean vehicleResource = PurchaseResourceType.VEHICLE.value().equals(resourceType);
+        entity.setProvince(vehicleResource ? null : clean(request.province()));
+        entity.setCity(vehicleResource ? null : clean(request.city()));
+        entity.setDistrict(vehicleResource ? null : clean(request.district()));
         entity.setPhone(clean(request.phone()));
         entity.setContactName(clean(request.contactName()));
         entity.setFax(clean(request.fax()));
-        entity.setAddress(clean(request.address()));
+        entity.setAddress(vehicleResource ? null : clean(request.address()));
         applyTypedFields(entity, request, resourceType);
         entity.setWarmTip(request.warmTip());
         entity.setIntroduction(request.introduction());
@@ -541,21 +542,27 @@ public class PurchaseResourceService extends BusinessCrudService<PurchaseResourc
         return procurementMode;
     }
 
-    /** 同一租户、同类型、同地区下的未删除资源名称不能重复。 */
+    /** 用车按座位规格唯一；其它资源仍按同类型、同地区和名称判断重复。 */
     private void assertUnique(PurchaseResourceSaveRequest request, Long tenantId, Long excludeId) {
         QueryWrapper<PurchaseResourceEntity> wrapper = baseQuery(tenantId)
-                .eq("resource_type", request.resourceType())
-                .eq("resource_name", cleanRequired(request.resourceName()))
-                .eq(StringUtils.hasText(request.province()), "province", request.province())
-                .isNull(!StringUtils.hasText(request.province()), "province")
-                .eq(StringUtils.hasText(request.city()), "city", request.city())
-                .isNull(!StringUtils.hasText(request.city()), "city")
-                .eq(StringUtils.hasText(request.district()), "district", request.district())
-                .isNull(!StringUtils.hasText(request.district()), "district")
-                .ne(excludeId != null, "id", excludeId);
+                .eq("resource_type", request.resourceType());
+        if (PurchaseResourceType.VEHICLE.value().equals(request.resourceType())) {
+            wrapper.eq("seat_count", request.seatCount());
+        } else {
+            wrapper.eq("resource_name", cleanRequired(request.resourceName()))
+                    .eq(StringUtils.hasText(request.province()), "province", request.province())
+                    .isNull(!StringUtils.hasText(request.province()), "province")
+                    .eq(StringUtils.hasText(request.city()), "city", request.city())
+                    .isNull(!StringUtils.hasText(request.city()), "city")
+                    .eq(StringUtils.hasText(request.district()), "district", request.district())
+                    .isNull(!StringUtils.hasText(request.district()), "district");
+        }
+        wrapper.ne(excludeId != null, "id", excludeId);
         Long count = resourceMapper.selectCount(wrapper);
         if (count != null && count > 0) {
-            throw new BizException("同地区同类型资源名称已存在");
+            throw new BizException(PurchaseResourceType.VEHICLE.value().equals(request.resourceType())
+                    ? "相同座位数的用车资源已存在"
+                    : "同地区同类型资源名称已存在");
         }
     }
 

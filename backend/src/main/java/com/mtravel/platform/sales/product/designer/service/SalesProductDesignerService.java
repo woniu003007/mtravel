@@ -31,6 +31,8 @@ import com.mtravel.platform.purchase.supplier.mapper.SupplierMapper;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerAdultQuoteResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerAdultQuoteSaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayPlanResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayDestinationResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayDestinationSaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayEndImageSelectionRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayEndImageSelectionResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayItineraryResponse;
@@ -39,6 +41,10 @@ import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourc
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceReorderRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceSaveRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceSupplierSaveRequest;
+import com.mtravel.platform.sales.product.designer.enums.ProductDesignerArrangementRole;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerBreakfastHotelResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerBreakfastPlanResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayItinerarySaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayItineraryResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayWordPlanMaterialRequest;
@@ -109,12 +115,13 @@ public class SalesProductDesignerService {
     private static final String PRICE_MODE_UNIFIED = "unified";
     private static final String QUOTE_STATUS_DRAFT = "draft";
     private static final Set<String> LEVEL_RESOURCE_TYPES = Set.of("hotel", "restaurant");
-    private static final String ARRANGEMENT_ITINERARY = "itinerary";
-    private static final String ARRANGEMENT_ACCOMMODATION = "accommodation";
-    private static final String ARRANGEMENT_BREAKFAST = "breakfast";
-    private static final String ARRANGEMENT_LUNCH = "lunch";
-    private static final String ARRANGEMENT_DINNER = "dinner";
-    private static final String ARRANGEMENT_UNASSIGNED = "unassigned";
+    private static final String ARRANGEMENT_ITINERARY = ProductDesignerArrangementRole.ITINERARY.value();
+    private static final String ARRANGEMENT_ACCOMMODATION = ProductDesignerArrangementRole.ACCOMMODATION.value();
+    private static final String ARRANGEMENT_BREAKFAST = ProductDesignerArrangementRole.BREAKFAST.value();
+    private static final String ARRANGEMENT_LUNCH = ProductDesignerArrangementRole.LUNCH.value();
+    private static final String ARRANGEMENT_DINNER = ProductDesignerArrangementRole.DINNER.value();
+    private static final String ARRANGEMENT_GROUND_SERVICE = ProductDesignerArrangementRole.GROUND_SERVICE.value();
+    private static final String ARRANGEMENT_UNASSIGNED = ProductDesignerArrangementRole.LEGACY_UNASSIGNED.value();
     private static final Set<String> MEAL_ARRANGEMENT_ROLES = Set.of(
             ARRANGEMENT_BREAKFAST, ARRANGEMENT_LUNCH, ARRANGEMENT_DINNER);
 
@@ -149,6 +156,12 @@ public class SalesProductDesignerService {
     /** 图片展示方式属于每日行程，字段注入保持现有单元测试构造契约不变。 */
     @Autowired(required = false)
     private SalesProductItineraryDayMapper itineraryDayMapper;
+    /** 新旧构造测试不变；运行时优先使用统一报价解析器冻结供应商关系和价格。 */
+    @Autowired(required = false)
+    private ProductDesignerSupplierQuoteService supplierQuoteService;
+    /** 产品级全程用车只在设计草稿中汇总一次，不下沉到每日资源。 */
+    @Autowired(required = false)
+    private SalesProductDesignerVehicleArrangementService vehicleArrangementService;
 
     private static final Set<String> WORD_IMAGE_MODES = Set.of("follow_resource", "day_end", "hidden");
     private static final int WORD_IMAGE_MIN_COUNT = 2;
@@ -256,6 +269,7 @@ public class SalesProductDesignerService {
                 .eq("tenant_id", tenantId)
                 .eq("is_deleted", false)
                 .eq("product_id", draftId)
+                .ne("arrangement_role", ARRANGEMENT_GROUND_SERVICE)
                 .gt("day_no", travelDays));
         if (overflowCount != null && overflowCount > 0) {
             throw new BizException("请先移除超出新行程天数的资源安排");
@@ -292,7 +306,8 @@ public class SalesProductDesignerService {
         Long resourceCount = dayResourceMapper.selectCount(new QueryWrapper<SalesProductDayResourceEntity>()
                 .eq("tenant_id", tenantId)
                 .eq("is_deleted", false)
-                .eq("product_id", draftId));
+                .eq("product_id", draftId)
+                .ne("arrangement_role", ARRANGEMENT_GROUND_SERVICE));
         if (resourceCount == null || resourceCount == 0) {
             throw new BizException("请先编排行程资源再完成设计");
         }
@@ -335,6 +350,9 @@ public class SalesProductDesignerService {
         loadProduct(tenantId, draftId);
         OffsetDateTime now = OffsetDateTime.now();
         softDeleteDraftChildren(tenantId, draftId, operator, now);
+        if (vehicleArrangementService != null) {
+            vehicleArrangementService.softDeleteForProduct(tenantId, draftId, operator);
+        }
 
         SalesProductEntity deleted = new SalesProductEntity();
         deleted.setIsDeleted(true);
@@ -357,6 +375,7 @@ public class SalesProductDesignerService {
                 .eq("tenant_id", tenantId)
                 .eq("is_deleted", false)
                 .eq("product_id", productId)
+                .ne("arrangement_role", ARRANGEMENT_GROUND_SERVICE)
                 .orderByAsc("day_no")
                 .orderByAsc("sort_order")
                 .orderByAsc("id"));
@@ -396,16 +415,21 @@ public class SalesProductDesignerService {
                 .mapToObj(dayNo -> dayPlan(
                         dayNo,
                         byDay.getOrDefault(dayNo, List.of()),
+                        byDay.getOrDefault(dayNo - 1, List.of()),
                         selectedImageIds,
                         selectedIntroductions,
                         selectedOptionalItems,
                         itineraryByDay.get(dayNo)
                 ))
                 .toList();
-        BigDecimal totalCost = resources.stream()
+        BigDecimal dayResourceCost = resources.stream()
                 .map(SalesProductDayResourceEntity::getCostAmountSnapshot)
                 .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal vehicleCost = vehicleArrangementService == null
+                ? BigDecimal.ZERO
+                : vehicleArrangementService.costAmount(tenantId, productId);
+        BigDecimal totalCost = dayResourceCost.add(vehicleCost);
         return new ProductDesignerDetailResponse(
                 product.getId(),
                 product.getProductName(),
@@ -414,6 +438,9 @@ public class SalesProductDesignerService {
                 daysCount,
                 product.getStatus(),
                 money(totalCost),
+                money(dayResourceCost),
+                money(vehicleCost),
+                vehicleArrangementService == null ? List.of() : vehicleArrangementService.list(tenantId, productId),
                 days,
                 ProductDesignerAdultQuoteResponse.fromEntity(currentAdultQuote(tenantId, productId))
         );
@@ -440,7 +467,7 @@ public class SalesProductDesignerService {
                 .eq("tenant_id", tenantId)
                 .eq("is_deleted", false)
                 .eq("status", STATUS_ACTIVE)
-                .ne("resource_type", "traffic")
+                .notIn("resource_type", List.of("ground_agent", "traffic", "vehicle"))
                 .eq(StringUtils.hasText(resourceType), "resource_type", resourceType)
                 .eq(StringUtils.hasText(province), "province", clean(province))
                 .in(StringUtils.hasText(city), "city", cityCandidates(city))
@@ -981,6 +1008,54 @@ public class SalesProductDesignerService {
         return ProductDesignerDayItineraryResponse.fromEntity(entity, request.dayNo());
     }
 
+    /**
+     * 只保存当天主行程城市，不触碰住宿、用餐或已编排资源。
+     * 地图筛选范围可以随城市切换，但异地资源快照仍完整保留。
+     */
+    @Transactional
+    public ProductDesignerDayDestinationResponse saveDayDestination(
+            Long tenantId,
+            ProductDesignerDayDestinationSaveRequest request,
+            String operator
+    ) {
+        SalesProductEntity product = loadProduct(tenantId, request.productId());
+        validateDayNo(product, request.dayNo());
+        if (itineraryDayMapper == null) {
+            throw new BizException("每日行程服务未配置");
+        }
+        SalesProductItineraryDayEntity entity = itineraryDayMapper.selectOne(new QueryWrapper<SalesProductItineraryDayEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("is_deleted", false)
+                .eq("product_id", request.productId())
+                .eq("day_no", request.dayNo())
+                .last("LIMIT 1"));
+        boolean created = entity == null;
+        if (created) {
+            entity = new SalesProductItineraryDayEntity();
+            entity.setTenantId(tenantId);
+            entity.setProductId(request.productId());
+            entity.setDayNo(request.dayNo());
+            entity.setCreatedBy(operator);
+            entity.setIsDeleted(false);
+            entity.setBreakfastIncluded(false);
+            entity.setLunchIncluded(false);
+            entity.setDinnerIncluded(false);
+        }
+        entity.setDestinationProvince(clean(request.destinationProvince()));
+        entity.setDestinationCity(clean(request.destinationCity()));
+        entity.setDestinationDistrict(clean(request.destinationDistrict()));
+        if (created) {
+            itineraryDayMapper.insert(entity);
+        } else {
+            itineraryDayMapper.update(entity, new UpdateWrapper<SalesProductItineraryDayEntity>()
+                    .eq("tenant_id", tenantId)
+                    .eq("is_deleted", false)
+                    .eq("product_id", request.productId())
+                    .eq("day_no", request.dayNo()));
+        }
+        return ProductDesignerDayDestinationResponse.fromEntity(entity, request.dayNo());
+    }
+
     /** 新增或修改某天的一条资源，并保存供应商成本和资源介绍快照。 */
     @Transactional
     public ProductDesignerDayResourceResponse saveDayResource(
@@ -997,7 +1072,20 @@ public class SalesProductDesignerService {
         String arrangementRole = normalizeArrangementRole(
                 resource, request.arrangementRole(), entity.getArrangementRole());
         assertNotDuplicateDayResource(tenantId, request, arrangementRole);
-        PurchaseRelationEntity relation = relationForSave(tenantId, resource, request.supplierId());
+        boolean hotelBreakfastIncluded = ARRANGEMENT_ACCOMMODATION.equals(arrangementRole)
+                && Boolean.TRUE.equals(request.hotelBreakfastIncluded() == null
+                ? entity.getHotelBreakfastIncluded()
+                : request.hotelBreakfastIncluded());
+        if (ARRANGEMENT_BREAKFAST.equals(arrangementRole)) {
+            assertOrClearPreviousNightBreakfastHotels(
+                    tenantId, request.productId(), request.dayNo(), request.replaceBreakfastSource(), operator);
+        }
+        if (hotelBreakfastIncluded) {
+            assertOrClearNextDayBreakfastRestaurant(
+                    tenantId, request.productId(), request.dayNo() + 1, request.replaceBreakfastSource(), operator);
+        }
+        ProductDesignerSupplierQuote quote = resolveSupplierQuote(
+                tenantId, resource, request.supplierRelationId(), request.supplierId());
         List<Long> introductionIds = normalizedIntroductionIds(request);
         boolean selectedMaterialsProvided = request.selectedMaterials() != null;
         boolean legacyIntroductionUnchanged = request.introductionIds() == null
@@ -1015,7 +1103,7 @@ public class SalesProductDesignerService {
         BigDecimal quantity = request.quantity() == null
                 ? Objects.requireNonNullElse(entity.getQuantitySnapshot(), BigDecimal.ONE)
                 : request.quantity();
-        BigDecimal unitPrice = unitPriceForSave(tenantId, resource, relation);
+        BigDecimal unitPrice = quote.unitPrice();
         BigDecimal costAmount = unitPrice.multiply(quantity).setScale(2, RoundingMode.HALF_UP);
         entity.setTenantId(tenantId);
         entity.setProductId(request.productId());
@@ -1024,10 +1112,7 @@ public class SalesProductDesignerService {
         entity.setResourceNameSnapshot(resource.getResourceName());
         entity.setResourceTypeSnapshot(resource.getResourceType());
         entity.setArrangementRole(arrangementRole);
-        entity.setHotelBreakfastIncluded(ARRANGEMENT_ACCOMMODATION.equals(arrangementRole)
-                && Boolean.TRUE.equals(request.hotelBreakfastIncluded() == null
-                ? entity.getHotelBreakfastIncluded()
-                : request.hotelBreakfastIncluded()));
+        entity.setHotelBreakfastIncluded(hotelBreakfastIncluded);
         entity.setProvinceSnapshot(resource.getProvince());
         entity.setCitySnapshot(resource.getCity());
         entity.setDistrictSnapshot(resource.getDistrict());
@@ -1036,13 +1121,15 @@ public class SalesProductDesignerService {
         entity.setLatitudeSnapshot(resource.getLatitude());
         entity.setProcurementModeSnapshot(resource.getProcurementMode());
         int fallbackSortOrder = entity.getSortOrder() == null
-                ? nextSortOrder(tenantId, request.productId(), request.dayNo())
+                ? nextSortOrder(tenantId, request.productId(), request.dayNo(), arrangementRole)
                 : entity.getSortOrder();
         entity.setSortOrder(request.sortOrder() == null ? fallbackSortOrder : request.sortOrder());
         entity.setStayMinutes(request.stayMinutes() == null ? 0 : request.stayMinutes());
         entity.setIncludeInWord(request.includeInWord() == null || request.includeInWord());
-        entity.setSupplierId(relation == null ? null : relation.getSupplierId());
-        entity.setSupplierNameSnapshot(relation == null ? null : supplierName(tenantId, relation.getSupplierId()));
+        entity.setSupplierRelationIdSnapshot(quote.supplierRelationId());
+        entity.setSupplierId(quote.supplierId());
+        entity.setSupplierNameSnapshot(quote.supplierName());
+        entity.setPriceModeSnapshot(quote.priceMode());
         entity.setUnitPriceSnapshot(unitPrice);
         entity.setQuantitySnapshot(quantity);
         entity.setCostAmountSnapshot(costAmount);
@@ -1088,6 +1175,30 @@ public class SalesProductDesignerService {
         return dayResourceResponse(tenantId, entity);
     }
 
+    /** 仅更换一条已编排行资源的供应商关系，并刷新其成本快照。 */
+    @Transactional
+    public ProductDesignerDayResourceResponse changeDayResourceSupplier(
+            Long tenantId, ProductDesignerDayResourceSupplierSaveRequest request, String operator
+    ) {
+        SalesProductDayResourceEntity entity = loadDayResource(tenantId, request.productId(), request.dayResourceId());
+        PurchaseResourceEntity resource = loadActiveResource(tenantId, entity.getResourceId());
+        ProductDesignerSupplierQuote quote = resolveSupplierQuote(
+                tenantId, resource, request.supplierRelationId(), null);
+        BigDecimal quantity = Objects.requireNonNullElse(entity.getQuantitySnapshot(), BigDecimal.ONE);
+        entity.setSupplierRelationIdSnapshot(quote.supplierRelationId());
+        entity.setSupplierId(quote.supplierId());
+        entity.setSupplierNameSnapshot(quote.supplierName());
+        entity.setPriceModeSnapshot(quote.priceMode());
+        entity.setUnitPriceSnapshot(quote.unitPrice());
+        entity.setCostAmountSnapshot(quote.unitPrice().multiply(quantity).setScale(2, RoundingMode.HALF_UP));
+        int updated = dayResourceMapper.update(entity, baseDayResourceUpdate(tenantId, request.productId())
+                .eq("id", request.dayResourceId()));
+        if (updated == 0) {
+            throw new BizException("产品每日资源不存在或已删除");
+        }
+        return dayResourceResponse(tenantId, entity);
+    }
+
     /** 软删除产品某天的一条资源。 */
     @Transactional
     public void deleteDayResource(Long tenantId, ProductDesignerDayResourceDeleteRequest request, String operator) {
@@ -1121,14 +1232,21 @@ public class SalesProductDesignerService {
     @Transactional
     public void reorderDayResources(Long tenantId, ProductDesignerDayResourceReorderRequest request) {
         loadProduct(tenantId, request.productId());
+        ProductDesignerArrangementRole arrangementRole =
+                ProductDesignerArrangementRole.fromValue(request.arrangementRole());
+        if (!arrangementRole.isIndependentlySortable()) {
+            throw new BizException("当前资源区块不支持排序");
+        }
         List<SalesProductDayResourceEntity> current = dayResourceMapper.selectList(new QueryWrapper<SalesProductDayResourceEntity>()
                 .eq("tenant_id", tenantId)
                 .eq("is_deleted", false)
                 .eq("product_id", request.productId())
-                .eq("day_no", request.dayNo()));
+                .eq("day_no", request.dayNo())
+                .eq("arrangement_role", arrangementRole.value()));
         Map<Long, SalesProductDayResourceEntity> currentMap = current.stream()
                 .collect(Collectors.toMap(SalesProductDayResourceEntity::getId, Function.identity()));
-        if (!currentMap.keySet().containsAll(request.dayResourceIds())) {
+        if (!currentMap.keySet().equals(new java.util.HashSet<>(request.dayResourceIds()))
+                || request.dayResourceIds().size() != currentMap.size()) {
             throw new BizException("排序资源不属于当前产品或已删除");
         }
         for (int index = 0; index < request.dayResourceIds().size(); index += 1) {
@@ -1136,6 +1254,7 @@ public class SalesProductDesignerService {
             entity.setSortOrder(index + 1);
             dayResourceMapper.update(entity, baseDayResourceUpdate(tenantId, request.productId())
                     .eq("day_no", request.dayNo())
+                    .eq("arrangement_role", arrangementRole.value())
                     .eq("id", request.dayResourceIds().get(index)));
         }
     }
@@ -1211,6 +1330,7 @@ public class SalesProductDesignerService {
     private ProductDesignerDayPlanResponse dayPlan(
             Integer dayNo,
             List<SalesProductDayResourceEntity> resources,
+            List<SalesProductDayResourceEntity> previousDayResources,
             Map<Long, List<Long>> selectedImageIds,
             Map<Long, List<SalesProductDayResourceIntroductionEntity>> selectedIntroductions,
             Map<Long, List<com.mtravel.platform.sales.product.designer.dto.ProductDesignerSelectedOptionalItemResponse>> selectedOptionalItems,
@@ -1220,33 +1340,52 @@ public class SalesProductDesignerService {
                 .map(SalesProductDayResourceEntity::getCostAmountSnapshot)
                 .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+        List<ProductDesignerDayResourceResponse> dayResources = resources.stream()
+                .map(item -> {
+                    List<SalesProductDayResourceIntroductionEntity> introductions =
+                            effectiveIntroductionSnapshots(
+                                    item,
+                                    selectedIntroductions.getOrDefault(item.getId(), List.of())
+                            );
+                    return ProductDesignerDayResourceResponse.fromEntity(
+                            item,
+                            selectedImageIds.getOrDefault(item.getId(), List.of()),
+                            introductions.stream()
+                                    .map(SalesProductDayResourceIntroductionEntity::getResourceIntroductionId)
+                                    .toList(),
+                            introductions.stream()
+                                    .map(snapshot -> ProductDesignerIntroductionSnapshotResponse.fromEntity(
+                                            snapshot, extensionBlocks(snapshot.getExtensionBlocksSnapshot())
+                                    ))
+                                    .toList(),
+                            selectedOptionalItems.getOrDefault(item.getId(), List.of()),
+                            selectedMaterials(introductions,
+                                    selectedOptionalItems.getOrDefault(item.getId(), List.of()))
+                    );
+                })
+                .toList();
+        ProductDesignerDayResourceResponse breakfastRestaurant = dayResources.stream()
+                .filter(item -> ARRANGEMENT_BREAKFAST.equals(item.arrangementRole()))
+                .findFirst()
+                .orElse(null);
+        List<ProductDesignerBreakfastHotelResponse> breakfastHotels = previousDayResources.stream()
+                .filter(item -> ARRANGEMENT_ACCOMMODATION.equals(item.getArrangementRole()))
+                .filter(item -> Boolean.TRUE.equals(item.getHotelBreakfastIncluded()))
+                .map(item -> new ProductDesignerBreakfastHotelResponse(
+                        item.getId(), item.getResourceId(), item.getResourceNameSnapshot()))
+                .toList();
+        ProductDesignerBreakfastPlanResponse mealPlan = new ProductDesignerBreakfastPlanResponse(
+                breakfastRestaurant != null ? "restaurant" : breakfastHotels.isEmpty() ? "none" : "hotel",
+                breakfastHotels,
+                breakfastRestaurant
+        );
         return new ProductDesignerDayPlanResponse(
                 dayNo,
+                itinerary == null ? null : itinerary.getDestinationProvince(),
+                itinerary == null ? null : itinerary.getDestinationCity(),
+                itinerary == null ? null : itinerary.getDestinationDistrict(),
                 money(dayCost),
-                resources.stream()
-                        .map(item -> {
-                            List<SalesProductDayResourceIntroductionEntity> introductions =
-                                    effectiveIntroductionSnapshots(
-                                            item,
-                                            selectedIntroductions.getOrDefault(item.getId(), List.of())
-                                    );
-                            return ProductDesignerDayResourceResponse.fromEntity(
-                                    item,
-                                    selectedImageIds.getOrDefault(item.getId(), List.of()),
-                                    introductions.stream()
-                                            .map(SalesProductDayResourceIntroductionEntity::getResourceIntroductionId)
-                                            .toList(),
-                                    introductions.stream()
-                                            .map(snapshot -> ProductDesignerIntroductionSnapshotResponse.fromEntity(
-                                                    snapshot, extensionBlocks(snapshot.getExtensionBlocksSnapshot())
-                                            ))
-                                            .toList(),
-                                    selectedOptionalItems.getOrDefault(item.getId(), List.of()),
-                                    selectedMaterials(introductions,
-                                            selectedOptionalItems.getOrDefault(item.getId(), List.of()))
-                            );
-                        })
-                        .toList(),
+                dayResources,
                 resources.stream()
                         .filter(item -> ARRANGEMENT_ACCOMMODATION.equals(item.getArrangementRole()))
                         .map(SalesProductDayResourceEntity::getCitySnapshot)
@@ -1255,7 +1394,8 @@ public class SalesProductDesignerService {
                         .orElse(itinerary == null ? null : itinerary.getRelatedHotel()),
                 itinerary != null && Boolean.TRUE.equals(itinerary.getBreakfastIncluded()),
                 itinerary != null && Boolean.TRUE.equals(itinerary.getLunchIncluded()),
-                itinerary != null && Boolean.TRUE.equals(itinerary.getDinnerIncluded())
+                itinerary != null && Boolean.TRUE.equals(itinerary.getDinnerIncluded()),
+                mealPlan
         );
     }
 
@@ -1767,6 +1907,10 @@ public class SalesProductDesignerService {
             ProductDesignerDayResourceSaveRequest request,
             String arrangementRole
     ) {
+        // 地接服务是当天独立执行序列，同一资源允许按不同批次/时段重复安排。
+        if (ARRANGEMENT_GROUND_SERVICE.equals(arrangementRole)) {
+            return;
+        }
         Long count = dayResourceMapper.selectCount(baseDayResourceQuery(tenantId, request.productId())
                 .eq("day_no", request.dayNo())
                 .eq("resource_id", request.resourceId())
@@ -1775,7 +1919,8 @@ public class SalesProductDesignerService {
         if (count != null && count > 0) {
             throw new BizException("同一天不能重复加入同一个资源");
         }
-        if (!MEAL_ARRANGEMENT_ROLES.contains(arrangementRole)) {
+        if (!MEAL_ARRANGEMENT_ROLES.contains(arrangementRole)
+                && !ARRANGEMENT_ACCOMMODATION.equals(arrangementRole)) {
             return;
         }
         Long occupied = dayResourceMapper.selectCount(baseDayResourceQuery(tenantId, request.productId())
@@ -1783,6 +1928,9 @@ public class SalesProductDesignerService {
                 .eq("arrangement_role", arrangementRole)
                 .ne(request.id() != null, "id", request.id()));
         if (occupied != null && occupied > 0) {
+            if (ARRANGEMENT_ACCOMMODATION.equals(arrangementRole)) {
+                throw new BizException("当天已安排酒店，请更换或删除原酒店");
+            }
             throw new BizException("当天该餐次已安排餐厅，请先更换或删除原餐厅");
         }
     }
@@ -1793,19 +1941,30 @@ public class SalesProductDesignerService {
             String requestedRole,
             String existingRole
     ) {
+        if ("ground_agent".equals(resource.getResourceType())) {
+            throw new BizException("地接服务请在真实团队安排阶段配置");
+        }
+        if ("vehicle".equals(resource.getResourceType()) || "traffic".equals(resource.getResourceType())) {
+            throw new BizException("用车和交通不能安排到某一天，请使用产品级安排");
+        }
         String role = clean(requestedRole);
         if (!StringUtils.hasText(role)) {
-            role = StringUtils.hasText(existingRole)
-                    ? existingRole
-                    : "hotel".equals(resource.getResourceType())
-                            ? ARRANGEMENT_ACCOMMODATION
-                            : "restaurant".equals(resource.getResourceType())
-                                    ? ARRANGEMENT_UNASSIGNED
-                                    : ARRANGEMENT_ITINERARY;
+            if (StringUtils.hasText(existingRole)) {
+                role = existingRole;
+            } else if ("hotel".equals(resource.getResourceType())) {
+                role = ARRANGEMENT_ACCOMMODATION;
+            } else if ("restaurant".equals(resource.getResourceType())) {
+                throw new BizException("餐厅资源必须选择早餐、中餐或晚餐");
+            } else if ("ground_agent".equals(resource.getResourceType())) {
+                role = ARRANGEMENT_GROUND_SERVICE;
+            } else {
+                role = ARRANGEMENT_ITINERARY;
+            }
         }
-        if (!Set.of(ARRANGEMENT_ITINERARY, ARRANGEMENT_ACCOMMODATION, ARRANGEMENT_BREAKFAST,
-                ARRANGEMENT_LUNCH, ARRANGEMENT_DINNER, ARRANGEMENT_UNASSIGNED).contains(role)) {
-            throw new BizException("资源安排位置不合法");
+        ProductDesignerArrangementRole resolvedRole = ProductDesignerArrangementRole.fromValue(role);
+        if (resolvedRole == ProductDesignerArrangementRole.LEGACY_UNASSIGNED
+                && (!StringUtils.hasText(existingRole) || StringUtils.hasText(requestedRole))) {
+            throw new BizException("餐厅资源必须选择早餐、中餐或晚餐");
         }
         if (ARRANGEMENT_ACCOMMODATION.equals(role) && !"hotel".equals(resource.getResourceType())) {
             throw new BizException("住宿位置只能安排酒店资源");
@@ -1814,11 +1973,62 @@ public class SalesProductDesignerService {
                 && !"restaurant".equals(resource.getResourceType())) {
             throw new BizException("餐次位置只能安排餐厅资源");
         }
+        if (ARRANGEMENT_GROUND_SERVICE.equals(role) && !"ground_agent".equals(resource.getResourceType())) {
+            throw new BizException("地接服务位置只能安排地接资源");
+        }
         if (ARRANGEMENT_ITINERARY.equals(role)
-                && ("hotel".equals(resource.getResourceType()) || "restaurant".equals(resource.getResourceType()))) {
-            throw new BizException("酒店和餐厅必须安排到住宿或具体餐次");
+                && ("hotel".equals(resource.getResourceType()) || "restaurant".equals(resource.getResourceType())
+                || "ground_agent".equals(resource.getResourceType()))) {
+            throw new BizException("酒店、餐厅和地接必须安排到对应区域");
         }
         return role;
+    }
+
+    /** 外部早餐与前一晚酒店含早二选一，替换操作必须在同一事务内完成。 */
+    private void assertOrClearPreviousNightBreakfastHotels(
+            Long tenantId, Long productId, Integer dayNo, Boolean replaceBreakfastSource, String operator
+    ) {
+        if (dayNo == null || dayNo <= 1) {
+            return;
+        }
+        List<SalesProductDayResourceEntity> hotels = dayResourceMapper.selectList(baseDayResourceQuery(tenantId, productId)
+                .eq("day_no", dayNo - 1)
+                .eq("arrangement_role", ARRANGEMENT_ACCOMMODATION)
+                .eq("hotel_breakfast_included", true));
+        if (hotels.isEmpty()) {
+            return;
+        }
+        if (!Boolean.TRUE.equals(replaceBreakfastSource)) {
+            throw new BizException("前一晚酒店已包含次日早餐，如需改为外部早餐请确认替换");
+        }
+        dayResourceMapper.update(null, baseDayResourceUpdate(tenantId, productId)
+                .eq("day_no", dayNo - 1)
+                .eq("arrangement_role", ARRANGEMENT_ACCOMMODATION)
+                .eq("hotel_breakfast_included", true)
+                .set("hotel_breakfast_included", false)
+                .set("updated_by", operator));
+    }
+
+    /** 勾选酒店含早时，需要先处理次日已经存在的外部早餐餐厅。 */
+    private void assertOrClearNextDayBreakfastRestaurant(
+            Long tenantId, Long productId, Integer nextDayNo, Boolean replaceBreakfastSource, String operator
+    ) {
+        List<SalesProductDayResourceEntity> breakfasts = dayResourceMapper.selectList(baseDayResourceQuery(tenantId, productId)
+                .eq("day_no", nextDayNo)
+                .eq("arrangement_role", ARRANGEMENT_BREAKFAST));
+        if (breakfasts.isEmpty()) {
+            return;
+        }
+        if (!Boolean.TRUE.equals(replaceBreakfastSource)) {
+            throw new BizException("次日已安排外部早餐，如需改为酒店含早请确认替换");
+        }
+        OffsetDateTime now = OffsetDateTime.now();
+        dayResourceMapper.update(null, baseDayResourceUpdate(tenantId, productId)
+                .eq("day_no", nextDayNo)
+                .eq("arrangement_role", ARRANGEMENT_BREAKFAST)
+                .set("is_deleted", true)
+                .set("deleted_at", now)
+                .set("deleted_by", operator));
     }
 
     private PurchaseRelationEntity relationForSave(Long tenantId, PurchaseResourceEntity resource, Long supplierId) {
@@ -1845,6 +2055,32 @@ public class SalesProductDesignerService {
             throw new BizException("供应商未绑定当前资源或已停用");
         }
         return relation;
+    }
+
+    /**
+     * 资源加入和更换供应商共用的报价入口。
+     *
+     * <p>生产注入统一解析器后可精确锁定采购关系；构造型遗留单测仍保留原查询逻辑作为兼容兜底。</p>
+     */
+    private ProductDesignerSupplierQuote resolveSupplierQuote(
+            Long tenantId, PurchaseResourceEntity resource, Long supplierRelationId, Long supplierId
+    ) {
+        if (supplierQuoteService != null) {
+            return supplierQuoteService.resolve(tenantId, resource, supplierRelationId, supplierId);
+        }
+        if (supplierRelationId != null) {
+            throw new BizException("供应商采购关系服务未配置");
+        }
+        PurchaseRelationEntity relation = relationForSave(tenantId, resource, supplierId);
+        if (relation == null) {
+            return PurchaseResourceProcurementMode.NOT_REQUIRED.value().equals(resource.getProcurementMode())
+                    ? ProductDesignerSupplierQuote.notRequired()
+                    : ProductDesignerSupplierQuote.pendingQuote();
+        }
+        return new ProductDesignerSupplierQuote(
+                relation.getId(), relation.getSupplierId(), supplierName(tenantId, relation.getSupplierId()),
+                relation.getPriceMode(), unitPriceForSave(tenantId, resource, relation), false
+        );
     }
 
     private PurchaseResourceIntroductionEntity introductionForSave(Long tenantId, Long resourceId, Long introductionId) {
@@ -2233,6 +2469,11 @@ public class SalesProductDesignerService {
     }
 
     private List<ProductDesignerSupplierResponse> supplierResponses(Long tenantId, PurchaseResourceEntity resource) {
+        if ("vehicle".equals(resource.getResourceType())) {
+            List<PurchaseRelationSupplierPriceRow> rows = relationMapper
+                    .selectActiveResourceSupplierRows(tenantId, List.of(resource.getId()));
+            return rows == null || rows.isEmpty() ? List.of() : supplierResponses(rows, Map.of());
+        }
         return supplierResponsesByResource(tenantId, List.of(resource.getId()))
                 .getOrDefault(resource.getId(), List.of());
     }
@@ -2307,15 +2548,24 @@ public class SalesProductDesignerService {
                         money(item.getPeerPrice()), money(item.getTeamPrice())
                 ))
                 .toList();
-        BigDecimal referencePrice = PRICE_MODE_UNIFIED.equals(relation.getPriceMode())
-                ? money(relation.getUnifiedPrice())
-                : rows.stream().map(this::bestLinePrice).filter(Objects::nonNull).findFirst().orElse(BigDecimal.ZERO);
+        BigDecimal referencePrice;
+        boolean hasLinePrice = PRICE_MODE_UNIFIED.equals(relation.getPriceMode())
+                ? relation.getUnifiedPrice() != null
+                : rows.stream().map(this::bestLinePrice).filter(Objects::nonNull).findFirst().isPresent();
+        if (hasLinePrice) {
+            referencePrice = PRICE_MODE_UNIFIED.equals(relation.getPriceMode())
+                    ? money(relation.getUnifiedPrice())
+                    : rows.stream().map(this::bestLinePrice).filter(Objects::nonNull).findFirst().orElse(BigDecimal.ZERO);
+        } else {
+            referencePrice = BigDecimal.ZERO;
+        }
+        String priceMode = hasLinePrice ? relation.getPriceMode() : "pending";
         return new ProductDesignerSupplierResponse(
                 relation.getRelationId(),
                 relation.getSupplierId(),
                 relation.getSupplierName(),
                 Boolean.TRUE.equals(relation.getDefaultSupplier()),
-                relation.getPriceMode(),
+                priceMode,
                 money(relation.getUnifiedPrice()),
                 referencePrice,
                 lines,
@@ -2383,9 +2633,10 @@ public class SalesProductDesignerService {
         return line.getMarketPrice();
     }
 
-    private int nextSortOrder(Long tenantId, Long productId, Integer dayNo) {
+    private int nextSortOrder(Long tenantId, Long productId, Integer dayNo, String arrangementRole) {
         List<SalesProductDayResourceEntity> current = dayResourceMapper.selectList(baseDayResourceQuery(tenantId, productId)
                 .eq("day_no", dayNo)
+                .eq("arrangement_role", arrangementRole)
                 .orderByDesc("sort_order")
                 .last("limit 1"));
         if (current.isEmpty() || current.get(0).getSortOrder() == null) {
@@ -2407,12 +2658,17 @@ public class SalesProductDesignerService {
     }
 
     private BigDecimal productCost(Long tenantId, Long productId) {
-        return dayResourceMapper.selectList(baseDayResourceQuery(tenantId, productId))
+        BigDecimal dayResourceCost = dayResourceMapper.selectList(baseDayResourceQuery(tenantId, productId))
                 .stream()
+                .filter(item -> !ARRANGEMENT_GROUND_SERVICE.equals(item.getArrangementRole()))
                 .map(SalesProductDayResourceEntity::getCostAmountSnapshot)
                 .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal vehicleCost = vehicleArrangementService == null
+                ? BigDecimal.ZERO
+                : vehicleArrangementService.costAmount(tenantId, productId);
+        return dayResourceCost.add(vehicleCost).setScale(2, RoundingMode.HALF_UP);
     }
 
     private BigDecimal money(BigDecimal value) {

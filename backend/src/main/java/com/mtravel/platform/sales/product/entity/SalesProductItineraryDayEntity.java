@@ -37,6 +37,18 @@ public class SalesProductItineraryDayEntity extends TenantSoftDeleteEntity {
     @TableField("related_hotel")
     private String relatedHotel;
 
+    /** 当天主行程目的地省份。 */
+    @TableField("destination_province")
+    private String destinationProvince;
+
+    /** 当天主行程目的地城市，驱动地图默认筛选范围。 */
+    @TableField("destination_city")
+    private String destinationCity;
+
+    /** 当天主行程目的地区县，可选。 */
+    @TableField("destination_district")
+    private String destinationDistrict;
+
     /** 旺季附加费。 */
     @TableField("seasonal_surcharge")
     private BigDecimal seasonalSurcharge;
@@ -119,6 +131,30 @@ public class SalesProductItineraryDayEntity extends TenantSoftDeleteEntity {
 
     public void setRelatedHotel(String relatedHotel) {
         this.relatedHotel = relatedHotel;
+    }
+
+    public String getDestinationProvince() {
+        return destinationProvince;
+    }
+
+    public void setDestinationProvince(String destinationProvince) {
+        this.destinationProvince = destinationProvince;
+    }
+
+    public String getDestinationCity() {
+        return destinationCity;
+    }
+
+    public void setDestinationCity(String destinationCity) {
+        this.destinationCity = destinationCity;
+    }
+
+    public String getDestinationDistrict() {
+        return destinationDistrict;
+    }
+
+    public void setDestinationDistrict(String destinationDistrict) {
+        this.destinationDistrict = destinationDistrict;
     }
 
     public BigDecimal getSeasonalSurcharge() {

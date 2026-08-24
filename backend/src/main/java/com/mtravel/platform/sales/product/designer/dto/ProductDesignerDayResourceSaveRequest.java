@@ -27,6 +27,8 @@ import jakarta.validation.Valid;
  * @param selectedImageIds 产品 Word 使用的资源图片 ID，空列表表示不选图；空值表示修改时保持原选择
  * @param arrangementRole 资源在当天的业务归属；酒店为 accommodation，餐厅为 breakfast/lunch/dinner
  * @param hotelBreakfastIncluded 当晚酒店是否包含次日早餐，仅酒店住宿可设置
+ * @param replaceBreakfastSource 是否以当前选择替换互斥的早餐来源
+ * @param supplierRelationId 供应商采购关系 ID；优先于兼容字段 supplierId
  */
 public record ProductDesignerDayResourceSaveRequest(
         Long id,
@@ -45,7 +47,9 @@ public record ProductDesignerDayResourceSaveRequest(
         List<@Valid ProductDesignerSelectedOptionalItemRequest> selectedOptionalItems,
         List<@Valid ProductDesignerSelectedMaterialRequest> selectedMaterials,
         String arrangementRole,
-        Boolean hotelBreakfastIncluded
+        Boolean hotelBreakfastIncluded,
+        Boolean replaceBreakfastSource,
+        Long supplierRelationId
 ) {
     /** 兼容已有调用方：未提供归属时由后端按资源类型补齐默认归属。 */
     public ProductDesignerDayResourceSaveRequest(
@@ -57,15 +61,15 @@ public record ProductDesignerDayResourceSaveRequest(
     ) {
         this(id, productId, dayNo, resourceId, supplierId, selectedIntroductionId, stayMinutes, includeInWord,
                 quantity, sortOrder, remark, selectedImageIds, introductionIds, selectedOptionalItems,
-                selectedMaterials, null, null);
+                selectedMaterials, null, null, null, null);
     }
     /** 兼容已存在的多介绍素材请求。 */
     public ProductDesignerDayResourceSaveRequest(Long id, Long productId, Integer dayNo, Long resourceId, Long supplierId, Long selectedIntroductionId, Integer stayMinutes, Boolean includeInWord, BigDecimal quantity, Integer sortOrder, String remark, List<Long> selectedImageIds, List<Long> introductionIds) {
-        this(id, productId, dayNo, resourceId, supplierId, selectedIntroductionId, stayMinutes, includeInWord, quantity, sortOrder, remark, selectedImageIds, introductionIds, null, null, null, null);
+        this(id, productId, dayNo, resourceId, supplierId, selectedIntroductionId, stayMinutes, includeInWord, quantity, sortOrder, remark, selectedImageIds, introductionIds, null, null, null, null, null, null);
     }
     /** 兼容已有的自费项目调用方。 */
     public ProductDesignerDayResourceSaveRequest(Long id, Long productId, Integer dayNo, Long resourceId, Long supplierId, Long selectedIntroductionId, Integer stayMinutes, Boolean includeInWord, BigDecimal quantity, Integer sortOrder, String remark, List<Long> selectedImageIds, List<Long> introductionIds, List<@Valid ProductDesignerSelectedOptionalItemRequest> selectedOptionalItems) {
-        this(id, productId, dayNo, resourceId, supplierId, selectedIntroductionId, stayMinutes, includeInWord, quantity, sortOrder, remark, selectedImageIds, introductionIds, selectedOptionalItems, null, null, null);
+        this(id, productId, dayNo, resourceId, supplierId, selectedIntroductionId, stayMinutes, includeInWord, quantity, sortOrder, remark, selectedImageIds, introductionIds, selectedOptionalItems, null, null, null, null, null);
     }
     /** 兼容尚未升级的调用方：仍可只提交一个介绍 ID。 */
     public ProductDesignerDayResourceSaveRequest(
@@ -83,6 +87,6 @@ public record ProductDesignerDayResourceSaveRequest(
             List<Long> selectedImageIds
     ) {
         this(id, productId, dayNo, resourceId, supplierId, selectedIntroductionId, stayMinutes,
-                includeInWord, quantity, sortOrder, remark, selectedImageIds, null, null, null, null, null);
+                includeInWord, quantity, sortOrder, remark, selectedImageIds, null, null, null, null, null, null, null);
     }
 }

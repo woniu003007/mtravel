@@ -31,6 +31,44 @@ import static org.mockito.Mockito.when;
 class ScenicSupplierCreateServiceTest {
 
     @Test
+    void vehicleSupplierShouldBindWithoutFixedResourcePrice() {
+        PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
+        SupplierMapper supplierMapper = mock(SupplierMapper.class);
+        PurchaseRelationMapper relationMapper = mock(PurchaseRelationMapper.class);
+        SupplierResourcePriceMapper priceMapper = mock(SupplierResourcePriceMapper.class);
+        ScenicSupplierCreateService service = new ScenicSupplierCreateService(
+                resourceMapper, supplierMapper, relationMapper, priceMapper,
+                mock(EnterpriseExpenseItemMapper.class)
+        );
+        PurchaseResourceEntity resource = new PurchaseResourceEntity();
+        resource.setId(179L);
+        resource.setTenantId(1L);
+        resource.setResourceType("vehicle");
+        resource.setResourceName("7座商务车");
+        when(resourceMapper.selectOne(any(Wrapper.class))).thenReturn(resource);
+        when(supplierMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
+        when(supplierMapper.insert(any(SupplierEntity.class))).thenAnswer(invocation -> {
+            invocation.getArgument(0, SupplierEntity.class).setId(66L);
+            return 1;
+        });
+        when(relationMapper.insert(any(PurchaseRelationEntity.class))).thenAnswer(invocation -> {
+            invocation.getArgument(0, PurchaseRelationEntity.class).setId(164L);
+            return 1;
+        });
+        ArgumentCaptor<PurchaseRelationEntity> relationCaptor = ArgumentCaptor.forClass(PurchaseRelationEntity.class);
+
+        service.createResourceSupplier(1L, 179L, new ResourceSupplierCreateRequest(
+                "测试商务车队", null, null, null, null, null, null, "active", true,
+                "classified", null, null, null, null, null
+        ), "admin");
+
+        verify(relationMapper).insert(relationCaptor.capture());
+        assertThat(relationCaptor.getValue().getPriceMode()).isEqualTo("classified");
+        assertThat(relationCaptor.getValue().getUnifiedPrice()).isNull();
+        verify(priceMapper, never()).insertBatch(any());
+    }
+
+    @Test
     void scenicSupplierShouldPersistMultipleOptionalItemsAtFixedUnit() {
         PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
         SupplierMapper supplierMapper = mock(SupplierMapper.class);

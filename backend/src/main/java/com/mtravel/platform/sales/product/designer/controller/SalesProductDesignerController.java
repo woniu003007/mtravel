@@ -8,9 +8,12 @@ import com.mtravel.platform.sales.product.designer.dto.ProductDesignerAdultQuote
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceDeleteRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayItineraryResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayItinerarySaveRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayDestinationResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayDestinationSaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceReorderRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceSaveRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceSupplierSaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayItineraryResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayItinerarySaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayWordPlanResponse;
@@ -23,8 +26,14 @@ import com.mtravel.platform.sales.product.designer.dto.ProductDesignerMapResourc
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerOptionalItemsSaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerSelectedOptionalItemResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerResourceDetailResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerVehicleArrangementDeleteRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerVehicleArrangementReorderRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerVehicleArrangementResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerVehicleArrangementSaveRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerVehicleResourceResponse;
 import com.mtravel.platform.sales.product.designer.service.SalesProductDesignerService;
 import com.mtravel.platform.sales.product.designer.service.SalesProductDesignerOptionalItemService;
+import com.mtravel.platform.sales.product.designer.service.SalesProductDesignerVehicleArrangementService;
 import com.mtravel.platform.system.log.web.OperationLog;
 import com.mtravel.platform.tenant.TenantProperties;
 import jakarta.validation.Valid;
@@ -52,15 +61,18 @@ public class SalesProductDesignerController extends ControllerSupport {
 
     private final SalesProductDesignerService service;
     private final SalesProductDesignerOptionalItemService optionalItemService;
+    private final SalesProductDesignerVehicleArrangementService vehicleArrangementService;
 
     public SalesProductDesignerController(
             SalesProductDesignerService service,
             SalesProductDesignerOptionalItemService optionalItemService,
+            SalesProductDesignerVehicleArrangementService vehicleArrangementService,
             TenantProperties tenantProperties
     ) {
         super(tenantProperties);
         this.service = service;
         this.optionalItemService = optionalItemService;
+        this.vehicleArrangementService = vehicleArrangementService;
     }
 
     /** 分页查询产品设计草稿，不返回正式产品。 */
@@ -162,6 +174,52 @@ public class SalesProductDesignerController extends ControllerSupport {
         return ApiResponse.ok(service.resourceDetail(currentTenantId(), resourceId));
     }
 
+    /** 分页查询产品级全程用车选择器资源，不进入每日地图资源池。 */
+    @OperationLog(module = "销售管理", type = "查询")
+    @GetMapping("/vehicle-resources")
+    public ApiResponse<PageResult<ProductDesignerVehicleResourceResponse>> vehicleResources(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "1") @Min(1) long page,
+            @RequestParam(defaultValue = "50") @Min(1) @Max(200) long pageSize
+    ) {
+        return ApiResponse.ok(vehicleArrangementService.vehicleResources(
+                currentTenantId(), keyword, page, pageSize
+        ));
+    }
+
+    /** 新增或修改一条产品级全程用车安排。 */
+    @OperationLog(module = "销售管理", type = "修改")
+    @PostMapping("/vehicle-arrangement/save")
+    public ApiResponse<ProductDesignerVehicleArrangementResponse> saveVehicleArrangement(
+            @Valid @RequestBody ProductDesignerVehicleArrangementSaveRequest request,
+            Authentication authentication
+    ) {
+        return ApiResponse.ok(vehicleArrangementService.save(
+                currentTenantId(), request, currentOperator(authentication)
+        ));
+    }
+
+    /** 软删除一条产品级全程用车安排。 */
+    @OperationLog(module = "销售管理", type = "删除")
+    @PostMapping("/vehicle-arrangement/delete")
+    public ApiResponse<Void> deleteVehicleArrangement(
+            @Valid @RequestBody ProductDesignerVehicleArrangementDeleteRequest request,
+            Authentication authentication
+    ) {
+        vehicleArrangementService.delete(currentTenantId(), request, currentOperator(authentication));
+        return ApiResponse.ok();
+    }
+
+    /** 保存产品级全程用车排序。 */
+    @OperationLog(module = "销售管理", type = "修改")
+    @PostMapping("/vehicle-arrangement/reorder")
+    public ApiResponse<Void> reorderVehicleArrangements(
+            @Valid @RequestBody ProductDesignerVehicleArrangementReorderRequest request
+    ) {
+        vehicleArrangementService.reorder(currentTenantId(), request);
+        return ApiResponse.ok();
+    }
+
     /** 新增或修改产品某天的一条资源。 */
     @OperationLog(module = "销售管理", type = "修改")
     @PostMapping("/day-resource/save")
@@ -172,6 +230,18 @@ public class SalesProductDesignerController extends ControllerSupport {
         return ApiResponse.ok(service.saveDayResource(currentTenantId(), request, currentOperator(authentication)));
     }
 
+    /** 仅替换一条已编排行资源的供应商关系和成本快照。 */
+    @OperationLog(module = "销售管理", type = "修改")
+    @PostMapping("/day-resource/supplier")
+    public ApiResponse<ProductDesignerDayResourceResponse> changeDayResourceSupplier(
+            @Valid @RequestBody ProductDesignerDayResourceSupplierSaveRequest request,
+            Authentication authentication
+    ) {
+        return ApiResponse.ok(service.changeDayResourceSupplier(
+                currentTenantId(), request, currentOperator(authentication)
+        ));
+    }
+
     /** 保存产品设计工作台当天住宿城市和三餐。 */
     @OperationLog(module = "销售管理", type = "修改")
     @PostMapping("/day-itinerary/save")
@@ -180,6 +250,18 @@ public class SalesProductDesignerController extends ControllerSupport {
             Authentication authentication
     ) {
         return ApiResponse.ok(service.saveDayItinerary(
+                currentTenantId(), request, currentOperator(authentication)
+        ));
+    }
+
+    /** 保存当天主行程城市，供日卡与地图共同使用。 */
+    @OperationLog(module = "销售管理", type = "修改")
+    @PostMapping("/day-destination/save")
+    public ApiResponse<ProductDesignerDayDestinationResponse> saveDayDestination(
+            @Valid @RequestBody ProductDesignerDayDestinationSaveRequest request,
+            Authentication authentication
+    ) {
+        return ApiResponse.ok(service.saveDayDestination(
                 currentTenantId(), request, currentOperator(authentication)
         ));
     }

@@ -35,7 +35,12 @@ public class SalesProductDayResourceEntity extends TenantSoftDeleteEntity {
     @TableField("stay_minutes") private Integer stayMinutes;
     @TableField("include_in_word") private Boolean includeInWord;
     @TableField(value = "supplier_id", updateStrategy = FieldStrategy.ALWAYS) private Long supplierId;
+    /** 加入产品时采用的精确采购关系，避免同供应商多报价关系无法回溯。 */
+    @TableField(value = "supplier_relation_id_snapshot", updateStrategy = FieldStrategy.ALWAYS)
+    private Long supplierRelationIdSnapshot;
     @TableField(value = "supplier_name_snapshot", updateStrategy = FieldStrategy.ALWAYS) private String supplierNameSnapshot;
+    /** 报价快照模式：unified、classified 或 pending。 */
+    @TableField(value = "price_mode_snapshot", updateStrategy = FieldStrategy.ALWAYS) private String priceModeSnapshot;
     @TableField("unit_price_snapshot") private BigDecimal unitPriceSnapshot;
     @TableField("quantity_snapshot") private BigDecimal quantitySnapshot;
     @TableField("cost_amount_snapshot") private BigDecimal costAmountSnapshot;
@@ -83,8 +88,12 @@ public class SalesProductDayResourceEntity extends TenantSoftDeleteEntity {
     public void setIncludeInWord(Boolean includeInWord) { this.includeInWord = includeInWord; }
     public Long getSupplierId() { return supplierId; }
     public void setSupplierId(Long supplierId) { this.supplierId = supplierId; }
+    public Long getSupplierRelationIdSnapshot() { return supplierRelationIdSnapshot; }
+    public void setSupplierRelationIdSnapshot(Long supplierRelationIdSnapshot) { this.supplierRelationIdSnapshot = supplierRelationIdSnapshot; }
     public String getSupplierNameSnapshot() { return supplierNameSnapshot; }
     public void setSupplierNameSnapshot(String supplierNameSnapshot) { this.supplierNameSnapshot = supplierNameSnapshot; }
+    public String getPriceModeSnapshot() { return priceModeSnapshot; }
+    public void setPriceModeSnapshot(String priceModeSnapshot) { this.priceModeSnapshot = priceModeSnapshot; }
     public BigDecimal getUnitPriceSnapshot() { return unitPriceSnapshot; }
     public void setUnitPriceSnapshot(BigDecimal unitPriceSnapshot) { this.unitPriceSnapshot = unitPriceSnapshot; }
     public BigDecimal getQuantitySnapshot() { return quantitySnapshot; }

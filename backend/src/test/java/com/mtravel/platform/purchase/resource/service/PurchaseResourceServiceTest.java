@@ -191,6 +191,10 @@ class PurchaseResourceServiceTest {
 
         verify(resourceMapper).update(captor.capture(), any(Wrapper.class));
         PurchaseResourceEntity changed = captor.getValue();
+        assertThat(changed.getProvince()).isNull();
+        assertThat(changed.getCity()).isNull();
+        assertThat(changed.getDistrict()).isNull();
+        assertThat(changed.getAddress()).isNull();
         assertThat(changed.getScenicLevel()).isNull();
         assertThat(changed.getLongitude()).isNull();
         assertThat(changed.getLatitude()).isNull();

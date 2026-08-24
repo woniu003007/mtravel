@@ -12,6 +12,9 @@ public record ProductDesignerDetailResponse(
         Integer travelDays,
         String status,
         BigDecimal totalCostAmount,
+        BigDecimal dayResourceCostAmount,
+        BigDecimal vehicleCostAmount,
+        List<ProductDesignerVehicleArrangementResponse> vehicleArrangements,
         List<ProductDesignerDayPlanResponse> days,
         ProductDesignerAdultQuoteResponse adultQuote
 ) {}

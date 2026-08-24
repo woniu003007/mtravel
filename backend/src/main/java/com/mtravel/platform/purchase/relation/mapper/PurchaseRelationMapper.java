@@ -38,6 +38,73 @@ public interface PurchaseRelationMapper extends BaseMapper<PurchaseRelationEntit
               ON s.tenant_id = r.tenant_id
              AND s.id = r.supplier_id
              AND s.is_deleted = false
+             AND s.status = 'active'
+            LEFT JOIN supplier_resource_prices p
+              ON p.tenant_id = r.tenant_id
+             AND p.relation_id = r.id
+             AND p.is_deleted = false
+             AND p.status = 'active'
+            WHERE r.tenant_id = #{tenantId}
+              AND r.is_deleted = false
+              AND r.status = 'active'
+              AND (
+                    (r.price_mode = 'unified' AND r.unified_price IS NOT NULL)
+                    OR (
+                        r.price_mode = 'classified'
+                        AND EXISTS (
+                            SELECT 1
+                            FROM supplier_resource_prices valid_price
+                            WHERE valid_price.tenant_id = r.tenant_id
+                              AND valid_price.relation_id = r.id
+                              AND valid_price.is_deleted = false
+                              AND valid_price.status = 'active'
+                              AND (
+                                    valid_price.team_price IS NOT NULL
+                                    OR valid_price.peer_price IS NOT NULL
+                                    OR valid_price.market_price IS NOT NULL
+                              )
+                        )
+                    )
+              )
+              AND r.resource_id IN
+              <foreach collection="resourceIds" item="resourceId" open="(" separator="," close=")">
+                #{resourceId}
+              </foreach>
+            ORDER BY r.resource_id, r.is_default DESC, r.group_quantity ASC, r.id ASC,
+                     p.resource_project_id ASC, p.id ASC
+            </script>
+            """)
+    List<PurchaseRelationSupplierPriceRow> selectActiveResourceSupplierPriceRows(
+            @Param("tenantId") Long tenantId,
+            @Param("resourceIds") List<Long> resourceIds
+    );
+
+    /**
+     * 批量读取资源的有效供应商关系及报价明细，不做“有可计算报价”过滤。
+     *
+     * <p>用于产品设计阶段的候选展示场景：关系存在即返回，报价可为空并以待询价展示。</p>
+     */
+    @Select("""
+            <script>
+            SELECT
+              r.resource_id AS resource_id,
+              r.id AS relation_id,
+              r.supplier_id AS supplier_id,
+              s.supplier_name AS supplier_name,
+              r.is_default AS default_supplier,
+              r.price_mode AS price_mode,
+              r.unified_price AS unified_price,
+              p.resource_project_id AS resource_project_id,
+              p.project_name AS project_name,
+              p.market_price AS market_price,
+              p.peer_price AS peer_price,
+              p.team_price AS team_price
+            FROM purchase_relations r
+            JOIN suppliers s
+              ON s.tenant_id = r.tenant_id
+             AND s.id = r.supplier_id
+             AND s.is_deleted = false
+             AND s.status = 'active'
             LEFT JOIN supplier_resource_prices p
               ON p.tenant_id = r.tenant_id
              AND p.relation_id = r.id
@@ -54,7 +121,7 @@ public interface PurchaseRelationMapper extends BaseMapper<PurchaseRelationEntit
                      p.resource_project_id ASC, p.id ASC
             </script>
             """)
-    List<PurchaseRelationSupplierPriceRow> selectActiveResourceSupplierPriceRows(
+    List<PurchaseRelationSupplierPriceRow> selectActiveResourceSupplierRows(
             @Param("tenantId") Long tenantId,
             @Param("resourceIds") List<Long> resourceIds
     );

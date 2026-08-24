@@ -43,6 +43,7 @@ import org.springframework.util.StringUtils;
 public class ScenicSupplierCreateService {
 
     private static final String RESOURCE_TYPE = "scenic";
+    private static final String VEHICLE_RESOURCE_TYPE = "vehicle";
     private static final String SUPPLIER_CATEGORY = "scenic";
 
     private final PurchaseResourceMapper resourceMapper;
@@ -263,6 +264,7 @@ public class ScenicSupplierCreateService {
                 .eq("tenant_id", tenantId)
                 .eq("is_deleted", false)
                 .eq("id", relationId)
+                .set(VEHICLE_RESOURCE_TYPE.equals(resource.getResourceType()), "purchase_price", BigDecimal.ZERO)
                 .set("unified_price", "unified".equals(request.priceMode()) ? request.unifiedPrice() : null)
                 .set("price_remark", "unified".equals(request.priceMode()) ? clean(request.priceRemark()) : null);
         int relationUpdated = relationMapper.update(relationUpdate, relationWrapper);
@@ -317,7 +319,7 @@ public class ScenicSupplierCreateService {
     }
 
     /**
-     * 景区允许仅维护自费项目报价；其它资源仍至少需要一项统一或分类资源报价。
+     * 景区允许仅维护自费项目报价；用车只绑定车队、真实排团时再询价；其它资源仍需维护报价。
      */
     private void validateResourceSupplierRequest(
             PurchaseResourceEntity resource,
@@ -329,6 +331,9 @@ public class ScenicSupplierCreateService {
         String supplierStatus = StringUtils.hasText(request.status()) ? request.status() : "active";
         if (Boolean.TRUE.equals(request.isDefault()) && !"active".equals(supplierStatus)) {
             throw new BizException("默认供应商必须是合作中状态");
+        }
+        if (VEHICLE_RESOURCE_TYPE.equals(resource.getResourceType())) {
+            return;
         }
         boolean hasOptionalItemQuote = RESOURCE_TYPE.equals(resource.getResourceType())
                 && request.optionalItems() != null

@@ -1587,6 +1587,7 @@ public class SalesProductDesignerDocumentService {
                 .eq("tenant_id", tenantId)
                 .eq("is_deleted", false)
                 .eq("product_id", productId)
+                .ne("arrangement_role", "ground_service")
                 .orderByAsc("day_no")
                 .orderByAsc("sort_order")
                 .orderByAsc("id"));

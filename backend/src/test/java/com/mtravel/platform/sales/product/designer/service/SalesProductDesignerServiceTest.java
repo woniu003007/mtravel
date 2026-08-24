@@ -16,6 +16,8 @@ import com.mtravel.platform.purchase.resource.material.mapper.PurchaseResourceIm
 import com.mtravel.platform.purchase.resource.material.mapper.PurchaseResourceIntroductionMapper;
 import com.mtravel.platform.purchase.supplier.mapper.SupplierMapper;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceSaveRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceReorderRequest;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayDestinationSaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayItinerarySaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayEndImageSelectionRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayWordPlanSaveRequest;
@@ -138,6 +140,41 @@ class SalesProductDesignerServiceTest {
         assertThat(captor.getValue().getLunchIncluded()).isFalse();
         assertThat(captor.getValue().getDinnerIncluded()).isTrue();
         assertThat(response.accommodationCity()).isEqualTo("南京市");
+    }
+
+    @Test
+    void saveDayDestinationShouldOnlyUpdateTheDailyMapScope() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductItineraryDayMapper itineraryMapper = mock(SalesProductItineraryDayMapper.class);
+        SalesProductDesignerService service = service(
+                productMapper,
+                mock(PurchaseResourceMapper.class),
+                mock(PurchaseRelationMapper.class),
+                mock(SupplierResourcePriceMapper.class),
+                mock(SalesProductDayResourceMapper.class)
+        );
+        ReflectionTestUtils.setField(service, "itineraryDayMapper", itineraryMapper);
+        SalesProductItineraryDayEntity existing = new SalesProductItineraryDayEntity();
+        existing.setRelatedHotel("南京玄武湖酒店");
+        existing.setBreakfastIncluded(true);
+        existing.setLunchIncluded(false);
+        existing.setDinnerIncluded(true);
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(draftProduct());
+        when(itineraryMapper.selectOne(any(Wrapper.class))).thenReturn(existing);
+
+        var response = service.saveDayDestination(1L,
+                new ProductDesignerDayDestinationSaveRequest(88L, 2, "浙江省", "杭州市", "西湖区"),
+                "admin");
+
+        assertThat(response.dayNo()).isEqualTo(2);
+        assertThat(response.destinationProvince()).isEqualTo("浙江省");
+        assertThat(response.destinationCity()).isEqualTo("杭州市");
+        assertThat(response.destinationDistrict()).isEqualTo("西湖区");
+        assertThat(existing.getRelatedHotel()).isEqualTo("南京玄武湖酒店");
+        assertThat(existing.getBreakfastIncluded()).isTrue();
+        assertThat(existing.getLunchIncluded()).isFalse();
+        assertThat(existing.getDinnerIncluded()).isTrue();
+        verify(itineraryMapper).update(eq(existing), any(UpdateWrapper.class));
     }
 
     @Test
@@ -467,7 +504,7 @@ class SalesProductDesignerServiceTest {
     }
 
     @Test
-    void saveDayResourceShouldAllowMultipleHotelsInSameDay() {
+    void saveDayResourceShouldRejectSecondHotelInSameDayWithBusinessMessage() {
         SalesProductMapper productMapper = mock(SalesProductMapper.class);
         PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
         SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
@@ -475,25 +512,17 @@ class SalesProductDesignerServiceTest {
                 productMapper, resourceMapper, mock(PurchaseRelationMapper.class),
                 mock(SupplierResourcePriceMapper.class), dayResourceMapper
         );
-        PurchaseResourceEntity secondHotel = freeHotelResource();
-        secondHotel.setId(23L);
-        secondHotel.setResourceName("南京玄武酒店");
         when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
-        when(resourceMapper.selectOne(any(Wrapper.class))).thenReturn(freeHotelResource(), secondHotel);
-        when(dayResourceMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
-        when(dayResourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
-        when(dayResourceMapper.insert(any(SalesProductDayResourceEntity.class))).thenAnswer(invocation -> 1);
+        when(resourceMapper.selectOne(any(Wrapper.class))).thenReturn(freeHotelResource());
+        // 先确认不是同一酒店重复，再确认当天住宿槽位已被占用。
+        when(dayResourceMapper.selectCount(any(Wrapper.class))).thenReturn(0L, 1L);
 
-        service.saveDayResource(1L, new ProductDesignerDayResourceSaveRequest(
+        assertThatThrownBy(() -> service.saveDayResource(1L, new ProductDesignerDayResourceSaveRequest(
                 null, 88L, 1, 22L, null, null, null, true, null, null, null, null
-        ), "admin");
-        service.saveDayResource(1L, new ProductDesignerDayResourceSaveRequest(
-                null, 88L, 1, 23L, null, null, null, true, null, null, null, null
-        ), "admin");
-
-        ArgumentCaptor<SalesProductDayResourceEntity> captor = ArgumentCaptor.forClass(SalesProductDayResourceEntity.class);
-        verify(dayResourceMapper, times(2)).insert(captor.capture());
-        assertThat(captor.getAllValues()).allMatch(item -> "accommodation".equals(item.getArrangementRole()));
+        ), "admin"))
+                .isInstanceOf(BizException.class)
+                .hasMessage("当天已安排酒店，请更换或删除原酒店");
+        verify(dayResourceMapper, never()).insert(any(SalesProductDayResourceEntity.class));
     }
 
     @Test
@@ -748,6 +777,92 @@ class SalesProductDesignerServiceTest {
     }
 
     @Test
+    void saveDayResourceShouldRejectVehicleAsADayResource() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDesignerService service = service(
+                productMapper,
+                resourceMapper,
+                mock(PurchaseRelationMapper.class),
+                mock(SupplierResourcePriceMapper.class),
+                dayResourceMapper
+        );
+        PurchaseResourceEntity vehicle = freeResource();
+        vehicle.setResourceType("vehicle");
+        vehicle.setResourceName("39座旅游大巴");
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
+        when(resourceMapper.selectOne(any(Wrapper.class))).thenReturn(vehicle);
+
+        assertThatThrownBy(() -> service.saveDayResource(
+                1L,
+                new ProductDesignerDayResourceSaveRequest(
+                        null, 88L, 1, 21L, null, null, null, true,
+                        null, null, null, null
+                ),
+                "admin"
+        ))
+                .isInstanceOf(BizException.class)
+                .hasMessage("用车和交通不能安排到某一天，请使用产品级安排");
+
+        verify(dayResourceMapper, never()).insert(any(SalesProductDayResourceEntity.class));
+    }
+
+    @Test
+    void saveDayResourceShouldRejectGroundServiceUntilTheActualTeamArrangementStage() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDesignerService service = service(
+                productMapper,
+                resourceMapper,
+                mock(PurchaseRelationMapper.class),
+                mock(SupplierResourcePriceMapper.class),
+                dayResourceMapper
+        );
+        PurchaseResourceEntity groundService = freeResource();
+        groundService.setResourceType("ground_agent");
+        groundService.setResourceName("南京地接服务");
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
+        when(resourceMapper.selectOne(any(Wrapper.class))).thenReturn(groundService);
+        assertThatThrownBy(() -> service.saveDayResource(
+                1L,
+                new ProductDesignerDayResourceSaveRequest(
+                        null, 88L, 1, 21L, null, null, null, true,
+                        null, null, null, null
+                ),
+                "admin"
+        ))
+                .isInstanceOf(BizException.class)
+                .hasMessage("地接服务请在真实团队安排阶段配置");
+
+        verify(dayResourceMapper, never()).insert(any(SalesProductDayResourceEntity.class));
+    }
+
+    @Test
+    void saveDayResourceShouldRequireRestaurantMealRoleForNewResources() {
+        SalesProductDesignerService service = service(
+                mock(SalesProductMapper.class), mock(PurchaseResourceMapper.class),
+                mock(PurchaseRelationMapper.class), mock(SupplierResourcePriceMapper.class),
+                mock(SalesProductDayResourceMapper.class)
+        );
+        PurchaseResourceEntity restaurant = freeResource();
+        restaurant.setResourceType("restaurant");
+
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(
+                service, "normalizeArrangementRole", restaurant, null, null
+        )).isInstanceOf(BizException.class)
+                .hasMessage("餐厅资源必须选择早餐、中餐或晚餐");
+    }
+
+    @Test
+    void dayResourceReorderRequestShouldDeclareArrangementRole() {
+        assertThat(java.util.Arrays.stream(ProductDesignerDayResourceReorderRequest.class.getRecordComponents())
+                .map(java.lang.reflect.RecordComponent::getName))
+                .contains("arrangementRole");
+    }
+
+    @Test
     void saveAdultQuoteShouldRecalculateCostAndDeriveMarkupOnServer() {
         SalesProductMapper productMapper = mock(SalesProductMapper.class);
         SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
@@ -815,7 +930,7 @@ class SalesProductDesignerServiceTest {
     }
 
     @Test
-    void mapResourcesShouldReturnActiveNonTrafficResourcesWithoutCoordinates() {
+    void mapResourcesShouldReturnActiveNonVehicleDayResourcesWithoutCoordinates() {
         SalesProductMapper productMapper = mock(SalesProductMapper.class);
         PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
         SalesProductDesignerService service = service(
@@ -845,6 +960,8 @@ class SalesProductDesignerServiceTest {
         assertThat(wrapperCaptor.getValue().getSqlSegment())
                 .contains("resource_type")
                 .contains("status");
+        assertThat(wrapperCaptor.getValue().getParamNameValuePairs().values())
+                .contains("ground_agent", "traffic", "vehicle");
     }
 
     @Test

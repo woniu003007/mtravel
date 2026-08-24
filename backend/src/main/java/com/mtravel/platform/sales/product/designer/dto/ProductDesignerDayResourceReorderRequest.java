@@ -9,5 +9,6 @@ import java.util.List;
 public record ProductDesignerDayResourceReorderRequest(
         @NotNull(message = "产品ID不能为空") Long productId,
         @NotNull(message = "行程天数不能为空") @Min(value = 1, message = "行程天数必须从1开始") Integer dayNo,
+        @NotNull(message = "编排区块不能为空") String arrangementRole,
         @NotEmpty(message = "排序资源不能为空") List<Long> dayResourceIds
 ) {}

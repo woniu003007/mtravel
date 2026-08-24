@@ -27,6 +27,7 @@ import com.mtravel.platform.sales.product.designer.mapper.SalesProductAdultQuote
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceImageMapper;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceMapper;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductDocumentVersionMapper;
+import com.mtravel.platform.sales.product.designer.service.SalesProductDesignerVehicleArrangementService;
 import com.mtravel.platform.sales.product.entity.SalesProductArrangementItemEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductArrangementPriceLineEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductDescriptionEntity;
@@ -56,6 +57,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -83,6 +85,9 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
     private final SalesProductDayResourceImageMapper dayResourceImageMapper;
     private final SalesProductAdultQuoteMapper adultQuoteMapper;
     private final SalesProductDocumentVersionMapper documentVersionMapper;
+    /** 设计工作台的产品级用车快照与正式团队安排用车分表保存，删除时需一并清理。 */
+    @Autowired(required = false)
+    private SalesProductDesignerVehicleArrangementService designerVehicleArrangementService;
 
     public SalesProductService(
             SalesProductMapper productMapper,
@@ -731,6 +736,9 @@ public class SalesProductService extends BusinessCrudService<SalesProductEntity,
         SalesProductDocumentVersionEntity document = new SalesProductDocumentVersionEntity();
         markDeleted(document, operator, now);
         documentVersionMapper.update(document, childUpdate(tenantId, productId));
+        if (designerVehicleArrangementService != null) {
+            designerVehicleArrangementService.softDeleteForProduct(tenantId, productId, operator);
+        }
     }
 
     /** 填充统一软删除审计字段。 */

@@ -46,6 +46,6 @@ COMMENT ON COLUMN sales_product_day_resources.hotel_breakfast_included IS
 COMMENT ON INDEX uk_sales_product_day_resources_day_resource_role_active IS
   '同一产品同一天同一资源在同一编排归属下不能重复加入的唯一索引。';
 COMMENT ON INDEX uk_sales_product_day_resources_day_meal_role_active IS
-  '同一产品同一天每个餐次仅允许一个餐厅的唯一索引；当天住宿允许安排多个酒店。';
+  '同一产品同一天仅允许一家酒店，且每个餐次仅允许一个餐厅的唯一索引。';
 
 COMMIT;

@@ -6,10 +6,14 @@ import java.util.List;
 /** 产品工作台某一天的资源编排响应。 */
 public record ProductDesignerDayPlanResponse(
         Integer dayNo,
+        String destinationProvince,
+        String destinationCity,
+        String destinationDistrict,
         BigDecimal dayCostAmount,
         List<ProductDesignerDayResourceResponse> resources,
         String accommodationCity,
         Boolean breakfastIncluded,
         Boolean lunchIncluded,
-        Boolean dinnerIncluded
+        Boolean dinnerIncluded,
+        ProductDesignerBreakfastPlanResponse mealPlan
 ) {}
