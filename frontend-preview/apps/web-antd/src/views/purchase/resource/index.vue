@@ -2110,7 +2110,7 @@ function selectIntroduction(record?: PurchaseResourceApi.ResourceIntroductionIte
     contentMode: 'multiline',
     items: [],
     titleColor: block.titleColor
-      || (block.type === 'photo_recommendation' ? '#d97706' : block.type === 'warm_tip' ? '#0070c0' : '#000000'),
+      || (block.type === 'warm_tip' ? '#0070c0' : '#e36c09'),
     type: 'generic',
   }));
   introductionForm.isOptionalItem = Boolean(record?.isOptionalItem);
@@ -2419,7 +2419,7 @@ function addIntroductionExtensionBlock() {
     contentMode: 'multiline',
     items: [],
     title: '',
-    titleColor: '#000000',
+    titleColor: '#e36c09',
     type: 'generic',
   });
 }

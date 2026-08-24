@@ -9,6 +9,7 @@ export namespace EnterpriseDepartmentApi {
     parentName?: string;
     departmentCode?: string;
     departmentName: string;
+    managerEmployeeId?: number;
     managerName?: string;
     contactPhone?: string;
     sortOrder: number;
@@ -36,6 +37,7 @@ export namespace EnterpriseDepartmentApi {
     contactPhone?: string;
     departmentCode?: string;
     departmentName: string;
+    managerEmployeeId?: number;
     managerName?: string;
     parentId?: number;
     remark?: string;

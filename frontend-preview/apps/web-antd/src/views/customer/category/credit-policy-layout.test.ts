@@ -16,7 +16,8 @@ describe('customer credit policy page', () => {
     const apiSource = readAppFile('src/api/customer/category.ts');
 
     expect(source).toContain('客户等级授信配置');
-    expect(source).toContain('规则ID');
+    expect(source).toContain('序号');
+    expect(source).toContain('defaultCreditLimit');
     expect(source).toContain('账期天数');
     expect(source).toContain('审批人（按顺序）');
     expect(source).toContain('getEnterpriseEmployeePage');

@@ -11,6 +11,7 @@ export namespace QuoteConfigApi {
     | 'vehicle';
   export type Status = 'active' | 'disabled';
   export type ResourceQuoteMode = 'both' | 'fixed' | 'rate';
+  export type ApprovalMode = 'department_manager' | 'specified_person';
 
   export interface PageResult<T> {
     items: T[];
@@ -147,6 +148,7 @@ export namespace QuoteConfigApi {
   }
 
   export interface ApprovalConfig {
+    approvalMode: ApprovalMode;
     approvers: ApprovalMember[];
     ccUsers: ApprovalMember[];
   }

@@ -26,6 +26,10 @@ import {
   updateEnterpriseDepartment,
   type EnterpriseDepartmentApi,
 } from '#/api/enterprise/department';
+import {
+  getEnterpriseEmployeePage,
+  type EnterpriseEmployeeApi,
+} from '#/api/enterprise/employee';
 import BusinessSearchForm from '#/components/business/BusinessSearchForm.vue';
 
 const columns: TableColumnsType<EnterpriseDepartmentApi.Item> = [
@@ -49,6 +53,7 @@ const statusOptions = [
 
 const data = ref<EnterpriseDepartmentApi.Item[]>([]);
 const departmentOptions = ref<EnterpriseDepartmentApi.Item[]>([]);
+const managerEmployees = ref<EnterpriseEmployeeApi.Item[]>([]);
 const loading = ref(false);
 const modalOpen = ref(false);
 const saving = ref(false);
@@ -80,16 +85,39 @@ const pagination = reactive<TablePaginationConfig>({
 const parentOptions = computed(() => {
   return departmentOptions.value
     .filter((item) => item.id !== editingId.value)
-    .map((item) => ({
+  .map((item) => ({
       label: item.parentName
         ? `${item.parentName} / ${item.departmentName}`
         : item.departmentName,
       value: item.id,
-    }));
+  }));
 });
+
+const managerEmployeeOptions = computed(() => managerEmployees.value
+  .filter((item) => item.status === 'active' && item.systemUserId)
+  .map((item) => ({
+    label: item.username && item.username !== item.employeeName
+      ? `${item.employeeName}（${item.username}）`
+      : item.employeeName,
+    value: item.id,
+  })));
 
 async function loadDepartmentOptions() {
   departmentOptions.value = await getEnterpriseDepartmentAll(true);
+}
+
+async function loadManagerEmployees(departmentId?: number) {
+  if (!departmentId) {
+    managerEmployees.value = [];
+    return;
+  }
+  const result = await getEnterpriseEmployeePage({
+    departmentId,
+    page: 1,
+    pageSize: 200,
+    status: 'active',
+  });
+  managerEmployees.value = result.items;
 }
 
 async function loadData() {
@@ -132,18 +160,21 @@ function resetForm() {
     contactPhone: '',
     departmentCode: '',
     departmentName: '',
+    managerEmployeeId: undefined,
     managerName: '',
     parentId: undefined,
     remark: '',
     sortOrder: 0,
     status: 'active',
   });
+  managerEmployees.value = [];
 }
 
 async function openCreateModal() {
   editingId.value = undefined;
   resetForm();
   await loadDepartmentOptions();
+  await loadManagerEmployees();
   modalOpen.value = true;
 }
 
@@ -153,6 +184,7 @@ async function openEditModal(record: EnterpriseDepartmentApi.Item) {
     contactPhone: record.contactPhone || '',
     departmentCode: record.departmentCode || '',
     departmentName: record.departmentName,
+    managerEmployeeId: record.managerEmployeeId,
     managerName: record.managerName || '',
     parentId: record.parentId,
     remark: record.remark || '',
@@ -160,6 +192,7 @@ async function openEditModal(record: EnterpriseDepartmentApi.Item) {
     status: record.status,
   });
   await loadDepartmentOptions();
+  await loadManagerEmployees(record.id);
   modalOpen.value = true;
 }
 
@@ -173,12 +206,18 @@ function buildSaveParams(): EnterpriseDepartmentApi.SaveParams {
     contactPhone: clean(formState.contactPhone),
     departmentCode: clean(formState.departmentCode),
     departmentName: formState.departmentName.trim(),
+    managerEmployeeId: formState.managerEmployeeId,
     managerName: clean(formState.managerName),
     parentId: formState.parentId,
     remark: clean(formState.remark),
     sortOrder: Number(formState.sortOrder || 0),
     status: formState.status,
   };
+}
+
+function handleManagerChange(value: unknown) {
+  const managerId = typeof value === 'number' ? value : undefined;
+  formState.managerName = managerEmployeeOptions.value.find((item) => item.value === managerId)?.label || '';
 }
 
 async function saveDepartment() {
@@ -380,10 +419,18 @@ onMounted(async () => {
         </div>
         <div class="department-form-row">
           <Form.Item label="负责人">
+            <Select
+              v-if="editingId"
+              v-model:value="formState.managerEmployeeId"
+              allow-clear
+              :options="managerEmployeeOptions"
+              placeholder="请选择本部门负责人"
+              @change="handleManagerChange"
+            />
             <Input
-              v-model:value="formState.managerName"
-              :maxlength="80"
-              placeholder="请输入部门负责人"
+              v-else
+              disabled
+              placeholder="请先保存部门，再选择本部门负责人"
             />
           </Form.Item>
           <Form.Item label="联系电话">

@@ -48,7 +48,7 @@ interface EmployeeOption {
 }
 
 const columns = [
-  { dataIndex: 'id', key: 'id', title: '规则ID', width: 92 },
+  { key: 'sequence', title: '序号', width: 72 },
   {
     dataIndex: 'categoryName',
     key: 'categoryName',
@@ -449,8 +449,10 @@ onBeforeUnmount(() => {
         size="small"
         @change="handleTableChange"
       >
-        <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'id'">{{ record.id }}</template>
+        <template #bodyCell="{ column, record, index }">
+          <template v-if="column.key === 'sequence'">
+            {{ (Number(query.page) - 1) * Number(query.pageSize) + index + 1 }}
+          </template>
           <template v-else-if="column.key === 'defaultCreditLimit'">
             {{ formatMoney(record.defaultCreditLimit) }}
           </template>

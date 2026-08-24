@@ -10,7 +10,7 @@ import {
   Input,
   InputNumber,
   Modal,
-  Segmented,
+  Radio,
   Select,
   Space,
   Table,
@@ -89,6 +89,10 @@ const resourceQuoteModeOptions: SelectOption<QuoteConfigApi.ResourceQuoteMode>[]
   { label: '按固定加价报价', value: 'fixed' },
   { label: '两种方式都可以报价', value: 'both' },
 ];
+const approvalModeOptions: SelectOption<QuoteConfigApi.ApprovalMode>[] = [
+  { label: '当前账号直属领导（部门负责人）', value: 'department_manager' },
+  { label: '指定人员', value: 'specified_person' },
+];
 
 const resourceRows = ref<QuoteConfigApi.ResourceRule[]>([]);
 const guideLevelRows = ref<QuoteConfigApi.GuideLevel[]>([]);
@@ -134,6 +138,7 @@ const groundForm = reactive<QuoteConfigApi.GroundAgentRuleSaveParams>({
   status: 'active',
 });
 const approvalForm = reactive<QuoteConfigApi.ApprovalConfig>({
+  approvalMode: 'specified_person',
   approvers: [],
   ccUsers: [],
 });
@@ -280,6 +285,7 @@ async function loadApprovalConfig() {
   approvalLoading.value = true;
   try {
     const result = await getQuoteApprovalConfig();
+    approvalForm.approvalMode = result.approvalMode || 'specified_person';
     approvalForm.approvers = result.approvers || [];
     approvalForm.ccUsers = result.ccUsers || [];
     mergeApprovalEmployeeOptions(result);
@@ -512,7 +518,10 @@ async function saveApproval() {
   saving.value = true;
   try {
     await saveQuoteApprovalConfig({
-      approvers: approvalApproverValues.value.map((item) => ({ systemUserId: item.value })),
+      approvalMode: approvalForm.approvalMode,
+      approvers: approvalForm.approvalMode === 'specified_person'
+        ? approvalApproverValues.value.map((item) => ({ systemUserId: item.value }))
+        : [],
       ccUsers: approvalCcValues.value.map((item) => ({ systemUserId: item.value })),
     });
     message.success('保存成功');
@@ -717,7 +726,17 @@ onMounted(async () => {
 
         <Tabs.TabPane key="approval" tab="审批配置">
           <Form class="quote-approval-form" layout="vertical">
-            <Form.Item label="审批人（按顺序）" required>
+            <Form.Item label="审批方式" required>
+              <Radio.Group v-model:value="approvalForm.approvalMode">
+                <Radio v-for="option in approvalModeOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </Radio>
+              </Radio.Group>
+            </Form.Item>
+            <div v-if="approvalForm.approvalMode === 'department_manager'" class="quote-approval-help quote-approval-manager-hint">
+              提交报价审批时，系统自动取当前登录账号所属部门的负责人；这里不需要设置审批级数，也不填写固定姓名。
+            </div>
+            <Form.Item v-else label="指定审批人员（按顺序）" required>
               <Select
                 v-model:value="approvalApproverValues"
                 mode="multiple"
@@ -725,10 +744,10 @@ onMounted(async () => {
                 :options="employeeOptions"
                 :field-names="{ label: 'label', value: 'value' }"
                 :loading="approvalLoading"
-                placeholder="请选择低价审批人"
+                placeholder="请选择具体审批人员"
               />
             </Form.Item>
-            <Form.Item label="抄送人">
+            <Form.Item label="固定抄送人">
               <Select
                 v-model:value="approvalCcValues"
                 mode="multiple"
@@ -736,7 +755,7 @@ onMounted(async () => {
                 :options="employeeOptions"
                 :field-names="{ label: 'label', value: 'value' }"
                 :loading="approvalLoading"
-                placeholder="请选择审批通过后的抄送人"
+                placeholder="请选择审批通过后固定抄送的人员"
               />
             </Form.Item>
             <Space>
@@ -760,18 +779,22 @@ onMounted(async () => {
             <Select v-model:value="resourceForm.status" :options="statusOptions" />
           </Form.Item>
           <Form.Item class="quote-form-grid-span-all" label="报价方式" required>
-            <Segmented v-model:value="resourceForm.quoteMode" :options="resourceQuoteModeOptions" />
+            <Radio.Group v-model:value="resourceForm.quoteMode" class="quote-mode-radio-group">
+              <Radio v-for="option in resourceQuoteModeOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </Radio>
+            </Radio.Group>
           </Form.Item>
-          <Form.Item v-if="resourceForm.quoteMode !== 'fixed'" label="建议比例上浮">
+          <Form.Item label="建议比例上浮">
             <InputNumber v-model:value="resourceForm.suggestedMarkupRate" :min="0" :step="0.01" addon-after="%" style="width: 100%" />
           </Form.Item>
-          <Form.Item v-if="resourceForm.quoteMode !== 'fixed'" label="最低比例上浮">
+          <Form.Item label="最低比例上浮">
             <InputNumber v-model:value="resourceForm.minimumMarkupRate" :min="0" :step="0.01" addon-after="%" style="width: 100%" />
           </Form.Item>
-          <Form.Item v-if="resourceForm.quoteMode !== 'rate'" label="建议固定加价">
+          <Form.Item label="建议固定加价">
             <InputNumber v-model:value="resourceForm.suggestedFixedMarkup" :min="0" addon-before="¥" style="width: 100%" />
           </Form.Item>
-          <Form.Item v-if="resourceForm.quoteMode !== 'rate'" label="最低固定加价">
+          <Form.Item label="最低固定加价">
             <InputNumber v-model:value="resourceForm.minimumFixedMarkup" :min="0" addon-before="¥" style="width: 100%" />
           </Form.Item>
         </div>
@@ -865,7 +888,31 @@ onMounted(async () => {
   grid-column: 1 / -1;
 }
 
+.quote-mode-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 24px;
+  min-height: 32px;
+}
+
+.quote-mode-radio-group :deep(.ant-radio-wrapper) {
+  margin-inline-end: 0;
+  color: #262626;
+  font-weight: 400;
+}
+
 .quote-approval-form {
   max-width: 760px;
+}
+
+.quote-approval-help {
+  margin-top: 6px;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.quote-approval-manager-hint {
+  margin: -4px 0 20px;
 }
 </style>
