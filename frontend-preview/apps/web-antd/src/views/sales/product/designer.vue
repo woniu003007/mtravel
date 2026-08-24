@@ -34,24 +34,37 @@ import {
   getAmapJsConfig,
 } from '#/api/sales/product';
 import {
+  changeSalesProductDesignerDayResourceSupplier,
   deleteSalesProductDesignerDayResource,
+  deleteSalesProductDesignerVehicleArrangement,
   getSalesProductDesignerDetail,
   getSalesProductDesignerDayWordPlan,
   getSalesProductDesignerDocuments,
   getSalesProductDesignerResourceDetail,
   getSalesProductDesignerResources,
+  getSalesProductDesignerVehicleResources,
   downloadSalesProductDesignerDocument,
   generateSalesProductDesignerAdultQuote,
   generateSalesProductDesignerProductWord,
   previewSalesProductDesignerDocument,
   publishSalesProductDesignerDraft,
   reorderSalesProductDesignerDayResources,
+  reorderSalesProductDesignerVehicleArrangements,
   saveSalesProductDesignerAdultQuote,
   saveSalesProductDesignerDayResource,
+  saveSalesProductDesignerDayDestination,
+  saveSalesProductDesignerVehicleArrangement,
   saveSalesProductDesignerDayWordPlan,
   type SalesProductDesignerApi,
 } from '#/api/sales/product-designer';
 import ProductResourceMapWorkspace from './components/ProductResourceMapWorkspace.vue';
+import ProductDesignerDayArrangementPanel from './components/ProductDesignerDayArrangementPanel.vue';
+import ProductDesignerVehicleArrangementPanel from './components/ProductDesignerVehicleArrangementPanel.vue';
+import { resolveArrangementTarget } from './components/product-designer-arrangement-utils';
+import {
+  buildProductResourceMarkerHtml,
+  productResourceMarkerZIndex,
+} from './components/product-resource-map-marker';
 import {
   buildWordPlanImageSavePayload,
   validateWordPlanImageSelections,
@@ -68,8 +81,6 @@ const resourceTypeOptions = [
   { label: '酒店', value: 'hotel' },
   { label: '餐厅', value: 'restaurant' },
   { label: '购物', value: 'shopping' },
-  { label: '用车', value: 'vehicle' },
-  { label: '地接', value: 'ground_agent' },
   { label: '其它', value: 'other' },
 ];
 const scenicLevelOptions = [
@@ -91,6 +102,8 @@ const provinceOptions = regionOptions.map(({ label, value }) => ({ label, value 
 
 const detail = ref<SalesProductDesignerApi.Detail>();
 const documents = ref<SalesProductDesignerApi.DocumentVersion[]>([]);
+const documentHistoryOpen = ref(false);
+const documentPreviewOpen = ref(false);
 const productWordPreviewUrl = ref('');
 const productWordPreviewVersion = ref<SalesProductDesignerApi.DocumentVersion>();
 const productWordPreviewLoading = ref(false);
@@ -98,6 +111,7 @@ const productWordPreviewError = ref('');
 const productWordGenerating = ref(false);
 const productWordPreviewDirty = ref(false);
 const resources = ref<SalesProductDesignerApi.MapResource[]>([]);
+const supplierCandidatesByResourceId = ref<Record<number, SalesProductDesignerApi.Supplier[]>>({});
 const selectedResource = ref<SalesProductDesignerApi.ResourceDetail>();
 const selectedDayResource = ref<SalesProductDesignerApi.DayResource>();
 const openingResourceId = ref<number>();
@@ -111,6 +125,7 @@ const mapLoading = ref(false);
 const mapError = ref('');
 const mapFullscreenOpen = ref(false);
 const selectedMapResourceId = ref<number>();
+const highlightedDayResourceId = ref<number>();
 const loadError = ref('');
 const drawerOpen = ref(false);
 const supplierConfigOpen = ref(false);
@@ -118,11 +133,29 @@ const wordPlanOpen = ref(false);
 const wordPlanLoading = ref(false);
 const wordPlanSaving = ref(false);
 const hotelBreakfastSaving = ref(false);
+const dayDestinationSaving = ref(false);
+const dayDestinationCityInput = ref('');
 const hotelSelectionTarget = ref<number>();
 const mealSelectionTarget = ref<'breakfast' | 'lunch' | 'dinner'>();
 const restaurantMealPickerOpen = ref(false);
 const restaurantMealPickerResource = ref<SalesProductDesignerApi.MapResource>();
 const restaurantMealPickerRole = ref<'breakfast' | 'lunch' | 'dinner'>();
+const vehicleArrangementOpen = ref(false);
+const vehicleArrangementSaving = ref(false);
+const vehicleResourceLoading = ref(false);
+const vehicleResourceKeyword = ref('');
+const vehicleResources = ref<SalesProductDesignerApi.VehicleResource[]>([]);
+const vehicleSupplierCandidates = ref<SalesProductDesignerApi.Supplier[]>([]);
+const vehicleForm = reactive({
+  endDayNo: undefined as number | undefined,
+  id: undefined as number | undefined,
+  quantity: 1,
+  remark: '',
+  resourceId: undefined as number | undefined,
+  startDayNo: undefined as number | undefined,
+  supplierRelationId: undefined as number | undefined,
+  vehicleType: '',
+});
 const quoteOpen = ref(false);
 const previewOpen = ref(false);
 const introPreview = ref<SalesProductDesignerApi.Introduction>();
@@ -130,7 +163,6 @@ const activeDayNo = ref(1);
 const resourcePage = ref(1);
 const resourceTotal = ref(0);
 const draggedResource = ref<SalesProductDesignerApi.MapResource>();
-const draggedPlanIndex = ref<number>();
 const mapContainer = ref<HTMLDivElement>();
 let amap: any;
 let amapMarkers: any[] = [];
@@ -145,7 +177,15 @@ let materialSortableVersion = 0;
 let wordPlanSortableVersion = 0;
 let productWordPreviewLoadVersion = 0;
 
-const filters = reactive<SalesProductDesignerApi.ResourceQuery>({ city: '杭州市', page: 1, pageSize: 100, province: '浙江省' });
+const latestProductDocument = computed(() => documents.value.find(
+  (item) => item.documentType === 'product_word' && item.generateStatus === 'success',
+) || documents.value.find((item) => item.documentType === 'product_word'));
+const historicalDocumentCount = computed(() => Math.max(
+  0,
+  documents.value.length - (latestProductDocument.value ? 1 : 0),
+));
+
+const filters = reactive<SalesProductDesignerApi.ResourceQuery>({ page: 1, pageSize: 100 });
 let previousProvince = filters.province;
 const citySearch = ref('');
 type MaterialEditorValue = SalesProductDesignerApi.SelectedMaterialSaveRequest & {
@@ -199,75 +239,50 @@ const cityOptions = computed(() => {
   return allCityOptions.filter((option) => option.value.replace(/市$/, '').toLowerCase().includes(keyword));
 });
 const activeDay = computed(() => detail.value?.days.find((item) => item.dayNo === activeDayNo.value));
+const activeDayDestination = computed(() => {
+  const day = activeDay.value;
+  if (!day?.destinationCity) return undefined;
+  return {
+    destinationCity: day.destinationCity,
+    destinationDistrict: day.destinationDistrict,
+    destinationProvince: day.destinationProvince,
+  };
+});
+const activeDayDestinationLabel = computed(() => activeDayDestination.value?.destinationCity || '未设置城市');
+const activeDayUsesProductCityFallback = computed(() => !activeDayDestination.value?.destinationCity && Boolean(detail.value?.city));
+const hasTemporaryMapCity = computed(() => Boolean(
+  activeDayDestination.value?.destinationCity && !sameCityName(filters.city, activeDayDestination.value.destinationCity),
+));
 const activeAccommodations = computed(() => activeDay.value?.resources
   .filter((item) => item.arrangementRole === 'accommodation') || []);
-const previousNightAccommodations = computed(() => detail.value?.days
-  .find((item) => item.dayNo === activeDayNo.value - 1)?.resources
-  .filter((item) => item.arrangementRole === 'accommodation') || []);
-const previousNightBreakfastHotels = computed(() => previousNightAccommodations.value
-  .filter((item) => item.hotelBreakfastIncluded));
+const activeAccommodation = computed(() => activeAccommodations.value[0]);
+const activeAccommodationHasCity = computed(() => Boolean(activeAccommodation.value?.city));
+const dayDestinationHint = computed(() => {
+  if (activeAccommodationHasCity.value) return '已跟随当晚酒店所在地自动设置';
+  if (activeDayUsesProductCityFallback.value) return `未安排酒店，地图暂按接团城市 ${detail.value?.city} 显示`;
+  return '未安排酒店时可手动填写';
+});
 const activeMealResources = computed<Record<'breakfast' | 'lunch' | 'dinner', SalesProductDesignerApi.DayResource | undefined>>(() => ({
   breakfast: activeDay.value?.resources.find((item) => item.arrangementRole === 'breakfast'),
   lunch: activeDay.value?.resources.find((item) => item.arrangementRole === 'lunch'),
   dinner: activeDay.value?.resources.find((item) => item.arrangementRole === 'dinner'),
 }));
+const activeBreakfastPlan = computed(() => {
+  const mealPlan = activeDay.value?.mealPlan;
+  if (!mealPlan) return undefined;
+  return {
+    hotelResourceNames: mealPlan.hotelSources.map((item) => item.resourceName),
+    source: mealPlan.source,
+  };
+});
+const activeArrangedResourceIds = computed(() => new Set(
+  (activeDay.value?.resources || []).map((item) => item.resourceId),
+));
 const mealRoleLabel: Record<'breakfast' | 'lunch' | 'dinner', string> = {
   breakfast: '早餐',
   dinner: '晚餐',
   lunch: '中餐',
 };
-const dayItinerarySummary = computed(() => {
-  const meals = (['breakfast', 'lunch', 'dinner'] as const)
-    .map((role) => activeMealResources.value[role]
-      ? `${mealRoleLabel[role]}：${activeMealResources.value[role]?.resourceName}`
-      : role === 'breakfast' && previousNightBreakfastHotels.value.length
-        ? `早餐：酒店含早（${previousNightBreakfastHotels.value.map((item) => item.resourceName).join('、')}）`
-        : '')
-    .filter(Boolean);
-  return {
-    hotel: activeAccommodations.value.map((item) => item.resourceName).join('、') || '未安排酒店',
-    meals: meals.length ? meals.join('；') : '未安排用餐',
-  };
-});
-type PlanResourceGroup = {
-  freeCount: number;
-  items: Array<{ index: number; item: SalesProductDesignerApi.DayResource }>;
-  key: string;
-  requiredCount: number;
-  resourceType: SalesProductDesignerApi.ResourceType;
-  title: string;
-  totalCost: number;
-};
-const planResourceGroups = computed<PlanResourceGroup[]>(() => {
-  const items = (activeDay.value?.resources || []).filter((item) => item.arrangementRole !== 'accommodation'
-    && item.arrangementRole !== 'breakfast'
-    && item.arrangementRole !== 'lunch'
-    && item.arrangementRole !== 'dinner');
-  const groups: PlanResourceGroup[] = [];
-  items.forEach((item, index) => {
-    const previous = groups[groups.length - 1];
-    if (!previous || previous.resourceType !== item.resourceType) {
-      groups.push({
-        freeCount: 0,
-        items: [],
-        key: `${item.resourceType}-${index}`,
-        requiredCount: 0,
-        resourceType: item.resourceType,
-        title: item.resourceType === 'scenic'
-          ? '景区组合'
-          : `${typeLabel[item.resourceType] || item.resourceType}安排`,
-        totalCost: 0,
-      });
-    }
-    const group = groups.at(-1);
-    if (!group) return;
-    group.items.push({ index, item });
-    group.totalCost += Number(item.costAmount || 0);
-    if (item.procurementMode === 'not_required') group.freeCount += 1;
-    else group.requiredCount += 1;
-  });
-  return groups;
-});
 const scenicWordPlanSummary = computed(() => {
   const scenic = activeDay.value?.resources.filter((item) => item.resourceType === 'scenic') || [];
   const selectedCount = scenic.reduce((total, item) => total + (item.selectedMaterials?.length || 0), 0);
@@ -432,6 +447,12 @@ function formatMoney(value?: number) {
   return `¥${Number(value || 0).toFixed(2)}`;
 }
 
+function supplierPriceText(supplier: SalesProductDesignerApi.Supplier) {
+  return supplier.priceMode === 'pending' && supplier.referenceUnitPrice === 0
+    ? '待询价'
+    : formatMoney(supplier.referenceUnitPrice);
+}
+
 function formatYuanPerPerson(value?: number) {
   return `${Number(value || 0).toFixed(2)}元/人`;
 }
@@ -518,6 +539,90 @@ function onCityChange(value: unknown) {
   syncProvinceFromCity(typeof value === 'string' ? value : undefined);
 }
 
+/** 将当晚住宿城市同步为默认地图范围；用户仍可用下方筛选临时查看其它城市。 */
+function syncMapFiltersToActiveDay() {
+  const destination = activeDayDestination.value;
+  const province = destination?.destinationProvince || detail.value?.province;
+  const city = destination?.destinationCity || detail.value?.city;
+  if (filters.province === province && sameCityName(filters.city, city)) return;
+  filters.province = province;
+  filters.city = city;
+  previousProvince = province;
+  citySearch.value = '';
+}
+
+/** 保存当晚住宿城市；异地已编排资源只保留快照，不会随着地图范围切换被删除。 */
+async function persistDayDestination(
+  destination: { city?: string; district?: string; province?: string },
+  options: { dayNo?: number; showSuccess?: boolean } = {},
+) {
+  if (!destination.city) return;
+  if (!productId.value || dayDestinationSaving.value) return;
+  const targetDayNo = options.dayNo || activeDayNo.value;
+  dayDestinationSaving.value = true;
+  try {
+    const saved = await saveSalesProductDesignerDayDestination({
+      dayNo: targetDayNo,
+      destinationCity: destination.city,
+      destinationDistrict: destination.district,
+      destinationProvince: destination.province,
+      productId: productId.value,
+    });
+    const day = detail.value?.days.find((item) => item.dayNo === targetDayNo);
+    if (day) {
+      day.destinationProvince = saved.destinationProvince;
+      day.destinationCity = saved.destinationCity;
+      day.destinationDistrict = saved.destinationDistrict;
+    }
+    if (targetDayNo === activeDayNo.value) dayDestinationCityInput.value = saved.destinationCity;
+    syncMapFiltersToActiveDay();
+    if (options.showSuccess !== false) message.success(`已将 D${targetDayNo} 当晚住宿城市设为${saved.destinationCity}`);
+    return true;
+  } catch (error) {
+    message.error(designerErrorMessage(error, '当晚住宿城市保存失败，请稍后重试'));
+    return false;
+  } finally {
+    dayDestinationSaving.value = false;
+  }
+}
+
+/** 工作台允许直接输入城市；命中地区库时自动补齐标准城市名和省份。 */
+async function saveManualDayDestination() {
+  if (activeAccommodationHasCity.value) return;
+  const inputCity = dayDestinationCityInput.value.trim();
+  if (!inputCity) {
+    dayDestinationCityInput.value = activeDayDestination.value?.destinationCity || '';
+    message.warning('请输入当晚住宿城市');
+    return;
+  }
+  const matchedProvince = regionOptions.find((province) =>
+    province.children?.some((city) => sameCityName(city.value, inputCity)),
+  );
+  const matchedCity = matchedProvince?.children?.find((city) => sameCityName(city.value, inputCity));
+  const destinationCity = matchedCity?.value || inputCity;
+  if (
+    sameCityName(destinationCity, activeDayDestination.value?.destinationCity)
+    && matchedProvince?.value === activeDayDestination.value?.destinationProvince
+  ) {
+    dayDestinationCityInput.value = activeDayDestination.value?.destinationCity || destinationCity;
+    return;
+  }
+  await persistDayDestination({
+    city: destinationCity,
+    province: matchedProvince?.value,
+  });
+}
+
+/** 安排或更换酒店后，住宿城市始终跟随酒店资源主档。 */
+async function syncDayDestinationFromHotel(resource: Pick<SalesProductDesignerApi.MapResource, 'city' | 'district' | 'province'>, dayNo: number) {
+  if (!resource.city) return false;
+  return Boolean(await persistDayDestination({
+    city: resource.city,
+    district: resource.district,
+    province: resource.province,
+  }, { dayNo, showSuccess: false }));
+}
+
 function onResourceTypeChange() {
   // 等级字段只属于对应资源类型，切换类型时不能把旧筛选条件带到下一次查询。
   filters.scenicLevel = undefined;
@@ -534,25 +639,39 @@ function selectMapResource(resourceId: number) {
 /** 点击资源即进入对应编排区；餐厅额外弹出餐次选择，避免系统猜测早中晚。 */
 function activateMapResource(resource: SalesProductDesignerApi.MapResource) {
   selectMapResource(resource.id);
-  if (resource.resourceType === 'restaurant' && !mealSelectionTarget.value) {
+  const target = resolveArrangementTarget(resource.resourceType);
+  if ('unsupportedInDayMap' in target) {
+    message.info(resource.resourceType === 'ground_agent'
+      ? '地接服务请在真实团队安排阶段配置'
+      : '用车请在产品级全程用车区域安排，不进入当天地图');
+    return;
+  }
+  if ('requiresMealSelection' in target) {
+    if (mealSelectionTarget.value) {
+      void addResource(resource, activeDayNo.value, mealSelectionTarget.value);
+      return;
+    }
     restaurantMealPickerResource.value = resource;
     restaurantMealPickerRole.value = undefined;
     restaurantMealPickerOpen.value = true;
     return;
   }
-  const arrangementRole = resource.resourceType === 'hotel'
-    ? 'accommodation'
-    : resource.resourceType === 'restaurant'
-      ? mealSelectionTarget.value
-      : 'itinerary';
-  if (!arrangementRole) {
-    message.info('请先在右侧选择要安排的早餐、中餐或晚餐');
+  const alreadyArranged = activeDay.value?.resources.some(
+    (item) => item.resourceId === resource.id && item.arrangementRole === target.role,
+  );
+  if (alreadyArranged && !target.allowRepeat) {
+    highlightedDayResourceId.value = activeDay.value?.resources.find(
+      (item) => item.resourceId === resource.id && item.arrangementRole === target.role,
+    )?.id;
+    message.info('该资源已安排到当前区块');
     return;
   }
-  const alreadyArranged = activeDay.value?.resources.some(
-    (item) => item.resourceId === resource.id && item.arrangementRole === arrangementRole,
+  void addResource(
+    resource,
+    activeDayNo.value,
+    target.role,
+    target.role === 'accommodation' ? activeAccommodation.value : undefined,
   );
-  if (!alreadyArranged) void addResourceForArrangement(resource);
 }
 
 function confirmRestaurantMeal() {
@@ -565,7 +684,7 @@ function confirmRestaurantMeal() {
   mealSelectionTarget.value = role;
   restaurantMealPickerOpen.value = false;
   restaurantMealPickerResource.value = undefined;
-  void addResourceForArrangement(resource);
+  void addResource(resource, activeDayNo.value, role);
 }
 
 function openMapFullscreen() {
@@ -655,7 +774,10 @@ async function loadDetail() {
   try {
     detail.value = await getSalesProductDesignerDetail(productId.value);
     if (!detail.value.days.some((item) => item.dayNo === activeDayNo.value)) activeDayNo.value = 1;
+    syncMapFiltersToActiveDay();
     syncQuoteForm();
+    await nextTick();
+    void renderMap();
   } catch (error) {
     detail.value = undefined;
     loadError.value = designerErrorMessage(error, '工作台数据加载失败，请稍后重试');
@@ -779,13 +901,17 @@ async function renderMap() {
     amapMarkers.forEach((marker) => amap.remove(marker));
     amapMarkers = mapResources.value.map((item) => {
       const selected = item.id === selectedMapResourceId.value;
+      const arranged = activeArrangedResourceIds.value.has(item.id);
       const marker = new AMap.Marker({
+        content: buildProductResourceMarkerHtml(item, {
+          arranged,
+          pending: item.procurementMode !== 'not_required' && !item.defaultSupplierId,
+          selected,
+        }),
+        offset: new AMap.Pixel(-12, -30),
         position: [item.longitude, item.latitude],
         title: item.resourceName,
-        label: {
-          content: `<span class="designer-map-label${selected ? ' is-selected' : ''}">${item.resourceName}</span>`,
-          direction: 'top',
-        },
+        zIndex: productResourceMarkerZIndex({ arranged, selected }),
       });
       marker.on('click', () => activateMapResource(item));
       amap.add(marker);
@@ -1635,7 +1761,15 @@ async function addSelectedResource(dayNo = activeDayNo.value) {
       })),
       supplierId: editor.supplierId,
     });
-    message.success(selectedDayResource.value ? '资源编排已更新' : `已安排${resourceArrangementLabel(selectedResource.value.resourceType, arrangementRole)}`);
+    const citySynced = arrangementRole === 'accommodation'
+      ? await syncDayDestinationFromHotel(selectedResource.value, dayNo)
+      : false;
+    message.success(selectedDayResource.value
+      ? `资源编排已更新${citySynced ? `，住宿城市已同步为${selectedResource.value.city}` : ''}`
+      : `已安排${resourceArrangementLabel(selectedResource.value.resourceType, arrangementRole)}${citySynced ? `，住宿城市已同步为${selectedResource.value.city}` : ''}`);
+    if (arrangementRole === 'accommodation' && !selectedResource.value.city) {
+      message.warning('该酒店未维护所在城市，请手动填写住宿城市');
+    }
     drawerOpen.value = false;
     clearArrangementSelection();
     await loadDetail();
@@ -1657,7 +1791,7 @@ function resourceArrangementLabel(
 }
 
 function resourceActionLabel(resource: SalesProductDesignerApi.MapResource) {
-  if (resource.resourceType === 'hotel') return activeAccommodations.value.length ? '继续安排酒店' : '安排住宿';
+  if (resource.resourceType === 'hotel') return activeAccommodation.value ? '更换住宿' : '安排住宿';
   if (resource.resourceType === 'restaurant') {
     return mealSelectionTarget.value ? `安排${mealRoleLabel[mealSelectionTarget.value]}` : '安排用餐';
   }
@@ -1683,21 +1817,36 @@ async function startMealSelection(role: 'breakfast' | 'lunch' | 'dinner') {
   await loadResources(true);
 }
 
+async function startItinerarySelection() {
+  clearArrangementSelection();
+  filters.resourceType = undefined;
+  await loadResources(true);
+}
+
 async function addResourceForArrangement(resource: SalesProductDesignerApi.MapResource) {
-  const dayNo = hotelSelectionTarget.value || activeDayNo.value;
-  const arrangementRole: SalesProductDesignerApi.ArrangementRole = resource.resourceType === 'hotel'
-    ? 'accommodation'
-    : resource.resourceType === 'restaurant'
-      ? mealSelectionTarget.value || 'unassigned'
-      : 'itinerary';
-  if (resource.resourceType === 'restaurant' && arrangementRole === 'unassigned') {
-    message.info('请先在右侧选择要安排的早餐、中餐或晚餐');
+  const target = resolveArrangementTarget(resource.resourceType);
+  if ('unsupportedInDayMap' in target) {
+    message.info(resource.resourceType === 'ground_agent'
+      ? '地接服务请在真实团队安排阶段配置'
+      : '用车请在产品级全程用车区域安排');
     return;
   }
-  const replacing = arrangementRole === 'breakfast' || arrangementRole === 'lunch' || arrangementRole === 'dinner'
-      ? activeMealResources.value[arrangementRole]
-      : undefined;
-  await addResource(resource, dayNo, arrangementRole, replacing);
+  if ('requiresMealSelection' in target) {
+    if (!mealSelectionTarget.value) {
+      restaurantMealPickerResource.value = resource;
+      restaurantMealPickerRole.value = undefined;
+      restaurantMealPickerOpen.value = true;
+      return;
+    }
+    await addResource(resource, activeDayNo.value, mealSelectionTarget.value);
+    return;
+  }
+  await addResource(
+    resource,
+    hotelSelectionTarget.value || activeDayNo.value,
+    target.role,
+    target.role === 'accommodation' ? activeAccommodation.value : undefined,
+  );
 }
 
 async function addResource(
@@ -1705,23 +1854,46 @@ async function addResource(
   dayNo = activeDayNo.value,
   arrangementRole: SalesProductDesignerApi.ArrangementRole = 'itinerary',
   replacing?: SalesProductDesignerApi.DayResource,
+  replaceBreakfastSource = false,
 ) {
   if (addingResourceIds.value.has(resource.id)) return;
+  const resolvedReplacing = replacing || (
+    arrangementRole === 'breakfast' || arrangementRole === 'lunch' || arrangementRole === 'dinner'
+      ? activeMealResources.value[arrangementRole]
+      : undefined
+  );
+  if (arrangementRole === 'breakfast' && activeBreakfastPlan.value?.source === 'hotel' && !replaceBreakfastSource) {
+    Modal.confirm({
+      content: '将改为外部早餐，并取消前一晚酒店的含次日早餐。是否继续？',
+      okText: '确认替换',
+      onOk: () => addResource(resource, dayNo, arrangementRole, resolvedReplacing, true),
+      title: '确认替换早餐来源',
+    });
+    return;
+  }
   addingResourceIds.value = new Set(addingResourceIds.value).add(resource.id);
   try {
     await saveSalesProductDesignerDayResource({
       arrangementRole,
       dayNo,
-      hotelBreakfastIncluded: replacing?.hotelBreakfastIncluded,
-      id: replacing?.id,
+      hotelBreakfastIncluded: resolvedReplacing?.hotelBreakfastIncluded,
+      id: resolvedReplacing?.id,
       productId: productId.value,
+      replaceBreakfastSource,
       resourceId: resource.id,
       selectedMaterials: [],
       supplierId: resource.defaultSupplierId,
     });
-    message.success(`已${replacing ? '更换' : '安排'}${resourceArrangementLabel(resource.resourceType, arrangementRole)}`);
+    const citySynced = arrangementRole === 'accommodation'
+      ? await syncDayDestinationFromHotel(resource, dayNo)
+      : false;
+    message.success(`已${resolvedReplacing ? '更换' : '安排'}${resourceArrangementLabel(resource.resourceType, arrangementRole)}${citySynced ? `，住宿城市已同步为${resource.city}` : ''}`);
+    if (arrangementRole === 'accommodation' && !resource.city) {
+      message.warning('该酒店未维护所在城市，请手动填写住宿城市');
+    }
     clearArrangementSelection();
     await loadDetail();
+    highlightedDayResourceId.value = undefined;
     await generateProductWordPreviewVersion();
   } catch {
     // 请求层已统一展示接口错误；这里不再重复弹出同一条提示。
@@ -1739,19 +1911,150 @@ async function deletePlan(item: SalesProductDesignerApi.DayResource) {
   await generateProductWordPreviewVersion();
 }
 
-async function reorderPlan(from: number, to: number) {
-  const items = activeDay.value?.resources ? [...activeDay.value.resources] : [];
-  if (to < 0 || to >= items.length || from === to) return;
-  const [moved] = items.splice(from, 1);
-  if (!moved) return;
-  items.splice(to, 0, moved);
+async function changeDayResourceSupplier(row: SalesProductDesignerApi.DayResource, supplierRelationId: number) {
+  await changeSalesProductDesignerDayResourceSupplier({
+    dayResourceId: row.id,
+    productId: productId.value,
+    supplierRelationId,
+  });
+  message.success(`已更新“${row.resourceName}”的供应商和成本快照`);
+  await loadDetail();
+}
+
+/** 只在用户点开“更换供应商”时读取该资源候选，避免打开产品页就批量请求。 */
+async function loadDayResourceSupplierCandidates(resourceId: number) {
+  if (supplierCandidatesByResourceId.value[resourceId]) return;
+  const resource = await getSalesProductDesignerResourceDetail(resourceId);
+  supplierCandidatesByResourceId.value = {
+    ...supplierCandidatesByResourceId.value,
+    [resourceId]: resource.suppliers,
+  };
+}
+
+async function reorderDayArrangement(
+  arrangementRole: 'accommodation' | 'ground_service' | 'itinerary',
+  dayResourceIds: number[],
+) {
   await reorderSalesProductDesignerDayResources({
+    arrangementRole,
     dayNo: activeDayNo.value,
-    dayResourceIds: items.map((item) => item.id),
+    dayResourceIds,
     productId: productId.value,
   });
   await loadDetail();
-  await generateProductWordPreviewVersion();
+}
+
+function resetVehicleForm(item?: SalesProductDesignerApi.VehicleArrangement) {
+  const travelDays = detail.value?.travelDays || 1;
+  vehicleForm.id = item?.id;
+  vehicleForm.resourceId = item?.resourceId;
+  vehicleForm.supplierRelationId = item?.supplierRelationId;
+  vehicleForm.vehicleType = item?.vehicleType || '';
+  vehicleForm.startDayNo = item?.startDayNo ?? 1;
+  vehicleForm.endDayNo = item?.endDayNo ?? travelDays;
+  vehicleForm.quantity = item?.quantity || 1;
+  vehicleForm.remark = item?.remark || '';
+  vehicleSupplierCandidates.value = [];
+}
+
+async function loadVehicleResources(keyword = vehicleResourceKeyword.value) {
+  const cleanKeyword = keyword.trim();
+  // 服务端同样限制 2 个字符；保留已有候选，避免输入第一个字时清空选择器。
+  if (cleanKeyword && cleanKeyword.length < 2) return;
+  vehicleResourceLoading.value = true;
+  try {
+    const result = await getSalesProductDesignerVehicleResources({
+      keyword: cleanKeyword || undefined,
+      page: 1,
+      pageSize: 50,
+    });
+    vehicleResources.value = result.items;
+    const selected = vehicleResources.value.find((item) => item.id === vehicleForm.resourceId);
+    if (selected) vehicleForm.vehicleType = selected.resourceName;
+  } finally {
+    vehicleResourceLoading.value = false;
+  }
+}
+
+async function loadVehicleSupplierCandidates(resourceId?: number) {
+  if (!resourceId) {
+    vehicleSupplierCandidates.value = [];
+    return;
+  }
+  const resource = await getSalesProductDesignerResourceDetail(resourceId);
+  vehicleSupplierCandidates.value = resource.suppliers || [];
+}
+
+async function handleVehicleResourceChange(resourceId?: number) {
+  vehicleForm.supplierRelationId = undefined;
+  if (!resourceId) {
+    vehicleForm.vehicleType = '';
+    vehicleSupplierCandidates.value = [];
+    return;
+  }
+  const selected = vehicleResources.value.find((item) => item.id === resourceId);
+  vehicleForm.vehicleType = selected?.resourceName || '';
+  await loadVehicleSupplierCandidates(resourceId);
+}
+
+async function openVehicleArrangement(item?: SalesProductDesignerApi.VehicleArrangement) {
+  resetVehicleForm(item);
+  vehicleResourceKeyword.value = '';
+  vehicleArrangementOpen.value = true;
+  await loadVehicleResources();
+  if (item?.resourceId) await loadVehicleSupplierCandidates(item.resourceId);
+}
+
+async function saveVehicleArrangement() {
+  if (!vehicleForm.resourceId) {
+    message.warning('请选择用车资源');
+    return;
+  }
+  if (!vehicleForm.vehicleType.trim()) {
+    message.warning('请填写车型');
+    return;
+  }
+  vehicleArrangementSaving.value = true;
+  try {
+    await saveSalesProductDesignerVehicleArrangement({
+      endDayNo: vehicleForm.endDayNo,
+      id: vehicleForm.id,
+      productId: productId.value,
+      quantity: vehicleForm.quantity,
+      remark: vehicleForm.remark.trim() || undefined,
+      resourceId: vehicleForm.resourceId,
+      startDayNo: vehicleForm.startDayNo,
+      supplierRelationId: vehicleForm.supplierRelationId,
+      vehicleType: vehicleForm.vehicleType.trim(),
+    });
+    vehicleArrangementOpen.value = false;
+    message.success(vehicleForm.id ? '全程用车已更新' : '全程用车已安排');
+    await loadDetail();
+  } finally {
+    vehicleArrangementSaving.value = false;
+  }
+}
+
+function deleteVehicleArrangement(item: SalesProductDesignerApi.VehicleArrangement) {
+  Modal.confirm({
+    content: `将移除“${item.resourceName}”这条全程用车安排，是否继续？`,
+    okButtonProps: { danger: true },
+    okText: '移除',
+    onOk: async () => {
+      await deleteSalesProductDesignerVehicleArrangement({
+        productId: productId.value,
+        vehicleArrangementId: item.id,
+      });
+      message.success('已移除全程用车');
+      await loadDetail();
+    },
+    title: '确认移除全程用车',
+  });
+}
+
+async function reorderVehicleArrangements(vehicleArrangementIds: number[]) {
+  await reorderSalesProductDesignerVehicleArrangements({ productId: productId.value, vehicleArrangementIds });
+  await loadDetail();
 }
 
 function showPreview(introduction?: SalesProductDesignerApi.Introduction) {
@@ -1778,14 +2081,6 @@ async function saveQuote() {
 }
 
 async function saveHotelBreakfast(hotel: SalesProductDesignerApi.DayResource, included: boolean) {
-  const nextDayNo = activeDayNo.value + 1;
-  const nextDayBreakfast = detail.value?.days
-    .find((item) => item.dayNo === nextDayNo)?.resources
-    .find((item) => item.arrangementRole === 'breakfast');
-  if (included && nextDayBreakfast) {
-    message.warning(`D${nextDayNo} 早餐已安排“${nextDayBreakfast.resourceName}”，请先移除或更换该餐厅`);
-    return;
-  }
   hotelBreakfastSaving.value = true;
   try {
     await saveSalesProductDesignerDayResource({
@@ -1794,11 +2089,29 @@ async function saveHotelBreakfast(hotel: SalesProductDesignerApi.DayResource, in
       hotelBreakfastIncluded: included,
       id: hotel.id,
       productId: productId.value,
+      replaceBreakfastSource: false,
       resourceId: hotel.resourceId,
       supplierId: hotel.supplierId,
     });
     message.success(included ? '已标记为含次日早餐' : '已取消次日酒店早餐');
     await loadDetail();
+  } catch (error) {
+    if (included) {
+      Modal.confirm({
+        content: `将标记酒店含次日早餐，并清除 D${activeDayNo.value + 1} 已选外部早餐餐厅。是否继续？`,
+        okText: '确认替换',
+        onOk: async () => {
+          await saveSalesProductDesignerDayResource({
+            arrangementRole: 'accommodation', dayNo: activeDayNo.value, hotelBreakfastIncluded: true,
+            id: hotel.id, productId: productId.value, replaceBreakfastSource: true,
+            resourceId: hotel.resourceId, supplierId: hotel.supplierId,
+          });
+          message.success('已改为酒店含次日早餐');
+          await loadDetail();
+        },
+        title: '确认替换早餐来源',
+      });
+    }
   } finally {
     hotelBreakfastSaving.value = false;
   }
@@ -1946,6 +2259,21 @@ async function downloadProductWordPreview() {
   }
 }
 
+async function openDocumentPreview(version: SalesProductDesignerApi.DocumentVersion) {
+  if (version.documentType !== 'product_word' || version.generateStatus !== 'success') {
+    message.warning('只有生成成功的产品 Word 可在页面中预览');
+    return;
+  }
+  await loadProductWordPreview(version);
+  if (!productWordPreviewUrl.value) return;
+  documentHistoryOpen.value = false;
+  documentPreviewOpen.value = true;
+}
+
+function documentTypeText(version: SalesProductDesignerApi.DocumentVersion) {
+  return version.documentType === 'product_word' ? '产品介绍 Word' : '成人报价单';
+}
+
 function onResourceDragStart(resource: SalesProductDesignerApi.MapResource) {
   draggedResource.value = resource;
 }
@@ -1955,13 +2283,6 @@ async function onDayDrop(dayNo: number) {
     activeDayNo.value = dayNo;
     await addResourceForArrangement(draggedResource.value);
     draggedResource.value = undefined;
-  }
-}
-
-async function onPlanDrop(index: number) {
-  if (draggedPlanIndex.value != null) {
-    await reorderPlan(draggedPlanIndex.value, index);
-    draggedPlanIndex.value = undefined;
   }
 }
 
@@ -2002,7 +2323,15 @@ watch(() => [
 ], () => loadResources(true));
 watch(activeDayNo, () => {
   selectedDayResource.value = undefined;
+  syncMapFiltersToActiveDay();
 });
+watch(
+  () => [activeDayNo.value, activeDay.value?.destinationCity] as const,
+  ([, city]) => {
+    dayDestinationCityInput.value = city || '';
+  },
+  { immediate: true },
+);
 watch(
   () => editor.selectedMaterials.map((item) => `${item.materialType}:${item.introductionId || item.resourceOptionalItemId}:${item.salePrice ?? ''}`).join('|'),
   () => {
@@ -2023,15 +2352,6 @@ watch(
 onMounted(async () => {
   await loadStarLevelOptions();
   await loadDetail();
-  if (detail.value?.city) {
-    const matched = regionOptions
-      .flatMap((province) => (province.children || []).map((city) => ({ province: province.value, city: city.value })))
-      .find((option) => sameCityName(option.city, detail.value?.city));
-    if (matched) {
-      filters.province = matched.province;
-      filters.city = matched.city;
-    }
-  }
   if (detail.value) await loadDocuments();
   await loadResources(true);
   await nextTick();
@@ -2075,9 +2395,21 @@ onBeforeUnmount(() => {
         <div class="designer-summary">
           <div class="summary-item"><span class="summary-label">设计状态</span><Tag color="blue">设计中</Tag></div>
           <div class="summary-item"><span class="summary-label">行程天数</span><strong>{{ detail.travelDays }} 天</strong></div>
-          <div class="summary-item"><span class="summary-label">资源成本</span><strong class="cost">{{ formatMoney(currentCost) }}</strong></div>
+          <div class="summary-item"><span class="summary-label">日程资源成本</span><strong class="cost">{{ formatMoney(detail.dayResourceCostAmount) }}</strong></div>
+          <div class="summary-item"><span class="summary-label">全程用车成本</span><strong class="cost">{{ formatMoney(detail.vehicleCostAmount) }}</strong></div>
+          <div class="summary-item"><span class="summary-label">资源总成本</span><strong class="cost">{{ formatMoney(currentCost) }}</strong></div>
           <div class="summary-item summary-location"><span class="summary-label">接团城市</span>{{ areaText(detail) }}</div>
         </div>
+
+        <ProductDesignerVehicleArrangementPanel
+          :arrangements="detail.vehicleArrangements || []"
+          :total-cost="detail.vehicleCostAmount"
+          :travel-days="detail.travelDays"
+          @add="openVehicleArrangement()"
+          @edit="openVehicleArrangement"
+          @remove="deleteVehicleArrangement"
+          @reorder="reorderVehicleArrangements"
+        />
 
         <div class="day-switcher">
           <div class="day-switcher-label">
@@ -2098,14 +2430,39 @@ onBeforeUnmount(() => {
             >
               <span class="day-no">D{{ day.dayNo }}</span>
               <span class="day-count">{{ day.resources.length }} 项</span>
+              <span class="day-city" :class="{ 'is-empty': !day.destinationCity }">{{ day.destinationCity || '未设置城市' }}</span>
               <span class="day-cost">{{ formatMoney(day.dayCostAmount) }}</span>
             </Button>
+          </div>
+          <div class="day-destination-editor">
+            <div class="day-destination-editor-heading">
+              <span class="day-destination-title">
+                <IconifyIcon icon="lucide:map-pin" />
+                D{{ activeDayNo }} 住宿城市
+              </span>
+              <span class="day-destination-hint">{{ dayDestinationHint }}</span>
+            </div>
+            <div class="day-destination-editor-control">
+              <Input
+                v-model:value="dayDestinationCityInput"
+                aria-label="设置当晚住宿城市"
+                :disabled="dayDestinationSaving || activeAccommodationHasCity"
+                :maxlength="80"
+                :placeholder="activeAccommodationHasCity ? '跟随当晚酒店' : '输入城市，如无锡'"
+                :title="activeAccommodationHasCity ? '城市已跟随当晚酒店自动设置' : '输入城市后按回车保存'"
+                @blur="saveManualDayDestination"
+                @press-enter="saveManualDayDestination"
+              >
+                <template #suffix><Spin v-if="dayDestinationSaving" size="small" /></template>
+              </Input>
+              <Button v-if="hasTemporaryMapCity" size="small" type="link" @click="syncMapFiltersToActiveDay">恢复</Button>
+            </div>
           </div>
         </div>
 
         <div class="designer-grid">
 
-          <Card class="map-panel" :title="`资源地图 · D${activeDayNo}`">
+          <Card class="map-panel" :title="`资源地图 · D${activeDayNo} · ${activeDayDestinationLabel}`">
             <template #extra>
               <Space size="small">
                 <Tag color="blue">{{ mapResources.length }} 个点位</Tag>
@@ -2218,15 +2575,15 @@ onBeforeUnmount(() => {
 
           <ProductResourceMapWorkspace
             :active-day-no="activeDayNo"
-            :adding-resource-ids="addingResourceIds"
+            :arranged-resource-ids="activeArrangedResourceIds"
             :city-options="cityOptions"
+            :day-destination="activeDayDestination"
             :filters="filters"
             :map-resources="mapResources"
             :open="mapFullscreenOpen"
             :province-options="provinceOptions"
             :resource-loading="resourceLoading"
             :resource-total="resourceTotal"
-            :resource-action-label="resourceActionLabel"
             :resources="resources"
             :resource-type-options="resourceTypeOptions"
             :scenic-level-options="scenicLevelOptions"
@@ -2234,7 +2591,7 @@ onBeforeUnmount(() => {
             :show-scenic-level-filter="showScenicLevelFilter"
             :show-star-level-filter="showStarLevelFilter"
             :star-level-options="starLevelOptions"
-            @add-resource="handleMapAddResource"
+            @activate-resource="activateMapResource"
             @city-search="handleMapCitySearch"
             @close="closeMapFullscreen"
             @filter-change="handleMapFilterChange"
@@ -2242,116 +2599,31 @@ onBeforeUnmount(() => {
             @reset="resetResourceFilters"
           />
 
-          <Card class="plan-panel" :title="`第 ${activeDayNo} 天行程`">
-            <template #extra><span class="plan-cost">{{ formatMoney(activeDay?.dayCostAmount) }}</span></template>
-            <section class="day-itinerary-section">
-              <div class="day-itinerary-summary">
-                <div class="day-itinerary-summary-main">
-                  <div><span class="day-itinerary-label">住宿</span><strong>{{ dayItinerarySummary.hotel }}</strong></div>
-                  <div><span class="day-itinerary-label">用餐</span><span>{{ dayItinerarySummary.meals }}</span></div>
-                </div>
-                <Button type="link" size="small" @click="startHotelSelection">{{ activeAccommodations.length ? '继续安排酒店' : '选择酒店' }}</Button>
+          <div class="plan-panel-cell">
+            <Card class="plan-panel" :title="`第 ${activeDayNo} 天行程 · ${activeDayDestinationLabel}`">
+              <template #extra><span class="plan-cost">{{ formatMoney(activeDay?.dayCostAmount) }}</span></template>
+              <ProductDesignerDayArrangementPanel
+                :active-day-no="activeDayNo"
+                :breakfast-plan="activeBreakfastPlan"
+                :highlighted-resource-id="highlightedDayResourceId"
+                :resources="activeDay?.resources || []"
+                :supplier-candidates-by-resource-id="supplierCandidatesByResourceId"
+                :travel-days="detail?.travelDays || 1"
+                @change-supplier="changeDayResourceSupplier"
+                @request-suppliers="loadDayResourceSupplierCandidates"
+                @remove-day-resource="deletePlan"
+                @reorder-day-resources="reorderDayArrangement"
+                @select-hotel="startHotelSelection"
+                @select-itinerary-resource="startItinerarySelection"
+                @select-meal-resource="startMealSelection"
+                @toggle-hotel-breakfast="saveHotelBreakfast"
+              />
+              <div v-if="scenicWordPlanSummary.selectedCount || scenicWordPlanSummary.unconfiguredCount" class="plan-word-action-row">
+                <span>景区素材已选 {{ scenicWordPlanSummary.selectedCount }} 项<template v-if="scenicWordPlanSummary.unconfiguredCount"> · {{ scenicWordPlanSummary.unconfiguredCount }} 个景区未配置</template></span>
+                <Button size="small" type="primary" @click.stop="openDayWordPlan">制作 Word 方案</Button>
               </div>
-              <div class="day-arrangement-block">
-                <div class="day-arrangement-heading"><strong>当天住宿</strong><span>D{{ activeDayNo }} 晚</span></div>
-                <div v-for="hotel in activeAccommodations" :key="hotel.id" class="day-arrangement-item">
-                  <div class="day-arrangement-main">
-                    <strong>{{ hotel.resourceName }}</strong>
-                    <span>{{ hotel.city || '城市未维护' }} · {{ hotel.supplierName || '未选供应商' }} · {{ formatMoney(hotel.costAmount) }}</span>
-                  </div>
-                  <Checkbox
-                    :checked="hotel.hotelBreakfastIncluded"
-                    :disabled="hotelBreakfastSaving || activeDayNo >= (detail?.travelDays || activeDayNo)"
-                    @change="saveHotelBreakfast(hotel, Boolean($event.target?.checked))"
-                  >
-                    含次日早餐
-                  </Checkbox>
-                  <Button danger type="text" size="small" @click="deletePlan(hotel)"><IconifyIcon icon="lucide:trash-2" /></Button>
-                </div>
-                <div v-if="!activeAccommodations.length" class="day-arrangement-empty"><span>尚未安排酒店，城市会随酒店自动带出。</span><Button size="small" type="primary" @click="startHotelSelection">选择酒店</Button></div>
-                <div v-else class="day-arrangement-empty"><span>酒店容量不足时可继续安排多家酒店。</span><Button size="small" type="link" @click="startHotelSelection">继续安排酒店</Button></div>
-              </div>
-              <div class="day-arrangement-block meal-arrangement-block">
-                <div class="day-arrangement-heading"><strong>当天用餐</strong><span>餐厅按餐次独立安排</span></div>
-                <div v-for="role in ['breakfast', 'lunch', 'dinner'] as const" :key="role" class="day-arrangement-item">
-                  <span class="meal-slot-label">{{ mealRoleLabel[role] }}</span>
-                  <div v-if="activeMealResources[role]" class="day-arrangement-main">
-                    <strong>{{ activeMealResources[role]?.resourceName }}</strong>
-                    <span>{{ activeMealResources[role]?.city || '城市未维护' }} · {{ formatMoney(activeMealResources[role]?.costAmount) }}</span>
-                  </div>
-                  <div v-else-if="role === 'breakfast' && previousNightBreakfastHotels.length" class="day-arrangement-main">
-                    <strong>酒店含早</strong><span>来自 D{{ activeDayNo - 1 }} 晚 {{ previousNightBreakfastHotels.map((item) => item.resourceName).join('、') }}</span>
-                  </div>
-                  <span v-else class="day-arrangement-muted">未安排</span>
-                  <Button size="small" type="link" @click="startMealSelection(role)">{{ activeMealResources[role] ? '更换餐厅' : '选择餐厅' }}</Button>
-                  <Button v-if="activeMealResources[role]" danger type="text" size="small" @click="deletePlan(activeMealResources[role]!)"><IconifyIcon icon="lucide:trash-2" /></Button>
-                </div>
-              </div>
-            </section>
-            <div class="drop-zone" @dragover.prevent @drop="onDayDrop(activeDayNo)">
-              <div v-if="!activeDay?.resources.length" class="plan-empty"><Empty description="把资源拖到这里开始编排" /></div>
-              <div v-for="group in planResourceGroups" :key="group.key" class="plan-group">
-                <div class="plan-group-header">
-                  <div class="plan-group-title">
-                    <span class="plan-group-marker" :class="`type-${group.resourceType}`"></span>
-                    <strong>{{ group.title }}</strong>
-                    <span class="plan-group-count">{{ group.items.length }} 项</span>
-                  </div>
-                  <div class="plan-group-meta">
-                    <Tag v-if="group.requiredCount" color="blue">需采购 {{ group.requiredCount }}</Tag>
-                    <Tag v-if="group.freeCount" color="green">无需采购 {{ group.freeCount }}</Tag>
-                    <span>{{ formatMoney(group.totalCost) }}</span>
-                  </div>
-                </div>
-                <div v-if="group.resourceType === 'scenic'" class="plan-word-action-row">
-                  <span>已选 {{ scenicWordPlanSummary.selectedCount }} 项素材<template v-if="scenicWordPlanSummary.unconfiguredCount"> · {{ scenicWordPlanSummary.unconfiguredCount }} 个景区未配置</template></span>
-                  <Button size="small" type="primary" @click.stop="openDayWordPlan">制作 Word 方案</Button>
-                </div>
-                <div
-                  v-for="entry in group.items"
-                  :key="entry.item.id"
-                  class="plan-row"
-                  draggable="true"
-                  @dragstart="draggedPlanIndex = entry.index"
-                  @dragover.prevent
-                  @drop.stop="onPlanDrop(entry.index)"
-                >
-                  <span class="plan-index">{{ entry.index + 1 }}</span>
-                  <div class="plan-main">
-                    <div class="plan-name-line">
-                      <strong>{{ entry.item.resourceName }}</strong>
-                      <Tag v-if="entry.item.procurementMode === 'not_required'" color="green">无需采购</Tag>
-                      <Tag v-else color="blue">需采购</Tag>
-                    </div>
-                    <span>
-                      {{ typeLabel[entry.item.resourceType] || entry.item.resourceType }}
-                      · {{ entry.item.procurementMode === 'not_required' ? '供应商不适用 · 成本 ¥0.00' : `${entry.item.supplierName || '未选供应商'} · ${formatMoney(entry.item.costAmount)}` }}
-                    </span>
-                    <span
-                      v-if="entry.item.selectedMaterials?.length || entry.item.selectedIntroductionIds?.length || entry.item.introductionTitle"
-                      class="plan-introduction"
-                    >
-                      介绍：
-                      <template v-if="entry.item.selectedMaterials?.length">
-                        已选 {{ entry.item.selectedMaterials.length }} 项素材
-                      </template>
-                      <template v-else-if="entry.item.selectedIntroductionIds?.length && entry.item.selectedIntroductionIds.length > 1">
-                        已选 {{ entry.item.selectedIntroductionIds.length }} 项素材
-                      </template>
-                      <template v-else-if="entry.item.introductionTitle">
-                        {{ `${entry.item.introductionTitle} · v${entry.item.introductionIndexVersion || 1}` }}
-                      </template>
-                    </span>
-                  </div>
-                  <div class="plan-actions">
-                    <Tooltip title="上移"><Button type="text" size="small" :disabled="entry.index === 0" @click="reorderPlan(entry.index, entry.index - 1)"><IconifyIcon icon="lucide:chevron-up" /></Button></Tooltip>
-                    <Tooltip title="下移"><Button type="text" size="small" :disabled="entry.index === (activeDay?.resources.length || 1) - 1" @click="reorderPlan(entry.index, entry.index + 1)"><IconifyIcon icon="lucide:chevron-down" /></Button></Tooltip>
-                    <Tooltip title="移除"><Button danger type="text" size="small" @click="deletePlan(entry.item)"><IconifyIcon icon="lucide:trash-2" /></Button></Tooltip>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </Card>
+            </Card>
+          </div>
         </div>
       </div>
     </Spin>
@@ -2374,6 +2646,53 @@ onBeforeUnmount(() => {
       </Radio.Group>
     </Modal>
 
+    <Modal
+      v-model:open="vehicleArrangementOpen"
+      :confirm-loading="vehicleArrangementSaving"
+      :destroy-on-close="true"
+      cancel-text="取消"
+      ok-text="保存用车"
+      title="安排全程用车"
+      width="560px"
+      @ok="saveVehicleArrangement"
+    >
+      <Alert class="vehicle-form-tip" message="这里选择车型和数量，也可预选意向车队；最终车队与价格在真实排团时按日期、路线和公里数确认。" show-icon type="info" />
+      <Form layout="vertical" class="vehicle-arrangement-form">
+        <Form.Item label="用车资源" required>
+          <Select
+            v-model:value="vehicleForm.resourceId"
+            allow-clear
+            show-search
+            :filter-option="false"
+            :loading="vehicleResourceLoading"
+            placeholder="输入至少 2 个字搜索座位数或车型"
+            @change="(value) => void handleVehicleResourceChange(typeof value === 'number' ? value : undefined)"
+            @search="(value) => { vehicleResourceKeyword = value; void loadVehicleResources(value); }"
+          >
+            <Select.Option v-for="item in vehicleResources" :key="item.id" :value="item.id">
+              {{ item.resourceName }}<template v-if="item.seatCount"> · {{ item.seatCount }} 座</template><template v-if="item.vehicleType"> · {{ item.vehicleType }}</template>
+            </Select.Option>
+          </Select>
+        </Form.Item>
+        <div class="vehicle-form-grid">
+          <Form.Item label="车型" required><Input v-model:value="vehicleForm.vehicleType" allow-clear placeholder="如：39座大巴" /></Form.Item>
+          <Form.Item label="数量" required><InputNumber v-model:value="vehicleForm.quantity" :min="1" :precision="2" style="width: 100%" /></Form.Item>
+        </div>
+        <div class="vehicle-form-grid">
+          <Form.Item label="起始天"><InputNumber v-model:value="vehicleForm.startDayNo" :max="detail?.travelDays || 1" :min="1" style="width: 100%" /></Form.Item>
+          <Form.Item label="结束天"><InputNumber v-model:value="vehicleForm.endDayNo" :max="detail?.travelDays || 1" :min="vehicleForm.startDayNo || 1" style="width: 100%" /></Form.Item>
+        </div>
+        <Form.Item label="意向车队（可选）">
+          <Select v-model:value="vehicleForm.supplierRelationId" allow-clear :disabled="!vehicleForm.resourceId || !vehicleSupplierCandidates.length" placeholder="真实排团时仍需按实际路线重新询价确认">
+            <Select.Option v-for="supplier in vehicleSupplierCandidates" :key="supplier.relationId" :value="supplier.relationId">
+              {{ supplier.supplierName }} · {{ supplierPriceText(supplier) }}<template v-if="supplier.isDefault">（默认）</template>
+            </Select.Option>
+          </Select>
+        </Form.Item>
+        <Form.Item label="备注"><Input v-model:value="vehicleForm.remark" allow-clear :maxlength="500" placeholder="如：含司机、过路费或特殊车辆要求" /></Form.Item>
+      </Form>
+    </Modal>
+
     <Drawer
       v-model:open="drawerOpen"
       :destroy-on-close="true"
@@ -2393,7 +2712,7 @@ onBeforeUnmount(() => {
               <div class="detail-config-grid">
                 <Form.Item label="供应商">
                   <Select v-model:value="editor.supplierId" :disabled="selectedResource.procurementMode === 'not_required'" allow-clear placeholder="选择当前资源的有效供应商" @change="refreshOptionalSupplierReferences">
-                    <Select.Option v-for="supplier in selectedResource.suppliers" :key="supplier.supplierId" :value="supplier.supplierId">{{ supplier.supplierName }} · {{ formatMoney(supplier.referenceUnitPrice) }}<template v-if="supplier.isDefault">（默认）</template></Select.Option>
+                    <Select.Option v-for="supplier in selectedResource.suppliers" :key="supplier.supplierId" :value="supplier.supplierId">{{ supplier.supplierName }} · {{ supplierPriceText(supplier) }}<template v-if="supplier.isDefault">（默认）</template></Select.Option>
                   </Select>
                 </Form.Item>
                 <Form.Item label="行程备注">
@@ -2553,7 +2872,7 @@ onBeforeUnmount(() => {
               placeholder="选择当前资源的有效供应商"
             >
               <Select.Option v-for="supplier in supplierConfig.resource?.suppliers || []" :key="supplier.supplierId" :value="supplier.supplierId">
-                {{ supplier.supplierName }} · {{ formatMoney(supplier.referenceUnitPrice) }}<template v-if="supplier.isDefault">（默认）</template>
+                {{ supplier.supplierName }} · {{ supplierPriceText(supplier) }}<template v-if="supplier.isDefault">（默认）</template>
               </Select.Option>
             </Select>
           </Form.Item>
@@ -2853,16 +3172,66 @@ onBeforeUnmount(() => {
       </Spin>
     </Modal>
 
-    <Card v-if="detail" class="document-history" title="已生成文件">
+    <Card v-if="detail" class="latest-document-card" title="最新产品文件">
+      <template #extra>
+        <Button size="small" type="link" @click="documentHistoryOpen = true">
+          历史版本{{ historicalDocumentCount ? ` ${historicalDocumentCount}` : '' }}
+          <IconifyIcon icon="lucide:chevron-right" />
+        </Button>
+      </template>
+      <div v-if="latestProductDocument" class="latest-document-row">
+        <div class="latest-document-icon"><IconifyIcon icon="lucide:file-text" /></div>
+        <div class="document-main">
+          <strong :title="latestProductDocument.fileName">{{ latestProductDocument.fileName }}</strong>
+          <span>产品介绍 Word · v{{ latestProductDocument.versionNo }} · 预览与下载为同一版本</span>
+        </div>
+        <Tag v-if="latestProductDocument.generateStatus === 'pending'" color="orange">生成中</Tag>
+        <Tag v-else-if="latestProductDocument.generateStatus === 'failed'" color="red">生成失败</Tag>
+        <Space v-else size="small">
+          <Button size="small" @click="openDocumentPreview(latestProductDocument)">预览</Button>
+          <Button size="small" type="primary" @click="downloadDocument(latestProductDocument)">下载 Word</Button>
+        </Space>
+      </div>
+      <div v-else class="latest-document-empty">
+        <span>尚未生成产品 Word</span>
+        <Button size="small" type="primary" :loading="productWordGenerating" @click="generateProductWordPreviewVersion(true)">生成产品 Word</Button>
+      </div>
+    </Card>
+
+    <Drawer
+      v-model:open="documentHistoryOpen"
+      title="历史文件"
+      width="560px"
+    >
       <div v-if="documents.length" class="document-list">
         <div v-for="item in documents" :key="item.id" class="document-row">
-          <div class="document-main"><strong>{{ item.fileName }}</strong><span>{{ item.documentType === 'product_word' ? '产品介绍 Word' : '成人报价单' }} · v{{ item.versionNo }}</span></div>
+          <div class="document-main"><strong>{{ item.fileName }}</strong><span>{{ documentTypeText(item) }} · v{{ item.versionNo }}</span></div>
+          <Button v-if="item.documentType === 'product_word' && item.generateStatus === 'success'" type="link" size="small" @click="openDocumentPreview(item)">预览</Button>
           <Button v-if="item.generateStatus === 'success'" type="link" size="small" @click="downloadDocument(item)">下载</Button>
+          <Tag v-else-if="item.generateStatus === 'pending'" color="orange">生成中</Tag>
           <Tag v-else color="red">生成失败</Tag>
         </div>
       </div>
-      <Empty v-else description="暂无生成文件" />
-    </Card>
+      <Empty v-else description="暂无历史文件" />
+    </Drawer>
+
+    <Drawer
+      v-model:open="documentPreviewOpen"
+      :title="productWordPreviewVersion ? `产品 Word 预览 · v${productWordPreviewVersion.versionNo}` : '产品 Word 预览'"
+      :width="'min(920px, 96vw)'"
+      class="product-document-preview-drawer"
+    >
+      <Spin :spinning="productWordPreviewLoading">
+        <iframe v-if="productWordPreviewUrl" class="document-preview-frame" :src="productWordPreviewUrl" title="产品 Word PDF 预览" />
+        <Empty v-else description="预览加载失败，请重试" />
+      </Spin>
+      <template #footer>
+        <div class="drawer-actions">
+          <Button @click="documentPreviewOpen = false">关闭</Button>
+          <Button v-if="productWordPreviewVersion?.generateStatus === 'success'" type="primary" @click="downloadProductWordPreview">下载 Word</Button>
+        </div>
+      </template>
+    </Drawer>
 
     <Modal v-model:open="previewOpen" :footer="null" title="介绍正文预览" width="720px">
       <div v-if="introPreview" class="intro-preview-modal">
@@ -2911,14 +3280,32 @@ onBeforeUnmount(() => {
 .day-switcher-label span { color: #64748b; font-size: 12px; }
 .day-switcher-label strong { margin-top: 2px; color: #1f2937; }
 .day-tabs { display: flex; min-width: 0; flex: 1; gap: 8px; overflow-x: auto; scrollbar-width: thin; }
-.day-tabs :deep(.day-tab.ant-btn) { display: grid; grid-template-columns: 34px minmax(42px, 1fr); grid-template-rows: 1fr 1fr; min-width: 126px; height: 52px; padding: 6px 10px; border: 1px solid #e5e7eb; border-radius: 4px; background: #fff; color: #475569; text-align: left; }
+.day-tabs :deep(.day-tab.ant-btn) { display: grid; grid-template-columns: 34px minmax(42px, 1fr); grid-template-rows: 16px 18px 16px; min-width: 132px; height: 62px; padding: 6px 10px; border: 1px solid #e5e7eb; border-radius: 4px; background: #fff; color: #475569; text-align: left; }
 .day-tabs :deep(.day-tab.ant-btn:hover) { border-color: #91caff; background: #f6faff; color: #0958d9; }
 .day-tabs :deep(.day-tab.ant-btn.active) { border-color: #69b1ff; background: #eaf3ff; color: #0958d9; box-shadow: inset 3px 0 0 #1677ff; }
-.day-no { grid-row: span 2; align-self: center; font-size: 16px; font-weight: 700; }
-.day-count { align-self: end; font-size: 12px; line-height: 18px; }
-.day-cost { align-self: start; overflow: hidden; color: #64748b; font-size: 12px; line-height: 18px; text-overflow: ellipsis; }
-.designer-grid { display: grid; grid-template-columns: minmax(760px, 1fr) minmax(340px, 390px); gap: 12px; align-items: start; }
-.plan-panel { position: sticky; top: 12px; }
+.day-no { grid-row: span 3; align-self: center; font-size: 16px; font-weight: 700; }
+.day-count { align-self: start; font-size: 11px; line-height: 16px; }
+.day-city { overflow: hidden; color: #334155; font-size: 12px; font-weight: 600; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }.day-city.is-empty { color: #ad6800; font-weight: 400; }
+.day-cost { align-self: end; overflow: hidden; color: #64748b; font-size: 11px; line-height: 16px; text-overflow: ellipsis; }
+.day-destination-editor { display: grid; min-width: 238px; gap: 5px; padding-left: 12px; border-left: 1px solid #f0f0f0; }
+.day-destination-editor-heading { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; }
+.day-destination-title { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; color: #334155; font-size: 12px; font-weight: 600; }
+.day-destination-title :deep(svg) { color: #1677ff; }
+.day-destination-hint { min-width: 0; overflow: hidden; color: #ad6800; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.day-destination-editor-control { display: flex; min-width: 0; align-items: center; gap: 2px; }
+.day-destination-editor-control :deep(.ant-input-affix-wrapper) { min-width: 0; flex: 1; }
+.day-destination-editor-control :deep(.ant-btn) { padding-inline: 6px; }
+.designer-grid { display: grid; grid-template-columns: minmax(760px, 1fr) minmax(340px, 390px); gap: 12px; align-items: stretch; }
+.plan-panel-cell { position: relative; min-width: 0; min-height: 0; }
+.plan-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+}
+.plan-panel :deep(.ant-card-head) { flex: 0 0 auto; }
 .map-panel :deep(.ant-card-body) { padding: 16px; }
 .resource-filters { display: grid; grid-template-columns: minmax(220px, 1fr) 140px 140px 160px 120px; gap: 8px; margin-bottom: 12px; }
 .map-container { position: relative; height: var(--designer-map-height); overflow: hidden; border: 1px solid #d9d9d9; border-radius: 4px; background: #f5f7fa; }
@@ -2943,8 +3330,8 @@ onBeforeUnmount(() => {
 .resource-meta :deep(.ant-tag) { margin-inline-end: 0; }
 .resource-price { color: #1677ff; font-size: 12px; white-space: nowrap; }
 .list-loading, .load-more { padding: 10px; text-align: center; color: #64748b; }
-.plan-panel { max-height: calc(100vh - 190px); overflow: hidden; }
-.plan-panel :deep(.ant-card-body) { max-height: calc(100vh - 248px); overflow-y: auto; padding: 12px 16px; }
+.plan-panel { overflow: hidden; }
+.plan-panel :deep(.ant-card-body) { min-height: 0; flex: 1; overflow-y: auto; padding: 12px 16px; }
 .day-itinerary-section { margin-bottom: 12px; border: 1px solid #e5e7eb; border-radius: 4px; background: #fafcff; }
 .day-itinerary-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 52px; padding: 8px 10px; }
 .day-itinerary-summary-main { display: grid; min-width: 0; gap: 3px; }
@@ -2964,6 +3351,10 @@ onBeforeUnmount(() => {
 .meal-picker-description { margin: 0 0 14px; color: #64748b; }
 .meal-picker-options { display: flex; width: 100%; }
 .meal-picker-options :deep(.ant-radio-button-wrapper) { flex: 1; text-align: center; }
+.vehicle-form-tip { margin-bottom: 14px; }
+.vehicle-arrangement-form { padding-top: 2px; }
+.vehicle-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 560px) { .vehicle-form-grid { grid-template-columns: 1fr; gap: 0; } }
 .meal-slot-label { width: 30px; flex: 0 0 30px; color: #64748b; font-size: 12px; }
 .drop-zone { min-height: calc(var(--designer-map-height) + 24px); }
 .plan-empty { display: grid; min-height: 320px; place-items: center; }
@@ -3186,16 +3577,25 @@ onBeforeUnmount(() => {
 .quote-cost { display: flex; justify-content: space-between; padding: 12px 0; margin: 12px 0; border-bottom: 1px solid #f0f0f0; }
 .quote-cost strong { color: #1677ff; font-size: 18px; }
 .quote-form { margin-top: 14px; }
-.document-history { margin-top: 12px; }
+.latest-document-card { margin-top: 12px; }
+.latest-document-card :deep(.ant-card-body) { padding-block: 12px; }
+.latest-document-row { display: flex; min-width: 0; align-items: center; gap: 12px; }
+.latest-document-icon { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border-radius: 6px; background: #eaf3ff; color: #1677ff; font-size: 18px; }
+.latest-document-empty { display: flex; min-height: 40px; align-items: center; justify-content: space-between; gap: 12px; color: #64748b; }
 .document-list { display: grid; gap: 6px; }
 .document-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
+.document-row:last-child { border-bottom: 0; }
 .document-main { min-width: 0; flex: 1; }
 .document-main strong, .document-main span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .document-main span, .image-meta { color: #64748b; font-size: 12px; }
+.product-document-preview-drawer :deep(.ant-drawer-body) { padding: 12px; background: #eef2f6; }
+.product-document-preview-drawer :deep(.ant-spin-nested-loading), .product-document-preview-drawer :deep(.ant-spin-container) { min-height: calc(100vh - 150px); }
+.document-preview-frame { display: block; width: 100%; min-height: calc(100vh - 150px); border: 0; border-radius: 4px; background: #fff; }
 @media (max-width: 1320px) {
   .designer-grid { grid-template-columns: minmax(0, 1fr); }
-  .plan-panel { position: static; grid-column: 1 / -1; max-height: none; }
-  .plan-panel :deep(.ant-card-body) { max-height: none; }
+  .plan-panel-cell { position: static; grid-column: 1 / -1; }
+  .plan-panel { position: relative; inset: auto; height: auto; }
+  .plan-panel :deep(.ant-card-body) { flex: initial; max-height: none; }
   .drop-zone { min-height: 180px; }
   .plan-empty { min-height: 160px; }
   .day-word-plan-layout { grid-template-columns: minmax(280px, .9fr) minmax(330px, 1.1fr); }
@@ -3229,8 +3629,11 @@ onBeforeUnmount(() => {
   .summary-location { margin-left: 0; text-align: left; }
   .day-switcher { align-items: stretch; flex-direction: column; gap: 8px; }
   .day-switcher-label { display: flex; align-items: center; justify-content: space-between; padding-right: 0; padding-bottom: 6px; border-right: 0; border-bottom: 1px solid #f0f0f0; }
+  .day-destination-editor { min-width: 0; padding-top: 8px; padding-left: 0; border-top: 1px solid #f0f0f0; border-left: 0; }
+  .day-destination-editor-control :deep(.ant-input-affix-wrapper) { width: 100%; }
   .designer-grid { display: block; }
-  .map-panel, .plan-panel { position: static; margin-bottom: 12px; }
+  .map-panel, .plan-panel-cell { margin-bottom: 12px; }
+  .plan-panel { position: static; }
   .resource-filters { grid-template-columns: 1fr; }
   .resource-filters > :last-child { grid-column: auto; }
   .resource-list { max-height: 220px; }
@@ -3240,5 +3643,8 @@ onBeforeUnmount(() => {
   .word-plan-head-actions { align-items: flex-start; flex-direction: column; gap: 8px; }
   .word-image-selected-list { grid-template-columns: 1fr; }
   .word-image-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .latest-document-row { align-items: flex-start; flex-wrap: wrap; }
+  .latest-document-row .document-main { min-width: calc(100% - 48px); }
+  .latest-document-row > :deep(.ant-space) { width: 100%; padding-left: 48px; }
 }
 </style>

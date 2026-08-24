@@ -2,7 +2,7 @@ import { requestClient } from '#/api/request';
 
 export namespace SalesProductDesignerApi {
   export type ProcurementMode = 'not_required' | 'required';
-  export type ArrangementRole = 'accommodation' | 'breakfast' | 'dinner' | 'itinerary' | 'lunch' | 'unassigned';
+  export type ArrangementRole = 'accommodation' | 'breakfast' | 'dinner' | 'ground_service' | 'itinerary' | 'lunch' | 'unassigned';
   export type QuoteStatus = 'confirmed' | 'draft';
   export type ResourceType =
     | 'ground_agent'
@@ -56,7 +56,7 @@ export namespace SalesProductDesignerApi {
   export interface Supplier {
     isDefault: boolean;
     priceLines: SupplierPriceLine[];
-    priceMode?: 'classified' | 'unified';
+    priceMode?: 'classified' | 'pending' | 'unified';
     referenceUnitPrice: number;
     relationId: number;
     supplierId: number;
@@ -159,18 +159,36 @@ export namespace SalesProductDesignerApi {
     sortOrder: number;
     stayMinutes: number;
     supplierId?: number;
+    supplierRelationId?: number;
     supplierName?: string;
     unitPrice: number;
   }
 
   export interface DayPlan {
+    destinationCity?: string;
+    destinationDistrict?: string;
+    destinationProvince?: string;
     accommodationCity?: string;
     breakfastIncluded?: boolean;
     dayCostAmount: number;
     dayNo: number;
     dinnerIncluded?: boolean;
     lunchIncluded?: boolean;
+    mealPlan?: BreakfastPlan;
     resources: DayResource[];
+  }
+
+  /** 早餐来源由后端按前夜住宿和当日外部餐厅统一计算。 */
+  export interface BreakfastPlan {
+    hotelSources: BreakfastHotel[];
+    restaurant?: DayResource;
+    source: 'hotel' | 'none' | 'restaurant';
+  }
+
+  export interface BreakfastHotel {
+    dayResourceId: number;
+    resourceId: number;
+    resourceName: string;
   }
 
   export interface DayItinerary {
@@ -190,6 +208,22 @@ export namespace SalesProductDesignerApi {
     productId: number;
   }
 
+  /** 当晚住宿城市快照；优先跟随已安排酒店，并作为当天地图默认范围。 */
+  export interface DayDestination {
+    dayNo: number;
+    destinationCity: string;
+    destinationDistrict?: string;
+    destinationProvince?: string;
+  }
+
+  export interface DayDestinationSaveRequest {
+    dayNo: number;
+    destinationCity: string;
+    destinationDistrict?: string;
+    destinationProvince?: string;
+    productId: number;
+  }
+
   export interface AdultQuote {
     adultCostAmount: number;
     adultSaleAmount: number;
@@ -205,6 +239,8 @@ export namespace SalesProductDesignerApi {
   export interface Detail {
     adultQuote?: AdultQuote;
     city?: string;
+    /** 每日地图资源冻结的成本合计，不含产品级全程用车。 */
+    dayResourceCostAmount?: number;
     days: DayPlan[];
     productId: number;
     productName: string;
@@ -212,6 +248,55 @@ export namespace SalesProductDesignerApi {
     status: string;
     totalCostAmount: number;
     travelDays: number;
+    /** 产品级全程用车冻结的成本合计。 */
+    vehicleCostAmount?: number;
+    vehicleArrangements?: VehicleArrangement[];
+  }
+
+  /** 不进入每日地图的产品级全程用车资源摘要。 */
+  export interface VehicleResource {
+    billingMode?: string;
+    city?: string;
+    id: number;
+    procurementMode: ProcurementMode;
+    province?: string;
+    resourceName: string;
+    seatCount?: number;
+    vehicleType?: string;
+  }
+
+  /** 已冻结资源、供应商与报价的产品级用车安排。 */
+  export interface VehicleArrangement {
+    costAmount: number;
+    endDayNo?: number;
+    id: number;
+    priceMode?: string;
+    procurementStatus: 'not_required' | 'pending' | 'quoted';
+    productId: number;
+    quantity: number;
+    remark?: string;
+    resourceId?: number;
+    resourceName: string;
+    sortOrder: number;
+    startDayNo?: number;
+    supplierId?: number;
+    supplierName?: string;
+    supplierRelationId?: number;
+    unitPrice: number;
+    vehicleType: string;
+  }
+
+  export interface VehicleArrangementSaveRequest {
+    endDayNo?: number;
+    id?: number;
+    productId: number;
+    quantity?: number;
+    remark?: string;
+    resourceId?: number;
+    sortOrder?: number;
+    startDayNo?: number;
+    supplierRelationId?: number;
+    vehicleType?: string;
   }
 
   export interface Draft {
@@ -303,6 +388,15 @@ export namespace SalesProductDesignerApi {
     sortOrder?: number;
     stayMinutes?: number;
     supplierId?: number;
+    supplierRelationId?: number;
+    /** 早餐来源冲突时，同一后端事务内替换另一来源。 */
+    replaceBreakfastSource?: boolean;
+  }
+
+  export interface DayResourceSupplierSaveRequest {
+    dayResourceId: number;
+    productId: number;
+    supplierRelationId: number;
   }
 
   export interface SelectedOptionalItem {
@@ -450,12 +544,49 @@ export function getSalesProductDesignerResourceDetail(resourceId: number) {
   });
 }
 
+/** 查询产品级全程用车候选；该资源刻意不进入每天的地图资源池。 */
+export function getSalesProductDesignerVehicleResources(params: {
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+}) {
+  return requestClient.get<SalesProductDesignerApi.PageResult<SalesProductDesignerApi.VehicleResource>>(
+    '/sales/product/designer/vehicle-resources', { params },
+  );
+}
+
+export function saveSalesProductDesignerVehicleArrangement(
+  data: SalesProductDesignerApi.VehicleArrangementSaveRequest,
+) {
+  return requestClient.post<SalesProductDesignerApi.VehicleArrangement>(
+    '/sales/product/designer/vehicle-arrangement/save', data,
+  );
+}
+
+export function deleteSalesProductDesignerVehicleArrangement(data: {
+  productId: number;
+  vehicleArrangementId: number;
+}) {
+  return requestClient.post<void>('/sales/product/designer/vehicle-arrangement/delete', data);
+}
+
+export function reorderSalesProductDesignerVehicleArrangements(data: {
+  productId: number;
+  vehicleArrangementIds: number[];
+}) {
+  return requestClient.post<void>('/sales/product/designer/vehicle-arrangement/reorder', data);
+}
+
 export function saveSalesProductDesignerDayResource(data: SalesProductDesignerApi.DayResourceSaveRequest) {
   return requestClient.post<SalesProductDesignerApi.DayResource>('/sales/product/designer/day-resource/save', data);
 }
 
 export function saveSalesProductDesignerDayItinerary(data: SalesProductDesignerApi.DayItinerarySaveRequest) {
   return requestClient.post<SalesProductDesignerApi.DayItinerary>('/sales/product/designer/day-itinerary/save', data);
+}
+
+export function saveSalesProductDesignerDayDestination(data: SalesProductDesignerApi.DayDestinationSaveRequest) {
+  return requestClient.post<SalesProductDesignerApi.DayDestination>('/sales/product/designer/day-destination/save', data);
 }
 
 export function getSalesProductDesignerDayWordPlan(productId: number, dayNo: number) {
@@ -474,7 +605,17 @@ export function deleteSalesProductDesignerDayResource(data: { id: number; produc
   return requestClient.post<void>('/sales/product/designer/day-resource/delete', data);
 }
 
+/** 仅更新已编排行资源的供应商/报价快照，不改动其它资源快照。 */
+export function changeSalesProductDesignerDayResourceSupplier(
+  data: SalesProductDesignerApi.DayResourceSupplierSaveRequest,
+) {
+  return requestClient.post<SalesProductDesignerApi.DayResource>(
+    '/sales/product/designer/day-resource/supplier', data,
+  );
+}
+
 export function reorderSalesProductDesignerDayResources(data: {
+  arrangementRole: 'accommodation' | 'ground_service' | 'itinerary';
   dayNo: number;
   dayResourceIds: number[];
   productId: number;

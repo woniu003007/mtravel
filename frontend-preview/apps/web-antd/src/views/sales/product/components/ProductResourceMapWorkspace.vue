@@ -15,6 +15,10 @@ import {
 import { IconifyIcon } from '@vben/icons';
 import { getAmapJsConfig } from '#/api/sales/product';
 import type { SalesProductDesignerApi } from '#/api/sales/product-designer';
+import {
+  buildProductResourceMarkerHtml,
+  productResourceMarkerZIndex,
+} from './product-resource-map-marker';
 
 type LocatedResource = SalesProductDesignerApi.MapResource & {
   latitude: number;
@@ -23,14 +27,14 @@ type LocatedResource = SalesProductDesignerApi.MapResource & {
 
 const props = defineProps<{
   activeDayNo: number;
-  addingResourceIds: Set<number>;
+  arrangedResourceIds?: Set<number>;
   cityOptions: { label: string; value: string }[];
+  dayDestination?: Pick<SalesProductDesignerApi.DayPlan, 'destinationCity' | 'destinationDistrict' | 'destinationProvince'>;
   filters: SalesProductDesignerApi.ResourceQuery;
   mapResources: LocatedResource[];
   open: boolean;
   provinceOptions: { label: string; value: string }[];
   resourceLoading: boolean;
-  resourceActionLabel?: (resource: SalesProductDesignerApi.MapResource) => string;
   resourceTotal: number;
   resources: SalesProductDesignerApi.MapResource[];
   resourceTypeOptions: { label: string; value?: string }[];
@@ -42,7 +46,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (event: 'add-resource', resource: SalesProductDesignerApi.MapResource): void;
+  (event: 'activate-resource', resource: SalesProductDesignerApi.MapResource): void;
   (event: 'city-search', value: string): void;
   (event: 'close'): void;
   (event: 'filter-change', key: keyof SalesProductDesignerApi.ResourceQuery, value: unknown): void;
@@ -61,7 +65,6 @@ let amapLoader: Promise<any> | undefined;
 const amapScriptSelector = 'script[data-mtravel-amap="true"]';
 
 const typeLabel: Record<string, string> = {
-  ground_agent: '地接',
   hotel: '酒店',
   other: '其它',
   restaurant: '餐厅',
@@ -87,7 +90,7 @@ function areaText(resource: SalesProductDesignerApi.MapResource) {
 }
 
 function activateResource(resource: SalesProductDesignerApi.MapResource) {
-  emit('add-resource', resource);
+  emit('activate-resource', resource);
 }
 
 function clearMapOverlays() {
@@ -155,14 +158,17 @@ async function loadMarkerClusterPlugin(AMap: any) {
 
 function createMarker(AMap: any, resource: LocatedResource) {
   const selected = resource.id === props.selectedResourceId;
+  const arranged = props.arrangedResourceIds?.has(resource.id) || false;
   const marker = new AMap.Marker({
-    label: {
-      content: `<span class="resource-map-label${selected ? ' resource-map-selected-label' : ''}">${resource.resourceName}</span>`,
-      direction: 'top',
-    },
+    content: buildProductResourceMarkerHtml(resource, {
+      arranged,
+      pending: resource.procurementMode !== 'not_required' && !resource.defaultSupplierId,
+      selected,
+    }),
+    offset: new AMap.Pixel(-12, -30),
     position: [resource.longitude, resource.latitude],
     title: resource.resourceName,
-    zIndex: selected ? 120 : 10,
+    zIndex: productResourceMarkerZIndex({ arranged, selected }),
   });
   marker.on('click', () => activateResource(resource));
   return marker;
@@ -250,7 +256,7 @@ watch(() => props.open, async (open) => {
 });
 
 watch(
-  () => [props.mapResources, props.selectedResourceId],
+  () => [props.mapResources, props.selectedResourceId, props.arrangedResourceIds],
   async () => {
     if (!props.open || !mapInstance) return;
     const AMap = await loadAmap();
@@ -276,11 +282,15 @@ onBeforeUnmount(destroyMap);
     <div class="resource-map-workspace">
       <header class="resource-map-toolbar">
         <div class="resource-map-heading">
-          <div class="resource-map-title">资源地图 · D{{ activeDayNo }}</div>
+          <div class="resource-map-title">资源地图 · D{{ activeDayNo }} · {{ dayDestination?.destinationCity || '未设置城市' }}</div>
           <div class="resource-map-stats">
             <Tag color="blue">{{ locatedCount }} 个点位</Tag>
             <Tag v-if="unlocatedCount > 0" color="orange">{{ unlocatedCount }} 个未定位</Tag>
           </div>
+        </div>
+        <div class="resource-map-destination">
+          <span>住宿城市</span>
+          <Tag color="blue">{{ dayDestination?.destinationCity || '未设置' }}</Tag>
         </div>
         <div class="resource-map-filters">
           <Input
@@ -366,7 +376,7 @@ onBeforeUnmount(destroyMap);
               <strong>资源列表</strong>
               <span>当前显示 {{ resources.length }} / {{ resourceTotal }} 项</span>
             </div>
-            <Tag color="blue">D{{ activeDayNo }}</Tag>
+            <Tag color="blue">{{ dayDestination?.destinationCity || `D${activeDayNo}` }}</Tag>
           </div>
           <div class="resource-map-list">
             <div
@@ -389,14 +399,7 @@ onBeforeUnmount(destroyMap);
                   <Tag color="orange">未定位</Tag>
                 </Tooltip>
                 <span v-else class="resource-map-price">{{ formatMoney(resource.referenceUnitPrice) }}</span>
-                <Button
-                  size="small"
-                  type="primary"
-                  :loading="addingResourceIds.has(resource.id)"
-                  @click.stop="emit('add-resource', resource)"
-                >
-                  {{ resourceActionLabel?.(resource) || `加入 D${activeDayNo}` }}
-                </Button>
+                <Tag v-if="arrangedResourceIds?.has(resource.id)" color="blue">已安排</Tag>
               </div>
             </div>
             <div v-if="resourceLoading" class="resource-map-list-state"><Spin size="small" /> 正在加载资源</div>
@@ -417,9 +420,11 @@ onBeforeUnmount(destroyMap);
 .resource-map-heading { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; min-width: 220px; }
 .resource-map-title { color: #1f2937; font-size: 16px; font-weight: 650; white-space: nowrap; }
 .resource-map-stats { display: flex; gap: 4px; white-space: nowrap; }
+.resource-map-destination { display: flex; min-width: 150px; align-items: center; gap: 7px; color: #64748b; font-size: 12px; white-space: nowrap; }
+.resource-map-destination :deep(.ant-tag) { margin-inline-end: 0; }
 .resource-map-filters { display: grid; min-width: 0; flex: 1; grid-template-columns: minmax(200px, 1.45fr) 130px 160px 140px 160px; gap: 8px; }
 .resource-map-toolbar-actions { display: flex; flex: 0 0 auto; gap: 8px; }
-.resource-map-body { display: grid; min-height: 0; flex: 1; grid-template-columns: minmax(0, 1fr) 340px; gap: 10px; padding: 10px; }
+.resource-map-body { display: grid; min-height: 0; flex: 1; grid-template-columns: minmax(0, 1fr) 292px; gap: 10px; padding: 10px; }
 .resource-map-canvas-wrap { position: relative; min-width: 0; min-height: 0; overflow: hidden; border: 1px solid #d9d9d9; border-radius: 6px; background: #f5f7fa; }
 .resource-map-canvas-wrap :deep(.ant-spin-nested-loading), .resource-map-canvas-wrap :deep(.ant-spin-container) { width: 100%; height: 100%; }
 .resource-map-canvas { position: relative; width: 100%; height: 100%; min-height: 420px; }
@@ -431,7 +436,7 @@ onBeforeUnmount(destroyMap);
 .resource-map-list-heading strong { color: #1f2937; font-size: 14px; }
 .resource-map-list-heading span { margin-top: 3px; color: #8c8c8c; font-size: 12px; }
 .resource-map-list { min-height: 0; flex: 1; overflow-y: auto; }
-.resource-map-row { display: flex; align-items: center; gap: 6px; min-height: 56px; padding: 7px 10px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: background .18s ease, border-color .18s ease; }
+.resource-map-row { display: flex; align-items: center; gap: 6px; min-height: 50px; padding: 6px 10px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: background .18s ease, border-color .18s ease; }
 .resource-map-row:hover, .resource-map-row.is-selected { background: #f6faff; }
 .resource-map-row.is-selected { border-left: 3px solid #1677ff; padding-left: 7px; }
 .resource-map-row-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #1677ff; }
@@ -448,23 +453,23 @@ onBeforeUnmount(destroyMap);
 :global(.resource-map-fullscreen-modal .ant-modal) { top: 0; width: 100vw !important; max-width: none; padding-bottom: 0; }
 :global(.resource-map-fullscreen-modal .ant-modal-content) { height: 100vh; overflow: hidden; border-radius: 0; }
 :global(.resource-map-fullscreen-modal .ant-modal-body) { height: 100%; padding: 0; }
-:global(.resource-map-fullscreen-modal .amap-marker-label) { top: -22px !important; left: 50% !important; padding: 0; border: 0; background: transparent; box-shadow: none; transform: translateX(-50%); }
-:global(.resource-map-fullscreen-modal .resource-map-label) { display: inline-block; padding: 2px 5px; color: #334155; font-size: 11px; line-height: 16px; background: rgb(255 255 255 / 94%); border: 1px solid #d9d9d9; border-radius: 3px; box-shadow: 0 1px 4px rgb(15 23 42 / 14%); white-space: nowrap; }
-:global(.resource-map-fullscreen-modal .resource-map-selected-label) { padding: 3px 7px; color: #0958d9; font-size: 12px; font-weight: 600; background: #eaf3ff; border-color: #69b1ff; box-shadow: 0 2px 8px rgb(22 119 255 / 18%); }
 @media (max-width: 1280px) {
   .resource-map-toolbar { align-items: stretch; flex-wrap: wrap; }
   .resource-map-heading { min-width: 210px; }
+  .resource-map-destination { flex: 1; }
   .resource-map-filters { order: 3; flex-basis: 100%; }
 }
 @media (max-width: 900px) {
   .resource-map-body { grid-template-columns: 1fr; grid-template-rows: minmax(360px, 1fr) minmax(240px, 40%); }
   .resource-map-list-panel { min-height: 240px; }
   .resource-map-toolbar { gap: 10px; padding: 10px 12px; }
+  .resource-map-destination { min-width: 150px; }
   .resource-map-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .resource-map-toolbar-actions { margin-left: auto; }
 }
 @media (max-width: 560px) {
   .resource-map-heading { width: 100%; justify-content: space-between; }
+  .resource-map-destination { width: 100%; }
   .resource-map-filters { grid-template-columns: 1fr; }
   .resource-map-toolbar-actions { width: 100%; justify-content: flex-end; }
   .resource-map-body { padding: 8px; gap: 8px; }

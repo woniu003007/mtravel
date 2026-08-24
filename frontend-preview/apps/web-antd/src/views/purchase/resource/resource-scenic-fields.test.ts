@@ -236,6 +236,21 @@ describe('purchase resource place fields', () => {
     expect(source).toContain('query.siteVisitStatus = undefined');
   });
 
+  it('shows vehicle specifications without city fields', () => {
+    const source = readAppFile('src/views/purchase/resource/index.vue');
+
+    expect(source).toContain("const isVehicleList = computed(() => query.resourceType === 'vehicle')");
+    expect(source).toContain("title: '座位数'");
+    expect(source).toContain("title: '车型'");
+    expect(source).toContain('<Form.Item v-if="!isVehicleList" label="所在地">');
+    expect(source).toContain('<Form.Item v-if="formState.resourceType !== \'vehicle\'" label="所在地">');
+    expect(source).toContain('address: vehicleResource ? undefined : clean(formState.address)');
+    expect(source).toContain("const isVehicleResourceBinding = computed(() => currentResource.value?.resourceType === 'vehicle')");
+    expect(source).toContain('用车资源不保存固定价格');
+    expect(source).toContain('<Form.Item v-if="!isVehicleResourceBinding" label="报价方式" required>');
+    expect(source).toContain("priceMode: vehicleResource ? 'classified' : scenicSupplierForm.priceMode");
+  });
+
   it('keeps scenic-only fields scenic and place fields limited to place resource save payloads', () => {
     const source = readAppFile('src/views/purchase/resource/index.vue');
     const buildPayloadSource = sourceBetween(

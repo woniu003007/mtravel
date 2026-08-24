@@ -75,14 +75,15 @@ describe('sales product designer flow', () => {
     expect(workbenchSource).toContain('完成后，该数据将从产品设计列表移入产品管理。');
   });
 
-  it('groups the day plan and exposes procurement and introduction choices per resource', () => {
+  it('uses the four-section day arrangement panel and keeps resource material editing available', () => {
     const workbenchSource = readAppFile('src/views/sales/product/designer.vue');
 
-    expect(workbenchSource).toContain('const planResourceGroups = computed<PlanResourceGroup[]>(() =>');
-    expect(workbenchSource).toContain('景区组合');
-    expect(workbenchSource).toContain('需采购');
-    expect(workbenchSource).toContain('无需采购');
-    expect(workbenchSource).toContain('entry.item.introductionTitle');
+    expect(workbenchSource).toContain('ProductDesignerDayArrangementPanel');
+    expect(workbenchSource).toContain('ProductResourceMapWorkspace');
+    expect(workbenchSource).toContain('supplierCandidatesByResourceId');
+    expect(workbenchSource).toContain('@change-supplier');
+    expect(workbenchSource).toContain('景区素材已选');
+    expect(workbenchSource).toContain('selectedMaterials: [] as MaterialEditorValue[]');
   });
 
   it('supports composing introduction and optional materials in one draggable output order', () => {
@@ -108,17 +109,16 @@ describe('sales product designer flow', () => {
     expect(apiSource).toContain('supplierOptionalItemId?: number');
     expect(apiSource).toContain('salePrice?: number');
     expect(workbenchSource).toContain('新选择只显示当前供应商已启用报价的项目');
-    expect(workbenchSource).toContain('建议对外价');
-    expect(workbenchSource).toContain('最终对外价');
-    expect(workbenchSource).toContain('salePrice: suggestedSalePrice ?? 0');
-    expect(workbenchSource).toContain("selected.salePrice = Number(value ?? 0)");
+    expect(workbenchSource).toContain('系统默认价');
+    expect(workbenchSource).toContain('本产品报价');
+    expect(workbenchSource).toContain('salePrice: suggestedSalePrice');
+    expect(workbenchSource).toContain('selected.salePrice = value == null ? undefined : Number(value)');
     expect(workbenchSource).toContain("materialType: 'optional_item'");
     expect(workbenchSource).toContain('item.isOptionalItem && item.resourceOptionalItemId === optionalItemId');
     expect(workbenchSource).toContain('activeIds.has(item.id)');
     expect(workbenchSource).toContain('salePriceDirty: false');
-    expect(workbenchSource).toContain('if (!item.salePriceDirty) item.salePrice = nextSuggestedSalePrice ?? 0');
-    expect(workbenchSource).toContain('请填写「${name}」的本产品最终对外价');
-    expect(workbenchSource).toContain("item.materialType === 'optional_item' ? item.salePrice : undefined");
+    expect(workbenchSource).toContain('if (!item.salePriceDirty) item.salePrice = nextSuggestedSalePrice');
+    expect(workbenchSource).toContain("item.materialType === 'optional_item' && item.salePriceDirty ? item.salePrice : undefined");
   });
 
   it('does not submit a stale supplier quote after the supplier is cleared or changed', () => {
@@ -132,43 +132,24 @@ describe('sales product designer flow', () => {
   it('uses the selected material images for a live resource preview without legacy resource controls', () => {
     const workbenchSource = readAppFile('src/views/sales/product/designer.vue');
 
-    expect(workbenchSource).toContain('Word 效果预览');
+    expect(workbenchSource).toContain('产品 Word 预览');
     expect(workbenchSource).toContain('downloadPurchaseResourceImage');
-    expect(workbenchSource).toContain('revokeMaterialPreviewUrls');
-    expect(workbenchSource).toContain('实际字体和分页以后续模板为准');
+    expect(workbenchSource).toContain('productWordPreviewUrl');
+    expect(workbenchSource).toContain('generateProductWordPreviewVersion');
     expect(workbenchSource).not.toContain('停留时间（分钟）');
     expect(workbenchSource).not.toContain('成本数量');
     expect(workbenchSource).not.toContain('纳入产品介绍 Word');
     expect(workbenchSource).not.toContain('产品配图');
   });
 
-  it('renders each scenic introduction as one indented Word paragraph with its material warm tip', () => {
+  it('uses the generated product Word PDF instead of a second client-side document renderer', () => {
     const workbenchSource = readAppFile('src/views/sales/product/designer.vue');
 
-    expect(workbenchSource).toContain("entry.material.materialType === 'introduction' && entry.introduction.title");
-    expect(workbenchSource).toContain('function inlinePreviewText(value?: string)');
-    expect(workbenchSource).toContain('class="word-preview-material-line"');
-    expect(workbenchSource).toContain('class="word-preview-attraction-title"');
-    expect(workbenchSource).toContain('【{{ entry.introduction.title }}】');
-    expect(workbenchSource).toContain('function formatVisitDuration(value?: string)');
-    expect(workbenchSource).toContain('（游览约${totalMinutes}分钟）');
-    expect(workbenchSource).toContain('（游览约${hours}小时${remainder}分钟）');
-    expect(workbenchSource).toContain('const minuteMatch = raw.match');
-    expect(workbenchSource).toContain('.word-preview-material-line { margin: 0; font: inherit; line-height: inherit; text-indent: 2em; }');
-    expect(workbenchSource).toContain('.word-preview-attraction-title { color: #0070c0; font-weight: 700; }');
-    expect(workbenchSource).toContain('.word-preview-notice, .word-preview-optional-price { color: #f00; }');
-    expect(workbenchSource).toContain('warmTipPreviewText(entry.introduction.warmTipContent)');
-    expect(workbenchSource).toContain('class="word-preview-warm-tip"');
-    expect(workbenchSource).not.toContain('温馨提示：{{ warmTipPreviewText');
-    expect(workbenchSource).toContain('font-size: 10pt;');
+    expect(workbenchSource).toContain('previewSalesProductDesignerDocument');
+    expect(workbenchSource).toContain('class="word-pdf-preview-frame"');
+    expect(workbenchSource).toContain('title="产品 Word PDF 预览"');
+    expect(workbenchSource).toContain('downloadProductWordPreview');
     expect(workbenchSource).not.toContain('selectedScenicIntroductionTitles');
-    expect(workbenchSource).not.toContain('.word-preview-sheet h2');
-    expect(workbenchSource).not.toContain('.word-preview-material h3');
-    expect(workbenchSource.indexOf('class="word-preview-notice"'))
-      .toBeLessThan(workbenchSource.indexOf('class="word-preview-content"'));
-    expect(workbenchSource).toContain('v-for="(block, blockIndex) in entry.introduction.extensionBlocks || []"');
-    expect(workbenchSource).not.toContain('warmTipLines(');
-    expect(workbenchSource).not.toContain('resourceDetail.warmTip');
   });
 
   it('builds the day-end image payload from global selections in mixed resource order', async () => {

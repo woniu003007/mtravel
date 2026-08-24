@@ -218,6 +218,15 @@ const baseColumns = [
   { fixed: 'right' as const, key: 'action', title: '操作', width: 250 },
 ];
 
+const vehicleColumns = [
+  ...baseColumns.slice(0, 2),
+  ...baseColumns.slice(3, 4),
+  { dataIndex: 'seatCount', key: 'seatCount', title: '座位数', width: 100 },
+  { dataIndex: 'vehicleType', key: 'vehicleType', title: '车型', width: 140 },
+  { dataIndex: 'billingMode', key: 'billingMode', title: '计费模式', width: 130 },
+  ...baseColumns.slice(6),
+];
+
 const scenicColumns = [
   {
     dataIndex: 'scenicLevel',
@@ -235,6 +244,7 @@ const loading = ref(false);
 const modalOpen = ref(false);
 const editingId = ref<number>();
 const bindingDrawerOpen = ref(false);
+const supplierBindingMode = ref<'bind' | 'create'>('bind');
 const documentDrawerOpen = ref(false);
 const materialTab = ref<'introductions' | 'images' | 'files'>('introductions');
 const materialServiceUnavailable = ref(false);
@@ -411,11 +421,24 @@ const resourceOptionalItemOptions = computed(() =>
     })),
 );
 const isScenicList = computed(() => query.resourceType === 'scenic');
+const isVehicleList = computed(() => query.resourceType === 'vehicle');
 const isPlaceList = computed(() => Boolean(query.resourceType && isPlaceResource(query.resourceType)));
 const isScenicForm = computed(() => formState.resourceType === 'scenic');
 const isPlaceForm = computed(() => isPlaceResource(formState.resourceType));
 const currentResourceTypeLabel = computed(() => typeLabel(currentResource.value?.resourceType));
+const isVehicleResourceBinding = computed(() => currentResource.value?.resourceType === 'vehicle');
+const unifiedPriceLabel = computed(() => currentResource.value?.resourceType === 'scenic'
+  ? '门票统一报价（无门票可留空）'
+  : `${currentResourceTypeLabel.value}统一报价`);
 const supplierFormTitle = computed(() => `${isEditingScenicSupplier.value ? '编辑' : '新增'}${currentResourceTypeLabel.value}供应商`);
+const supplierCreateTabTitle = computed(() => {
+  if (isEditingScenicSupplier.value) {
+    return supplierFormTitle.value;
+  }
+  return isVehicleResourceBinding.value
+    ? '新增并绑定车队'
+    : `新增并绑定${currentResourceTypeLabel.value}供应商`;
+});
 const unifiedPriceUnit = computed(() => {
   const resource = currentResource.value;
   if (!resource) return '元';
@@ -433,6 +456,9 @@ const unifiedPriceUnit = computed(() => {
   return '元/人';
 });
 const columns = computed(() => {
+  if (isVehicleList.value) {
+    return vehicleColumns;
+  }
   if (!isPlaceList.value) {
     return baseColumns;
   }
@@ -463,6 +489,10 @@ function typeColor(value?: string) {
     vehicle: 'volcano',
   };
   return colors[value || ''] || 'default';
+}
+
+function billingModeLabel(value?: string) {
+  return billingModeOptions.find((item) => item.value === value)?.label || '-';
 }
 
 function optionalItemTypeLabel(value?: string) {
@@ -723,6 +753,13 @@ function handleQueryResourceTypeChange(value: unknown) {
     query.businessStatus = undefined;
     query.siteVisitStatus = undefined;
   }
+  if (value === 'vehicle') {
+    queryRegionPath.value = [];
+    queryLocationKeyword.value = '';
+    query.province = undefined;
+    query.city = undefined;
+    query.district = undefined;
+  }
 }
 
 async function loadData() {
@@ -829,7 +866,7 @@ function resetScenicSupplierForm(resource?: ResourceRow) {
   scenicSupplierForm.contactPhone = undefined;
   scenicSupplierForm.status = 'active';
   scenicSupplierForm.isDefault = false;
-  scenicSupplierForm.priceMode = 'unified';
+  scenicSupplierForm.priceMode = location?.resourceType === 'vehicle' ? 'classified' : 'unified';
   scenicSupplierForm.unifiedPrice = undefined;
   scenicSupplierForm.optionalItems = [];
   scenicSupplierForm.priceLines = [];
@@ -1027,6 +1064,7 @@ async function openBindingsFromRoute() {
   routeBindingOpened.value = true;
   const resource = await getPurchaseResourceDetail(resourceId);
   currentResource.value = resource;
+  supplierBindingMode.value = 'bind';
   bindingDrawerOpen.value = true;
   bindForm.resourceId = resource.id;
   bindForm.isDefault = false;
@@ -1115,16 +1153,17 @@ function openEditModal(record: Record<string, any>) {
 
 function buildPayload(): PurchaseResourceApi.SaveParams {
   const regionFields = splitRegionPath(formRegionPath.value);
+  const vehicleResource = formState.resourceType === 'vehicle';
   const payload: PurchaseResourceApi.SaveParams = {
-    address: clean(formState.address),
+    address: vehicleResource ? undefined : clean(formState.address),
     autoCreateSupplier: !editingId.value && Boolean(formState.autoCreateSupplier),
-    city: regionFields.city,
+    city: vehicleResource ? undefined : regionFields.city,
     contactName: clean(formState.contactName),
-    district: regionFields.district,
+    district: vehicleResource ? undefined : regionFields.district,
     fax: clean(formState.fax),
     introduction: clean(formState.introduction),
     phone: clean(formState.phone),
-    province: regionFields.province,
+    province: vehicleResource ? undefined : regionFields.province,
     procurementMode: formState.procurementMode || 'required',
     remark: clean(formState.remark),
     resourceName: formState.resourceName.trim(),
@@ -1653,6 +1692,7 @@ function handleTableChange(nextPagination: TablePaginationConfig) {
 async function openBindingDrawer(record: Record<string, any>) {
   const row = record as ResourceRow;
   currentResource.value = row;
+  supplierBindingMode.value = 'bind';
   bindingDrawerOpen.value = true;
   bindForm.resourceId = row.id;
   bindForm.isDefault = false;
@@ -1676,6 +1716,10 @@ async function loadSuppliers(category: SupplierApi.Category) {
 }
 
 async function loadResourcePriceProjects(resourceType: ResourceType) {
+  if (resourceType === 'vehicle') {
+    resourcePriceProjects.value = [];
+    return;
+  }
   const result = await getExpenseItemAll(resourceType as EnterpriseExpenseItemApi.ResourceType);
   resourcePriceProjects.value = result;
 }
@@ -1791,9 +1835,14 @@ function validateScenicSupplierForm() {
   if (!validateOptionalItems()) {
     return false;
   }
+  if (isVehicleResourceBinding.value) {
+    return true;
+  }
   if (scenicSupplierForm.priceMode === 'unified') {
     if (isNil(scenicSupplierForm.unifiedPrice) && !hasOptionalItemQuote()) {
-      message.warning('请填写门票统一报价，或至少维护一条自费项目报价');
+      message.warning(currentResource.value.resourceType === 'scenic'
+        ? '请填写门票统一报价，或至少维护一条自费项目报价'
+        : '请填写统一报价');
       return false;
     }
     return true;
@@ -1804,7 +1853,9 @@ function validateScenicSupplierForm() {
     return false;
   }
   if (!hasClassifiedPrice() && !hasOptionalItemQuote()) {
-    message.warning('分类门票报价至少填写一种，或至少维护一条自费项目报价');
+    message.warning(currentResource.value.resourceType === 'scenic'
+      ? '分类门票报价至少填写一种，或至少维护一条自费项目报价'
+      : '分类报价至少填写一项');
     return false;
   }
   return true;
@@ -1835,6 +1886,7 @@ function validateOptionalItems() {
 
 function buildScenicSupplierPayload(): PurchaseResourceApi.ResourceSupplierCreateParams {
   const supplierRegion = splitRegionPath(scenicSupplierRegionPath.value);
+  const vehicleResource = isVehicleResourceBinding.value;
   const payload: PurchaseResourceApi.ResourceSupplierCreateParams = {
     basicInfo: clean(scenicSupplierForm.basicInfo),
     city: supplierRegion.city,
@@ -1854,13 +1906,16 @@ function buildScenicSupplierPayload(): PurchaseResourceApi.ResourceSupplierCreat
               suggestedSalePrice: item.suggestedSalePrice,
             }))
         : undefined,
-    priceMode: scenicSupplierForm.priceMode,
-    priceRemark: clean(scenicSupplierForm.priceRemark),
+    priceMode: vehicleResource ? 'classified' : scenicSupplierForm.priceMode,
+    priceRemark: vehicleResource ? undefined : clean(scenicSupplierForm.priceRemark),
     province: supplierRegion.province,
     remark: clean(scenicSupplierForm.remark),
     status: scenicSupplierForm.status || 'active',
     supplierName: scenicSupplierForm.supplierName.trim(),
   };
+  if (vehicleResource) {
+    return payload;
+  }
   if (payload.priceMode === 'unified') {
     payload.unifiedPrice = scenicSupplierForm.unifiedPrice;
   } else {
@@ -1875,6 +1930,7 @@ function buildScenicSupplierPayload(): PurchaseResourceApi.ResourceSupplierCreat
 }
 
 async function editBoundSupplier(record: PurchaseResourceApi.Binding) {
+  supplierBindingMode.value = 'create';
   const supplier = await getSupplierDetail(record.supplierId);
   editingScenicSupplierId.value = supplier.id;
   editingScenicSupplierRelationId.value = record.relationId;
@@ -1889,8 +1945,8 @@ async function editBoundSupplier(record: PurchaseResourceApi.Binding) {
   scenicSupplierForm.contactPhone = supplier.contactPhone;
   scenicSupplierForm.status = supplier.status;
   scenicSupplierForm.isDefault = Boolean(record.isDefault);
-  scenicSupplierForm.priceMode = record.priceMode || 'classified';
-  scenicSupplierForm.unifiedPrice = record.unifiedPrice;
+  scenicSupplierForm.priceMode = isVehicleResourceBinding.value ? 'classified' : (record.priceMode || 'classified');
+  scenicSupplierForm.unifiedPrice = isVehicleResourceBinding.value ? undefined : record.unifiedPrice;
   scenicSupplierForm.priceLines = record.priceLines?.map((line) => ({
     priceDescription: line.priceDescription,
     resourceProjectId: line.resourceProjectId,
@@ -1940,7 +1996,9 @@ async function createScenicSupplier() {
   try {
     if (editingScenicSupplierId.value) {
       if (!editingScenicSupplierRelationId.value) {
-        message.error('绑定关系缺少 relationId，无法保存报价');
+        message.error(isVehicleResourceBinding.value
+          ? '绑定关系缺少 relationId，无法保存供应商资料'
+          : '绑定关系缺少 relationId，无法保存报价');
         return;
       }
       await updateResourceSupplierForResource(
@@ -1948,7 +2006,7 @@ async function createScenicSupplier() {
         editingScenicSupplierRelationId.value,
         buildScenicSupplierPayload(),
       );
-      message.success('供应商资料和报价已更新');
+      message.success(isVehicleResourceBinding.value ? '车队供应商资料已更新' : '供应商资料和报价已更新');
       await Promise.all([
         loadSuppliers(currentResource.value.resourceType),
         loadBindings(currentResource.value.id),
@@ -1963,7 +2021,9 @@ async function createScenicSupplier() {
     // 新增后保留当前录入内容，并切换为编辑状态，避免再次点击时重复创建同名供应商。
     editingScenicSupplierId.value = created.supplierId;
     editingScenicSupplierRelationId.value = created.relationId;
-    message.success('供应商已新增并绑定，可继续编辑');
+    message.success(isVehicleResourceBinding.value
+      ? '车队供应商已新增并绑定'
+      : '供应商已新增并绑定，可继续编辑');
     await Promise.all([
       loadSuppliers(currentResource.value.resourceType),
       loadBindings(currentResource.value.id),
@@ -2853,7 +2913,7 @@ onMounted(async () => {
             @change="handleQueryResourceTypeChange"
           />
         </Form.Item>
-        <Form.Item label="所在地">
+        <Form.Item v-if="!isVehicleList" label="所在地">
           <AutoComplete
             v-model:value="queryLocationKeyword"
             allow-clear
@@ -2946,6 +3006,15 @@ onMounted(async () => {
               {{ statusLabel(record.status) }}
             </Tag>
           </template>
+          <template v-else-if="column.key === 'seatCount'">
+            <strong>{{ record.seatCount ? `${record.seatCount} 座` : '-' }}</strong>
+          </template>
+          <template v-else-if="column.key === 'vehicleType'">
+            {{ record.vehicleType || '-' }}
+          </template>
+          <template v-else-if="column.key === 'billingMode'">
+            {{ billingModeLabel(record.billingMode) }}
+          </template>
           <template v-else-if="column.key === 'scenicLevel'">
             <Tag color="blue">{{ scenicLevelLabel(record.scenicLevel) }}</Tag>
           </template>
@@ -3031,7 +3100,7 @@ onMounted(async () => {
           <Form.Item label="资源名称" required>
             <Input v-model:value="formState.resourceName" allow-clear />
           </Form.Item>
-          <Form.Item label="所在地">
+          <Form.Item v-if="formState.resourceType !== 'vehicle'" label="所在地">
             <Cascader
               v-model:value="formRegionPath"
               allow-clear
@@ -3081,7 +3150,7 @@ onMounted(async () => {
             />
           </Form.Item>
         </div>
-        <Form.Item v-if="!isPlaceForm" label="所在地址">
+        <Form.Item v-if="!isPlaceForm && formState.resourceType !== 'vehicle'" label="所在地址">
           <Input v-model:value="formState.address" allow-clear />
         </Form.Item>
         <section v-if="formState.resourceType === 'restaurant'" class="scenic-section">
@@ -3311,8 +3380,17 @@ onMounted(async () => {
         </Space>
       </div>
 
-      <Card size="small" class="mb-4" title="快速绑定已有供应商">
-        <Form :model="bindForm" layout="vertical">
+      <Card size="small" class="supplier-binding-card mb-4">
+        <Tabs
+          v-model:active-key="supplierBindingMode"
+          :animated="false"
+          class="supplier-binding-tabs"
+        >
+          <Tabs.TabPane key="bind" tab="绑定已有供应商">
+            <div class="supplier-mode-hint">
+              供应商档案已存在时使用。这里只建立当前资源与供应商的绑定关系，不会重复创建供应商。
+            </div>
+            <Form :model="bindForm" layout="vertical">
           <div class="bind-grid">
             <Form.Item label="供应商" required>
               <Select
@@ -3338,21 +3416,21 @@ onMounted(async () => {
               </Checkbox>
             </Form.Item>
           </div>
-          <div class="bind-actions">
-            <Button type="primary" @click="bindSupplier">绑定供应商</Button>
-          </div>
-        </Form>
-      </Card>
+              <div class="bind-actions">
+                <Button type="primary" @click="bindSupplier">
+                  绑定已有供应商
+                </Button>
+              </div>
+            </Form>
+          </Tabs.TabPane>
 
-      <Card
-        size="small"
-        class="mb-4"
-        :title="supplierFormTitle"
-      >
-        <div class="drawer-card-hint">
-          这里直接维护当前资源的供应商档案和报价。资料保存后会自动绑定当前资源，不用再切到供应商页来回跳转。
-        </div>
-        <Form :model="scenicSupplierForm" layout="vertical">
+          <Tabs.TabPane key="create" :tab="supplierCreateTabTitle">
+            <div class="supplier-mode-hint">
+              {{ isVehicleResourceBinding
+                ? '车队尚未录入系统时使用。保存后会创建车队档案并绑定当前车型；价格在真实排团时确认。'
+                : '供应商尚未录入系统时使用。保存档案和报价后，会自动绑定当前资源。' }}
+            </div>
+            <Form :model="scenicSupplierForm" layout="vertical">
           <div class="scenic-supplier-grid">
             <Form.Item label="供应商名称" required>
               <Input
@@ -3409,7 +3487,10 @@ onMounted(async () => {
               placeholder="可记录供应商简介、接待能力、结算要求等"
             />
           </Form.Item>
-          <Form.Item label="报价方式" required>
+          <div v-if="isVehicleResourceBinding" class="drawer-card-hint vehicle-pricing-hint">
+            用车资源不保存固定价格。产品阶段仅选择车型和车队，真实排团时再按实际线路向车队询价。
+          </div>
+          <Form.Item v-if="!isVehicleResourceBinding" label="报价方式" required>
             <Select
               v-model:value="scenicSupplierForm.priceMode"
               :options="[
@@ -3419,8 +3500,8 @@ onMounted(async () => {
             />
           </Form.Item>
           <Form.Item
-            v-if="scenicSupplierForm.priceMode === 'unified'"
-            label="门票统一报价（无门票可留空）"
+            v-if="!isVehicleResourceBinding && scenicSupplierForm.priceMode === 'unified'"
+            :label="unifiedPriceLabel"
           >
             <InputNumber
               v-model:value="scenicSupplierForm.unifiedPrice"
@@ -3431,7 +3512,7 @@ onMounted(async () => {
             />
           </Form.Item>
           <div
-            v-else
+            v-else-if="!isVehicleResourceBinding"
             class="scenic-supplier-price-grid"
           >
             <Form.Item
@@ -3525,7 +3606,7 @@ onMounted(async () => {
               暂未维护自费项目报价。点击“新增报价”后，直接填写项目名称并录入价格。
             </div>
           </div>
-          <Form.Item label="报价备注">
+          <Form.Item v-if="!isVehicleResourceBinding" label="报价备注">
             <Textarea
               v-model:value="scenicSupplierForm.priceRemark"
               :rows="2"
@@ -3535,26 +3616,32 @@ onMounted(async () => {
           <Form.Item label="备注">
             <Textarea v-model:value="scenicSupplierForm.remark" :rows="2" />
           </Form.Item>
-          <div class="bind-actions">
-            <Space>
-              <Button
-                type="primary"
-                :loading="creatingScenicSupplier"
-                @click="createScenicSupplier"
-              >
-                {{ isEditingScenicSupplier ? '保存修改' : '保存并绑定' }}
-              </Button>
-              <Button
-                v-if="isEditingScenicSupplier"
-                @click="resetScenicSupplierForm(currentResource)"
-              >
-                取消编辑
-              </Button>
-            </Space>
-          </div>
-        </Form>
+              <div class="bind-actions">
+                <Space>
+                  <Button
+                    type="primary"
+                    :loading="creatingScenicSupplier"
+                    @click="createScenicSupplier"
+                  >
+                    {{ isEditingScenicSupplier ? '保存修改' : '保存并绑定' }}
+                  </Button>
+                  <Button
+                    v-if="isEditingScenicSupplier"
+                    @click="resetScenicSupplierForm(currentResource)"
+                  >
+                    取消编辑
+                  </Button>
+                </Space>
+              </div>
+            </Form>
+          </Tabs.TabPane>
+        </Tabs>
       </Card>
 
+      <div class="supplier-binding-list-header">
+        <div class="supplier-binding-list-title">当前已绑定供应商</div>
+        <div class="supplier-binding-list-count">共 {{ bindings.length }} 家</div>
+      </div>
       <Table
         :data-source="bindings"
         :loading="bindingLoading"
@@ -4426,6 +4513,49 @@ onMounted(async () => {
   font-weight: 600;
 }
 
+.supplier-binding-card :deep(.ant-card-body) {
+  padding: 0 16px 16px;
+}
+
+.supplier-binding-tabs :deep(.ant-tabs-nav) {
+  margin-bottom: 16px;
+}
+
+.supplier-binding-tabs :deep(.ant-tabs-tab) {
+  min-width: 168px;
+  justify-content: center;
+  font-weight: 500;
+}
+
+.supplier-mode-hint {
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.6;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.supplier-binding-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 20px 0 10px;
+}
+
+.supplier-binding-list-title {
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.supplier-binding-list-count {
+  color: #64748b;
+  font-size: 12px;
+}
+
 .drawer-card-hint {
   margin-bottom: 12px;
   color: #64748b;
@@ -5017,6 +5147,10 @@ onMounted(async () => {
 }
 
 @media (max-width: 720px) {
+  .supplier-binding-tabs :deep(.ant-tabs-tab) {
+    min-width: 0;
+  }
+
   .modal-grid,
   .bind-grid,
   .coordinate-grid,
