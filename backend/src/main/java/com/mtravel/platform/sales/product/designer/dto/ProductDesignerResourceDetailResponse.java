@@ -21,5 +21,6 @@ public record ProductDesignerResourceDetailResponse(
         List<ProductDesignerResourceImageResponse> images,
         List<ProductDesignerSupplierResponse> suppliers,
         Long defaultSupplierId,
-        List<com.mtravel.platform.purchase.resource.optional.dto.PurchaseResourceOptionalItemResponse> optionalItems
+        List<com.mtravel.platform.purchase.resource.optional.dto.PurchaseResourceOptionalItemResponse> optionalItems,
+        List<ProductDesignerWordOptionalItemCandidateResponse> wordOptionalItemCandidates
 ) {}

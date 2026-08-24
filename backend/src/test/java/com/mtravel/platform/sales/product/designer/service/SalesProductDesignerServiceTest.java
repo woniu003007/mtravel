@@ -5,15 +5,18 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mtravel.platform.common.BizException;
-import com.mtravel.platform.purchase.relation.mapper.PurchaseRelationMapper;
-import com.mtravel.platform.purchase.relation.price.mapper.SupplierResourcePriceMapper;
 import com.mtravel.platform.purchase.relation.dto.PurchaseRelationSupplierPriceRow;
+import com.mtravel.platform.purchase.relation.entity.PurchaseRelationEntity;
+import com.mtravel.platform.purchase.relation.mapper.PurchaseRelationMapper;
+import com.mtravel.platform.purchase.relation.optional.entity.PurchaseRelationOptionalItemEntity;
+import com.mtravel.platform.purchase.relation.price.mapper.SupplierResourcePriceMapper;
 import com.mtravel.platform.purchase.resource.entity.PurchaseResourceEntity;
 import com.mtravel.platform.purchase.resource.mapper.PurchaseResourceMapper;
 import com.mtravel.platform.purchase.resource.material.entity.PurchaseResourceIntroductionEntity;
 import com.mtravel.platform.purchase.resource.material.entity.PurchaseResourceImageEntity;
 import com.mtravel.platform.purchase.resource.material.mapper.PurchaseResourceImageMapper;
 import com.mtravel.platform.purchase.resource.material.mapper.PurchaseResourceIntroductionMapper;
+import com.mtravel.platform.purchase.resource.optional.entity.PurchaseResourceOptionalItemEntity;
 import com.mtravel.platform.purchase.supplier.mapper.SupplierMapper;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceSaveRequest;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayResourceReorderRequest;
@@ -111,6 +114,83 @@ class SalesProductDesignerServiceTest {
                 1L, oneImage, List.of(first, second), "admin"))
                 .isInstanceOf(BizException.class)
                 .hasMessage("当天末尾图片只能选择 0、2 或 3 张");
+    }
+
+    @Test
+    void saveDayWordPlanShouldKeepSnapshotsWhenSourceResourceWasSoftDeleted() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
+        PurchaseResourceIntroductionMapper introductionMapper = mock(PurchaseResourceIntroductionMapper.class);
+        PurchaseResourceImageMapper imageMapper = mock(PurchaseResourceImageMapper.class);
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDayResourceImageMapper imageSnapshotMapper = mock(SalesProductDayResourceImageMapper.class);
+        SalesProductDayResourceIntroductionMapper introductionSnapshotMapper =
+                mock(SalesProductDayResourceIntroductionMapper.class);
+        SalesProductDesignerService service = new SalesProductDesignerService(
+                productMapper, resourceMapper, mock(PurchaseRelationMapper.class), mock(SupplierMapper.class),
+                mock(SupplierResourcePriceMapper.class), introductionMapper, imageMapper, dayResourceMapper,
+                imageSnapshotMapper, introductionSnapshotMapper, mock(SalesProductAdultQuoteMapper.class),
+                mock(SalesProductDocumentVersionMapper.class));
+        SalesProductDesignerOptionalItemService optionalService = mock(SalesProductDesignerOptionalItemService.class);
+        ReflectionTestUtils.setField(service, "optionalItemService", optionalService);
+        ReflectionTestUtils.setField(service, "introductionImageMapper",
+                mock(com.mtravel.platform.purchase.resource.material.mapper.PurchaseResourceIntroductionImageMapper.class));
+
+        SalesProductDayResourceEntity deletedSource = existingDayResource();
+        deletedSource.setId(501L);
+        deletedSource.setResourceId(101L);
+        deletedSource.setResourceNameSnapshot("已删除景区");
+        SalesProductDayResourceEntity activeSource = existingDayResource();
+        activeSource.setId(502L);
+        activeSource.setResourceId(202L);
+        activeSource.setResourceNameSnapshot("仍有效景区");
+        PurchaseResourceEntity activeResource = freeResource();
+        activeResource.setId(202L);
+        activeResource.setResourceName("仍有效景区");
+        PurchaseResourceIntroductionEntity activeIntroduction = introduction(701L, "有效景区介绍");
+        activeIntroduction.setResourceId(202L);
+        PurchaseResourceImageEntity firstImage = resourceImage(2021L);
+        PurchaseResourceImageEntity secondImage = resourceImage(2022L);
+        firstImage.setResourceId(202L);
+        secondImage.setResourceId(202L);
+
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(draftProduct());
+        // 被软删除的采购主档不再能由有效资源查询取到；保存 Word 方案必须跳过它而不是清空历史快照。
+        when(resourceMapper.selectOne(any(Wrapper.class))).thenReturn(null, activeResource);
+        when(resourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of(activeResource));
+        when(dayResourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of(deletedSource, activeSource));
+        when(introductionMapper.selectList(any(Wrapper.class))).thenReturn(List.of(activeIntroduction));
+        when(imageMapper.selectList(any(Wrapper.class))).thenReturn(List.of(firstImage, secondImage));
+        when(imageSnapshotMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(introductionSnapshotMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(optionalService.listByDayResourceIds(eq(1L), eq(88L), anyList())).thenReturn(java.util.Map.of());
+
+        ProductDesignerDayWordPlanSaveRequest request = new ProductDesignerDayWordPlanSaveRequest(
+                88L,
+                1,
+                List.of(deletedSource.getId(), activeSource.getId()),
+                List.of(new com.mtravel.platform.sales.product.designer.dto.ProductDesignerDayWordPlanMaterialRequest(
+                        activeSource.getId(), "introduction", activeIntroduction.getId(), null, null, null)),
+                "follow_resource",
+                java.util.Map.of(activeSource.getId(), List.of(firstImage.getId(), secondImage.getId()))
+        );
+
+        service.saveDayWordPlan(1L, request, "admin");
+
+        ArgumentCaptor<UpdateWrapper> introductionUpdates = ArgumentCaptor.forClass(UpdateWrapper.class);
+        verify(introductionSnapshotMapper).update(any(SalesProductDayResourceIntroductionEntity.class),
+                introductionUpdates.capture());
+        introductionUpdates.getValue().getSqlSegment();
+        assertThat(introductionUpdates.getValue().getParamNameValuePairs())
+                .containsValue(activeSource.getId())
+                .doesNotContainValue(deletedSource.getId());
+
+        ArgumentCaptor<UpdateWrapper> imageUpdates = ArgumentCaptor.forClass(UpdateWrapper.class);
+        verify(imageSnapshotMapper).update(any(SalesProductDayResourceImageEntity.class), imageUpdates.capture());
+        imageUpdates.getValue().getSqlSegment();
+        assertThat(imageUpdates.getValue().getParamNameValuePairs())
+                .containsValue(activeSource.getId())
+                .doesNotContainValue(deletedSource.getId());
     }
 
     @Test
@@ -580,6 +660,204 @@ class SalesProductDesignerServiceTest {
         assertThat(captor.getValue().getIntroductionNoticeSnapshot()).isEqualTo("雨天注意防滑\n请勿下水");
         assertThat(captor.getValue().getIntroductionWarmTipSnapshot()).isEqualTo("建议穿舒适鞋子");
         assertThat(captor.getValue().getIntroductionVisitDurationSnapshot()).isEqualTo("约 2 小时");
+    }
+
+    @Test
+    void dayWordPlanShouldReturnOptionalItemCandidateWithoutNormalIntroductionOrSupplierPrice() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
+        PurchaseRelationMapper relationMapper = mock(PurchaseRelationMapper.class);
+        PurchaseResourceIntroductionMapper introductionMapper = mock(PurchaseResourceIntroductionMapper.class);
+        PurchaseResourceImageMapper imageMapper = mock(PurchaseResourceImageMapper.class);
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDayResourceImageMapper dayResourceImageMapper =
+                mock(SalesProductDayResourceImageMapper.class);
+        SalesProductDayResourceIntroductionMapper dayResourceIntroductionMapper =
+                mock(SalesProductDayResourceIntroductionMapper.class);
+        SalesProductDesignerService service = new SalesProductDesignerService(
+                productMapper,
+                resourceMapper,
+                relationMapper,
+                mock(SupplierMapper.class),
+                mock(SupplierResourcePriceMapper.class),
+                introductionMapper,
+                imageMapper,
+                dayResourceMapper,
+                dayResourceImageMapper,
+                dayResourceIntroductionMapper,
+                mock(SalesProductAdultQuoteMapper.class),
+                mock(SalesProductDocumentVersionMapper.class)
+        );
+        SalesProductDesignerOptionalItemService optionalService = mock(SalesProductDesignerOptionalItemService.class);
+        var resourceOptionalItemMapper =
+                mock(com.mtravel.platform.purchase.resource.optional.mapper.PurchaseResourceOptionalItemMapper.class);
+        var relationOptionalItemMapper =
+                mock(com.mtravel.platform.purchase.relation.optional.mapper.PurchaseRelationOptionalItemMapper.class);
+        ReflectionTestUtils.setField(service, "optionalItemService", optionalService);
+        ReflectionTestUtils.setField(service, "resourceOptionalItemMapper", resourceOptionalItemMapper);
+        ReflectionTestUtils.setField(service, "relationOptionalItemMapper", relationOptionalItemMapper);
+
+        SalesProductDayResourceEntity dayResource = existingDayResource();
+        dayResource.setId(501L);
+        dayResource.setResourceId(21L);
+        dayResource.setSupplierId(null);
+        dayResource.setSelectedIntroductionId(null);
+        dayResource.setIntroductionIndexVersion(null);
+        dayResource.setIntroductionTitleSnapshot(null);
+        dayResource.setIntroductionContentSnapshot(null);
+        dayResource.setIntroductionNoticeSnapshot(null);
+        dayResource.setIntroductionWarmTipSnapshot(null);
+        dayResource.setIntroductionVisitDurationSnapshot(null);
+
+        PurchaseResourceEntity scenic = freeResource();
+        scenic.setId(21L);
+        PurchaseResourceOptionalItemEntity master = new PurchaseResourceOptionalItemEntity();
+        master.setId(701L);
+        master.setTenantId(1L);
+        master.setResourceId(21L);
+        master.setProjectName("西湖游船");
+        master.setItemType("boat");
+        master.setStatus("active");
+        master.setIsDeleted(false);
+        PurchaseResourceIntroductionEntity optionalIntroduction = introduction(801L, "西湖游船介绍");
+        optionalIntroduction.setResourceId(21L);
+        optionalIntroduction.setIsOptionalItem(true);
+        optionalIntroduction.setResourceOptionalItemId(701L);
+        optionalIntroduction.setStatus("published");
+        PurchaseRelationEntity relation = new PurchaseRelationEntity();
+        relation.setId(901L);
+        relation.setTenantId(1L);
+        relation.setResourceId(21L);
+        relation.setSupplierId(1001L);
+        relation.setIsDefault(true);
+        relation.setStatus("active");
+        relation.setIsDeleted(false);
+        PurchaseRelationOptionalItemEntity quote = new PurchaseRelationOptionalItemEntity();
+        quote.setId(1001L);
+        quote.setTenantId(1L);
+        quote.setRelationId(901L);
+        quote.setResourceOptionalItemId(701L);
+        quote.setProjectName("西湖游船");
+        quote.setSuggestedSalePrice(new BigDecimal("320"));
+        quote.setStatus("active");
+        quote.setIsDeleted(false);
+
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
+        when(dayResourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of(dayResource));
+        when(dayResourceImageMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(dayResourceIntroductionMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(optionalService.listByDayResourceIds(eq(1L), eq(88L), anyList())).thenReturn(java.util.Map.of());
+        when(resourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of(scenic));
+        when(introductionMapper.selectList(any(Wrapper.class))).thenReturn(List.of(optionalIntroduction));
+        when(imageMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(resourceOptionalItemMapper.selectList(any(Wrapper.class))).thenReturn(List.of(master));
+        when(relationMapper.selectList(any(Wrapper.class))).thenReturn(List.of(relation));
+        when(relationMapper.selectActiveResourceSupplierPriceRows(eq(1L), eq(List.of(21L)))).thenReturn(List.of());
+        when(relationOptionalItemMapper.selectList(any(Wrapper.class))).thenReturn(List.of(quote));
+
+        var response = service.dayWordPlan(1L, 88L, 1);
+
+        assertThat(response.resources()).hasSize(1);
+        assertThat(response.resources().getFirst().resourceDetail().introductions()).singleElement()
+                .satisfies(introduction -> {
+                    assertThat(introduction.isOptionalItem()).isTrue();
+                    assertThat(introduction.resourceOptionalItemId()).isEqualTo(701L);
+                });
+        assertThat(response.resources().getFirst().resourceDetail().wordOptionalItemCandidates()).singleElement()
+                .satisfies(candidate -> {
+                    assertThat(candidate.resourceOptionalItemId()).isEqualTo(701L);
+                    assertThat(candidate.introductionId()).isEqualTo(801L);
+                    assertThat(candidate.supplierOptionalItemId()).isEqualTo(1001L);
+                    assertThat(candidate.suggestedSalePrice()).isEqualByComparingTo("320");
+                });
+    }
+
+    @Test
+    void dayWordPlanShouldNotReturnDisabledOptionalItemMasterAsCandidate() {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        PurchaseResourceMapper resourceMapper = mock(PurchaseResourceMapper.class);
+        PurchaseRelationMapper relationMapper = mock(PurchaseRelationMapper.class);
+        PurchaseResourceIntroductionMapper introductionMapper = mock(PurchaseResourceIntroductionMapper.class);
+        PurchaseResourceImageMapper imageMapper = mock(PurchaseResourceImageMapper.class);
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDayResourceImageMapper dayResourceImageMapper =
+                mock(SalesProductDayResourceImageMapper.class);
+        SalesProductDayResourceIntroductionMapper dayResourceIntroductionMapper =
+                mock(SalesProductDayResourceIntroductionMapper.class);
+        SalesProductDesignerService service = new SalesProductDesignerService(
+                productMapper,
+                resourceMapper,
+                relationMapper,
+                mock(SupplierMapper.class),
+                mock(SupplierResourcePriceMapper.class),
+                introductionMapper,
+                imageMapper,
+                dayResourceMapper,
+                dayResourceImageMapper,
+                dayResourceIntroductionMapper,
+                mock(SalesProductAdultQuoteMapper.class),
+                mock(SalesProductDocumentVersionMapper.class)
+        );
+        SalesProductDesignerOptionalItemService optionalService = mock(SalesProductDesignerOptionalItemService.class);
+        var resourceOptionalItemMapper =
+                mock(com.mtravel.platform.purchase.resource.optional.mapper.PurchaseResourceOptionalItemMapper.class);
+        var relationOptionalItemMapper =
+                mock(com.mtravel.platform.purchase.relation.optional.mapper.PurchaseRelationOptionalItemMapper.class);
+        ReflectionTestUtils.setField(service, "optionalItemService", optionalService);
+        ReflectionTestUtils.setField(service, "resourceOptionalItemMapper", resourceOptionalItemMapper);
+        ReflectionTestUtils.setField(service, "relationOptionalItemMapper", relationOptionalItemMapper);
+
+        SalesProductDayResourceEntity dayResource = existingDayResource();
+        dayResource.setId(501L);
+        dayResource.setResourceId(21L);
+        PurchaseResourceEntity scenic = freeResource();
+        scenic.setId(21L);
+        PurchaseResourceOptionalItemEntity disabledMaster = new PurchaseResourceOptionalItemEntity();
+        disabledMaster.setId(702L);
+        disabledMaster.setTenantId(1L);
+        disabledMaster.setResourceId(21L);
+        disabledMaster.setProjectName("停用自费项目");
+        disabledMaster.setItemType("boat");
+        disabledMaster.setStatus("disabled");
+        disabledMaster.setIsDeleted(false);
+        PurchaseResourceIntroductionEntity optionalIntroduction = introduction(802L, "停用自费介绍");
+        optionalIntroduction.setResourceId(21L);
+        optionalIntroduction.setIsOptionalItem(true);
+        optionalIntroduction.setResourceOptionalItemId(702L);
+        optionalIntroduction.setStatus("published");
+        PurchaseRelationEntity relation = new PurchaseRelationEntity();
+        relation.setId(902L);
+        relation.setTenantId(1L);
+        relation.setResourceId(21L);
+        relation.setIsDefault(true);
+        relation.setStatus("active");
+        relation.setIsDeleted(false);
+        PurchaseRelationOptionalItemEntity quote = new PurchaseRelationOptionalItemEntity();
+        quote.setId(1002L);
+        quote.setTenantId(1L);
+        quote.setRelationId(902L);
+        quote.setResourceOptionalItemId(702L);
+        quote.setSuggestedSalePrice(new BigDecimal("320"));
+        quote.setStatus("active");
+        quote.setIsDeleted(false);
+
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product());
+        when(dayResourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of(dayResource));
+        when(dayResourceImageMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(dayResourceIntroductionMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(optionalService.listByDayResourceIds(eq(1L), eq(88L), anyList())).thenReturn(java.util.Map.of());
+        when(resourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of(scenic));
+        when(introductionMapper.selectList(any(Wrapper.class))).thenReturn(List.of(optionalIntroduction));
+        when(imageMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(resourceOptionalItemMapper.selectList(any(Wrapper.class))).thenReturn(List.of(disabledMaster));
+        when(relationMapper.selectList(any(Wrapper.class))).thenReturn(List.of(relation));
+        when(relationMapper.selectActiveResourceSupplierPriceRows(eq(1L), eq(List.of(21L)))).thenReturn(List.of());
+        when(relationOptionalItemMapper.selectList(any(Wrapper.class))).thenReturn(List.of(quote));
+
+        var response = service.dayWordPlan(1L, 88L, 1);
+
+        assertThat(response.resources()).hasSize(1);
+        assertThat(response.resources().getFirst().resourceDetail().wordOptionalItemCandidates()).isEmpty();
     }
 
     @Test

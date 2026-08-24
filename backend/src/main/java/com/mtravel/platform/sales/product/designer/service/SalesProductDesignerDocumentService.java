@@ -20,6 +20,8 @@ import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourc
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductDocumentVersionMapper;
 import com.mtravel.platform.purchase.resource.material.dto.ResourceIntroductionExtensionBlock;
 import com.mtravel.platform.purchase.resource.material.service.ResourceIntroductionExtensionBlockCodec;
+import com.mtravel.platform.purchase.resource.entity.PurchaseResourceEntity;
+import com.mtravel.platform.purchase.resource.mapper.PurchaseResourceMapper;
 import com.mtravel.platform.sales.product.entity.SalesProductDescriptionEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductItineraryDayEntity;
@@ -38,6 +40,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigInteger;
 import java.awt.image.BufferedImage;
+import java.awt.image.RenderedImage;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -57,7 +60,11 @@ import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 import java.util.regex.Pattern;
 import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageOutputStream;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xwpf.usermodel.LineSpacingRule;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
@@ -119,6 +126,9 @@ public class SalesProductDesignerDocumentService {
     private static final int INTRODUCTION_LIST_INDENT_TWIPS = 420;
     // Product template uses a two-character first-line indent for itinerary prose.
     private static final int INTRODUCTION_FIRST_LINE_INDENT_TWIPS = 420;
+    // Use a stable 16pt line height: clearly more open than LibreOffice's default single spacing,
+    // while keeping long multi-day products from producing a nearly empty trailing page.
+    private static final double INTRODUCTION_LINE_SPACING_POINTS = 16.0;
     private static final String INTRODUCTION_LINE_PREFIX = "\u3000\u3000";
     private static final Pattern INTRODUCTION_LIST_LINE = Pattern.compile(
             "^\\s*(?:\\d{1,3}[、.．]|[（(]\\d{1,3}[）)]|[一二三四五六七八九十]+、)\\s*\\S.*$"
@@ -136,6 +146,7 @@ public class SalesProductDesignerDocumentService {
     private final ObjectMapper objectMapper;
     private final SalesProductDayResourceOptionalItemMapper optionalItemMapper;
     private final ResourceIntroductionExtensionBlockCodec extensionBlockCodec;
+    private final PurchaseResourceMapper purchaseResourceMapper;
 
     @Value("${mtravel.document.office-command:soffice}")
     private String officeCommand = "soffice";
@@ -156,7 +167,8 @@ public class SalesProductDesignerDocumentService {
             CommonAttachmentService attachmentService,
             ObjectMapper objectMapper,
             SalesProductDayResourceOptionalItemMapper optionalItemMapper,
-            ResourceIntroductionExtensionBlockCodec extensionBlockCodec
+            ResourceIntroductionExtensionBlockCodec extensionBlockCodec,
+            PurchaseResourceMapper purchaseResourceMapper
     ) {
         this.productMapper = productMapper;
         this.descriptionMapper = descriptionMapper;
@@ -170,9 +182,10 @@ public class SalesProductDesignerDocumentService {
         this.objectMapper = objectMapper;
         this.optionalItemMapper = optionalItemMapper;
         this.extensionBlockCodec = extensionBlockCodec;
+        this.purchaseResourceMapper = purchaseResourceMapper;
     }
     /** 兼容现有文档服务构造入口。 */
-    public SalesProductDesignerDocumentService(SalesProductMapper productMapper, SalesProductDescriptionMapper descriptionMapper, SalesProductItineraryDayMapper itineraryDayMapper, SalesProductDayResourceMapper dayResourceMapper, SalesProductDayResourceImageMapper dayResourceImageMapper, SalesProductDayResourceIntroductionMapper dayResourceIntroductionMapper, SalesProductAdultQuoteMapper adultQuoteMapper, SalesProductDocumentVersionMapper versionMapper, CommonAttachmentService attachmentService, ObjectMapper objectMapper) { this(productMapper,descriptionMapper,itineraryDayMapper,dayResourceMapper,dayResourceImageMapper,dayResourceIntroductionMapper,adultQuoteMapper,versionMapper,attachmentService,objectMapper,null,new ResourceIntroductionExtensionBlockCodec(objectMapper)); }
+    public SalesProductDesignerDocumentService(SalesProductMapper productMapper, SalesProductDescriptionMapper descriptionMapper, SalesProductItineraryDayMapper itineraryDayMapper, SalesProductDayResourceMapper dayResourceMapper, SalesProductDayResourceImageMapper dayResourceImageMapper, SalesProductDayResourceIntroductionMapper dayResourceIntroductionMapper, SalesProductAdultQuoteMapper adultQuoteMapper, SalesProductDocumentVersionMapper versionMapper, CommonAttachmentService attachmentService, ObjectMapper objectMapper) { this(productMapper,descriptionMapper,itineraryDayMapper,dayResourceMapper,dayResourceImageMapper,dayResourceIntroductionMapper,adultQuoteMapper,versionMapper,attachmentService,objectMapper,null,new ResourceIntroductionExtensionBlockCodec(objectMapper),null); }
 
     /** 生成产品介绍 Word，并保留本次资源介绍正文快照。 */
     @Transactional
@@ -368,6 +381,7 @@ public class SalesProductDesignerDocumentService {
             if (template == null) {
                 configureDocument(document);
             }
+            normalizeDocumentFonts(document);
             replaceTemplateTitle(document, product.getProductName());
             Map<Integer, List<SalesProductDayResourceEntity>> byDay = resources.stream()
                     .collect(java.util.stream.Collectors.groupingBy(
@@ -438,11 +452,63 @@ public class SalesProductDesignerDocumentService {
             return;
         }
         XWPFParagraph paragraph = document.getParagraphs().getFirst();
+        CTPPr paragraphProperties = paragraph.getCTP().isSetPPr()
+                ? paragraph.getCTP().getPPr()
+                : paragraph.getCTP().addNewPPr();
+        if (paragraphProperties.isSetInd()) paragraphProperties.unsetInd();
+        paragraph.setAlignment(ParagraphAlignment.CENTER);
+        CTRPr runStyle = paragraph.getRuns().isEmpty() || !paragraph.getRuns().getFirst().getCTR().isSetRPr()
+                ? null
+                : (CTRPr) paragraph.getRuns().getFirst().getCTR().getRPr().copy();
         for (int index = paragraph.getRuns().size() - 1; index >= 0; index--) {
             paragraph.removeRun(index);
         }
-        XWPFRun run = textRun(paragraph, productName == null ? "" : productName, 20, true);
+        XWPFRun run = paragraph.createRun();
+        if (runStyle != null) {
+            run.getCTR().setRPr((CTRPr) runStyle.copy());
+        } else {
+            run.setFontSize(20);
+            run.setBold(true);
+        }
+        run.setFontFamily(DOCUMENT_FONT);
+        run.setFontFamily(DOCUMENT_FONT, XWPFRun.FontCharRange.eastAsia);
+        markRunAsEastAsian(run);
+        run.setText(productName == null ? "" : productName);
         run.setColor("000000");
+    }
+
+    /**
+     * 母版原始字体是微软雅黑，服务器 LibreOffice 不一定安装该字体。
+     * 在不改字号、颜色、粗细和段落布局的前提下，统一改用会嵌入成品的 Noto Sans SC。
+     */
+    private void normalizeDocumentFonts(XWPFDocument document) {
+        document.getParagraphs().forEach(this::normalizeParagraphFont);
+        document.getTables().forEach(this::normalizeTableFonts);
+        document.getHeaderList().forEach(header -> {
+            header.getParagraphs().forEach(this::normalizeParagraphFont);
+            header.getTables().forEach(this::normalizeTableFonts);
+        });
+        document.getFooterList().forEach(footer -> {
+            footer.getParagraphs().forEach(this::normalizeParagraphFont);
+            footer.getTables().forEach(this::normalizeTableFonts);
+        });
+    }
+
+    private void normalizeTableFonts(XWPFTable table) {
+        for (XWPFTableRow row : table.getRows()) {
+            for (XWPFTableCell cell : row.getTableCells()) {
+                cell.getParagraphs().forEach(this::normalizeParagraphFont);
+                cell.getTables().forEach(this::normalizeTableFonts);
+            }
+        }
+    }
+
+    private void normalizeParagraphFont(XWPFParagraph paragraph) {
+        for (XWPFRun run : paragraph.getRuns()) {
+            run.setFontFamily(DOCUMENT_FONT);
+            run.setFontFamily(DOCUMENT_FONT, XWPFRun.FontCharRange.eastAsia);
+            markRunAsEastAsian(run);
+        }
     }
 
     private void fillOverviewTable(
@@ -465,20 +531,16 @@ public class SalesProductDesignerDocumentService {
             List<SalesProductDayResourceEntity> dayResources = resources.stream()
                     .filter(item -> dayNo == item.getDayNo() && Boolean.TRUE.equals(item.getIncludeInWord()))
                     .toList();
-            String route = StringUtils.hasText(itinerary == null ? null : itinerary.getDayTitle())
-                    ? itinerary.getDayTitle()
-                    : dayResources.stream()
-                    .filter(item -> isItineraryResource(item))
-                    .map(SalesProductDayResourceEntity::getResourceNameSnapshot)
-                    .filter(StringUtils::hasText).reduce((left, right) -> left + "-" + right).orElse("待完善");
-            String hotel = accommodationText(dayResources, itinerary);
+            String route = routeText(dayResources, itinerary);
             rowText(row, 0, "D" + day);
             rowText(row, 1, route);
-            rowText(row, 2, mealText(dayResources, "breakfast", itinerary == null ? null : itinerary.getBreakfastIncluded(),
-                    previousNightAccommodation(resources, dayNo)));
-            rowText(row, 3, mealText(dayResources, "lunch", itinerary == null ? null : itinerary.getLunchIncluded()));
-            rowText(row, 4, mealText(dayResources, "dinner", itinerary == null ? null : itinerary.getDinnerIncluded()));
-            rowText(row, 5, hotel);
+            rowText(row, 2, overviewMealMark(dayResources, "breakfast",
+                    itinerary == null ? null : itinerary.getBreakfastIncluded(), previousNightAccommodation(resources, dayNo)));
+            rowText(row, 3, overviewMealMark(dayResources, "lunch",
+                    itinerary == null ? null : itinerary.getLunchIncluded(), null));
+            rowText(row, 4, overviewMealMark(dayResources, "dinner",
+                    itinerary == null ? null : itinerary.getDinnerIncluded(), null));
+            rowText(row, 5, overviewAccommodationText(dayResources, itinerary));
         }
         if (footerStyle != null) {
             XWPFTableRow footer = addClonedRow(table, footerStyle);
@@ -486,8 +548,57 @@ public class SalesProductDesignerDocumentService {
         }
     }
 
-    private String mealMark(Boolean included) {
-        return Boolean.TRUE.equals(included) ? "√" : "×";
+    private String routeText(
+            List<SalesProductDayResourceEntity> dayResources,
+            SalesProductItineraryDayEntity itinerary
+    ) {
+        if (itinerary != null && StringUtils.hasText(itinerary.getDayTitle())) {
+            return itinerary.getDayTitle();
+        }
+        return dayResources.stream()
+                .filter(this::isItineraryResource)
+                .map(SalesProductDayResourceEntity::getResourceNameSnapshot)
+                .filter(StringUtils::hasText)
+                .reduce((left, right) -> left + "-" + right)
+                .orElse("待完善");
+    }
+
+    /** 速览表只表达是否含餐，完整餐厅名称保留在每日详情中。 */
+    private String overviewMealMark(
+            List<SalesProductDayResourceEntity> dayResources,
+            String arrangementRole,
+            Boolean legacyIncluded,
+            SalesProductDayResourceEntity previousNightAccommodation
+    ) {
+        boolean hasMealResource = dayResources.stream()
+                .anyMatch(item -> arrangementRole.equals(item.getArrangementRole()));
+        boolean hotelBreakfast = "breakfast".equals(arrangementRole)
+                && previousNightAccommodation != null
+                && Boolean.TRUE.equals(previousNightAccommodation.getHotelBreakfastIncluded());
+        if (!hasMealResource && !hotelBreakfast && !Boolean.TRUE.equals(legacyIncluded)) return "---";
+        return switch (arrangementRole) {
+            case "breakfast" -> "早";
+            case "lunch" -> "中";
+            case "dinner" -> "晚";
+            default -> "含";
+        };
+    }
+
+    /** 速览表按模板语义显示住宿城市，避免完整酒店名在窄列中竖排。 */
+    private String overviewAccommodationText(
+            List<SalesProductDayResourceEntity> dayResources,
+            SalesProductItineraryDayEntity itinerary
+    ) {
+        if (itinerary != null && StringUtils.hasText(itinerary.getDestinationCity())) {
+            return itinerary.getDestinationCity();
+        }
+        String hotelCity = dayResources.stream()
+                .filter(item -> "accommodation".equals(item.getArrangementRole()))
+                .map(SalesProductDayResourceEntity::getCitySnapshot)
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .orElse(null);
+        return StringUtils.hasText(hotelCity) ? hotelCity : accommodationText(dayResources, itinerary);
     }
 
     private void fillDetailTable(
@@ -509,50 +620,100 @@ public class SalesProductDesignerDocumentService {
         CTRow dayStyle = table.getRows().size() > 1 ? copyRow(table.getRow(1)) : null;
         CTRow mealStyle = table.getRows().size() > 2 ? copyRow(table.getRow(2)) : dayStyle;
         CTRow contentStyle = table.getRows().size() > 3 ? copyRow(table.getRow(3)) : mealStyle;
-        CTRow pairStyle = table.getRows().size() > 19 ? copyRow(table.getRow(19)) : contentStyle;
-        CTRow headingStyle = table.getRows().size() > 27 ? copyRow(table.getRow(27)) : contentStyle;
-        CTRow bodyStyle = table.getRows().size() > 28 ? copyRow(table.getRow(28)) : contentStyle;
+        List<CTRow> serviceSectionRows = copyRowsFrom(table, serviceSectionStartIndex(table));
         while (table.getNumberOfRows() > 1) table.removeRow(table.getNumberOfRows() - 1);
         for (int day = 1; day <= days; day++) {
             final int dayNo = day;
             SalesProductItineraryDayEntity itinerary = itineraryByDay.get(day);
-            XWPFTableRow dayRow = addClonedRow(table, dayStyle);
-            rowText(dayRow, 0, "D" + day);
-            rowText(dayRow, 1, itinerary == null || !StringUtils.hasText(itinerary.getDayTitle()) ? "" : itinerary.getDayTitle());
-            XWPFTableRow mealRow = addClonedRow(table, mealStyle);
             List<SalesProductDayResourceEntity> dayResources = resources.stream()
                     .filter(item -> dayNo == item.getDayNo() && Boolean.TRUE.equals(item.getIncludeInWord()))
                     .toList();
-            fillMealRow(mealRow, itinerary, dayResources, previousNightAccommodation(resources, dayNo));
-            XWPFTableRow contentRow = addClonedRow(table, contentStyle);
-            fillContentCell(contentRow.getCell(0), itineraryText(itinerary));
             List<SalesProductDayResourceEntity> itineraryResources = dayResources.stream()
                     .filter(this::isItineraryResource)
                     .toList();
-            String imageMode = imageModeByDay.getOrDefault(dayNo, "follow_resource");
-            for (SalesProductDayResourceEntity resource : itineraryResources) {
-                appendResourceToCell(document, tenantId, contentRow.getCell(0), resource,
-                        introductionsByResource.getOrDefault(resource.getId(), List.of()),
-                        optionalByResource.getOrDefault(resource.getId(), List.of()),
-                        "follow_resource".equals(imageMode)
-                                ? imagesByResource.getOrDefault(resource.getId(), List.of())
-                                : List.of());
+            if (!hasDetailedDayContent(itinerary, dayResources, itineraryResources)) {
+                continue;
             }
-            if ("day_end".equals(imageMode)) {
-                // day_end 是当天统一图片组，排序允许跨景区混排，不能按资源再次拆开。
-                appendImageGridToCell(document, tenantId, contentRow.getCell(0),
-                        dayEndImagesByDay.getOrDefault(dayNo, List.of()));
+            XWPFTableRow dayRow = addClonedRow(table, dayStyle);
+            rowText(dayRow, 0, "D" + day);
+            rowText(dayRow, 1, routeText(dayResources, itinerary));
+            dayRow.setCantSplitRow(true);
+            keepRowWithNext(dayRow);
+            XWPFTableRow mealRow = addClonedRow(table, mealStyle);
+            fillMealRow(mealRow, itinerary, dayResources, previousNightAccommodation(resources, dayNo));
+            mealRow.setCantSplitRow(true);
+            String imageMode = imageModeByDay.getOrDefault(dayNo, "follow_resource");
+            boolean hasDayEndImages = "day_end".equals(imageMode)
+                    && dayEndImagesByDay.getOrDefault(dayNo, List.of()).size() >= 2;
+            boolean hasBodyContent = StringUtils.hasText(itineraryText(itinerary))
+                    || !itineraryResources.isEmpty()
+                    || hasDayEndImages;
+            if (hasBodyContent) {
+                keepRowWithNext(mealRow);
+                XWPFTableRow contentRow = addClonedRow(table, contentStyle);
+                fillContentCell(contentRow.getCell(0), itineraryText(itinerary));
+                for (SalesProductDayResourceEntity resource : itineraryResources) {
+                    appendResourceToCell(document, tenantId, contentRow.getCell(0), resource,
+                            introductionsByResource.getOrDefault(resource.getId(), List.of()),
+                            optionalByResource.getOrDefault(resource.getId(), List.of()),
+                            "follow_resource".equals(imageMode)
+                                    ? imagesByResource.getOrDefault(resource.getId(), List.of())
+                                    : List.of());
+                }
+                if (hasDayEndImages) {
+                    // day_end 是当天统一图片组，排序允许跨景区混排，不能按资源再次拆开。
+                    appendImageGridToCell(document, tenantId, contentRow.getCell(0),
+                            dayEndImagesByDay.getOrDefault(dayNo, List.of()));
+                }
             }
         }
-        addDetailSection(table, pairStyle, "【费用包含】", description == null ? null : description.getFeeIncluded());
-        addDetailSection(table, pairStyle, "【费用不含】", description == null ? null : description.getFeeExcluded());
-        addDetailSection(table, pairStyle, "【自费项目】", description == null ? null : description.getOptionalItems());
-        addDetailSection(table, pairStyle, "【购物安排】", description == null ? null : description.getShoppingArrangement());
-        addDetailSection(table, pairStyle, "【温馨提醒】", description == null ? null : description.getWarmReminder());
-        addDetailSection(table, pairStyle, "【注意事项】", description == null ? null : description.getAttentionItems());
-        addDetailSection(table, headingStyle, "不含项目", description == null ? null : description.getFeeExcluded());
-        addDetailSection(table, bodyStyle, "特别申明", description == null ? null : description.getBookingNotice());
-        addDetailSection(table, bodyStyle, "其他事项", description == null ? null : description.getAttentionItems());
+        appendTemplateServiceSection(table, serviceSectionRows, tenantId, product, resources, optionalByResource);
+    }
+
+    /** 从母版中定位【交通】开始的服务标准区，避免依赖固定旅游天数。 */
+    private int serviceSectionStartIndex(XWPFTable table) {
+        for (int index = 0; index < table.getNumberOfRows(); index++) {
+            XWPFTableRow row = table.getRow(index);
+            if (row != null && !row.getTableCells().isEmpty()
+                    && "【交通】".equals(row.getCell(0).getText().trim())) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private List<CTRow> copyRowsFrom(XWPFTable table, int startIndex) {
+        if (startIndex < 0 || startIndex >= table.getNumberOfRows()) return List.of();
+        List<CTRow> rows = new ArrayList<>();
+        for (int index = startIndex; index < table.getNumberOfRows(); index++) {
+            rows.add(copyRow(table.getRow(index)));
+        }
+        return rows;
+    }
+
+    private boolean hasDetailedDayContent(
+            SalesProductItineraryDayEntity itinerary,
+            List<SalesProductDayResourceEntity> dayResources,
+            List<SalesProductDayResourceEntity> itineraryResources
+    ) {
+        if (!dayResources.isEmpty() || !itineraryResources.isEmpty()) return true;
+        if (itinerary == null) return false;
+        return StringUtils.hasText(itinerary.getDayTitle())
+                || StringUtils.hasText(itineraryText(itinerary))
+                || StringUtils.hasText(itinerary.getRelatedHotel())
+                || StringUtils.hasText(itinerary.getAccommodationNote())
+                || Boolean.TRUE.equals(itinerary.getBreakfastIncluded())
+                || Boolean.TRUE.equals(itinerary.getLunchIncluded())
+                || Boolean.TRUE.equals(itinerary.getDinnerIncluded());
+    }
+
+    /** 将每日路线行、餐食行和后续内容绑在一起，避免页尾出现孤立蓝色标题条。 */
+    private void keepRowWithNext(XWPFTableRow row) {
+        for (XWPFTableCell cell : row.getTableCells()) {
+            for (XWPFParagraph paragraph : cell.getParagraphs()) {
+                paragraph.setKeepNext(true);
+            }
+        }
     }
 
     private XWPFTableRow cloneRow(XWPFTable table, CTRow style) {
@@ -572,7 +733,32 @@ public class SalesProductDesignerDocumentService {
 
     private void rowText(XWPFTableRow row, int cellIndex, String value) {
         if (row == null || cellIndex >= row.getTableCells().size()) return;
-        fillContentCell(row.getCell(cellIndex), value);
+        replaceCellTextPreservingStyle(row.getCell(cellIndex), value);
+    }
+
+    /** 表头、速览和每日信息单元格复用模板段落和字符样式，只替换文字。 */
+    private void replaceCellTextPreservingStyle(XWPFTableCell cell, String value) {
+        XWPFParagraph paragraph = cell.getParagraphs().isEmpty() ? cell.addParagraph() : cell.getParagraphs().getFirst();
+        CTRPr runStyle = paragraph.getRuns().isEmpty() || !paragraph.getRuns().getFirst().getCTR().isSetRPr()
+                ? null
+                : (CTRPr) paragraph.getRuns().getFirst().getCTR().getRPr().copy();
+        for (int index = paragraph.getRuns().size() - 1; index >= 0; index--) {
+            paragraph.removeRun(index);
+        }
+        CTTc cellXml = cell.getCTTc();
+        while (cellXml.sizeOfPArray() > 1) {
+            cellXml.removeP(cellXml.sizeOfPArray() - 1);
+        }
+        XWPFRun run = paragraph.createRun();
+        if (runStyle != null) {
+            run.getCTR().setRPr((CTRPr) runStyle.copy());
+        } else {
+            run.setFontSize(10);
+        }
+        run.setFontFamily(DOCUMENT_FONT);
+        run.setFontFamily(DOCUMENT_FONT, XWPFRun.FontCharRange.eastAsia);
+        markRunAsEastAsian(run);
+        run.setText(value == null ? "" : value);
     }
 
     private void fillMealRow(
@@ -649,15 +835,367 @@ public class SalesProductDesignerDocumentService {
         return firstText(itinerary.getItineraryContent(), firstText(itinerary.getRoadbookPlace(), itinerary.getRoadbookSummary()));
     }
 
-    private void addDetailSection(XWPFTable table, CTRow style, String title, String content) {
-        if (!StringUtils.hasText(content)) return;
-        XWPFTableRow row = addClonedRow(table, style);
-        if (row.getTableCells().size() == 1) {
-            fillContentCell(row.getCell(0), title + "\n" + content);
-        } else {
-            rowText(row, 0, title);
-            rowText(row, 1, content);
+    /**
+     * 复用母版的服务标准与声明区域，只替换产品动态内容。
+     *
+     * <p>交通、用餐和购物为用户下载后手填；门票、导游、保险及三组声明原样保留；
+     * 酒店和自费从当前产品编排自动汇总。</p>
+     */
+    private void appendTemplateServiceSection(
+            XWPFTable table,
+            List<CTRow> templateRows,
+            Long tenantId,
+            SalesProductEntity product,
+            List<SalesProductDayResourceEntity> resources,
+            Map<Long, List<SalesProductDayResourceOptionalItemEntity>> optionalByResource
+    ) {
+        if (templateRows.size() < 14) return;
+        List<XWPFTableRow> rows = templateRows.stream()
+                .map(row -> addClonedRow(table, row))
+                .toList();
+
+        clearServiceValue(rows.get(0)); // 交通
+        fillHotelServiceValue(rows.get(1), tenantId, product, resources);
+        clearServiceValue(rows.get(2)); // 用餐
+        // 门票、导游、保险直接保留母版原文。
+        clearServiceValue(rows.get(6)); // 购物
+        fillOptionalServiceValue(rows.get(7), orderedOptionalItems(resources, optionalByResource));
+    }
+
+    private void clearServiceValue(XWPFTableRow row) {
+        if (row != null && row.getTableCells().size() > 1) {
+            replaceCellTextPreservingStyle(row.getCell(1), "");
         }
+    }
+
+    /** 酒店按实际住宿天数、城市和所选酒店接待标准，列出资源库中的同级参考酒店。 */
+    private void fillHotelServiceValue(
+            XWPFTableRow row,
+            Long tenantId,
+            SalesProductEntity product,
+            List<SalesProductDayResourceEntity> resources
+    ) {
+        if (row == null || row.getTableCells().size() < 2) return;
+        List<SalesProductDayResourceEntity> hotels = resources.stream()
+                .filter(item -> "accommodation".equals(item.getArrangementRole()))
+                .sorted(Comparator.comparing(
+                                SalesProductDayResourceEntity::getDayNo,
+                                Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(SalesProductDayResourceEntity::getSortOrder,
+                                Comparator.nullsLast(Comparator.naturalOrder())))
+                .collect(java.util.stream.Collectors.toMap(
+                        SalesProductDayResourceEntity::getDayNo,
+                        item -> item,
+                        (left, right) -> left,
+                        LinkedHashMap::new
+                ))
+                .values().stream().toList();
+        if (hotels.isEmpty()) {
+            clearServiceValue(row);
+            return;
+        }
+
+        List<PurchaseResourceEntity> hotelResources = referenceHotelResources(tenantId, hotels);
+        Map<Long, PurchaseResourceEntity> hotelById = hotelResources.stream()
+                .filter(item -> item.getId() != null)
+                .collect(java.util.stream.Collectors.toMap(
+                        PurchaseResourceEntity::getId,
+                        item -> item,
+                        (left, right) -> left,
+                        LinkedHashMap::new
+                ));
+        XWPFTableCell cell = row.getCell(1);
+        TemplateParagraphStyle titleStyle = templateParagraphStyle(cell, text -> text.contains("晚连锁商务酒店"));
+        TemplateParagraphStyle referenceStyle = templateParagraphStyle(cell, text -> text.contains("参考酒店"));
+        TemplateParagraphStyle cityStyle = templateParagraphStyle(cell, text -> text.contains("杭州："));
+        TemplateParagraphStyle tipStyle = templateParagraphStyle(cell, text -> text.contains("温馨提示"));
+
+        clearCell(cell);
+        addTemplateParagraph(cell, titleStyle, hotelNightSummary(hotels, hotelById, product.getReceptionStandard()),
+                "0070C0", true);
+        addTemplateParagraph(cell, referenceStyle, "参考酒店：", "0070C0", true);
+
+        Map<String, List<SalesProductDayResourceEntity>> hotelsByCity = hotels.stream()
+                .filter(item -> StringUtils.hasText(item.getCitySnapshot()))
+                .collect(java.util.stream.Collectors.groupingBy(
+                        SalesProductDayResourceEntity::getCitySnapshot,
+                        LinkedHashMap::new,
+                        java.util.stream.Collectors.toList()
+                ));
+        for (Map.Entry<String, List<SalesProductDayResourceEntity>> entry : hotelsByCity.entrySet()) {
+            List<String> names = sameStandardHotelNames(
+                    entry.getKey(), entry.getValue(), hotelResources, hotelById, product.getReceptionStandard()
+            );
+            if (names.isEmpty()) continue;
+            addHotelCityParagraph(cell, cityStyle, displayCity(entry.getKey()) + "：",
+                    String.join("/", names) + "或同级别");
+        }
+        addTemplateParagraph(cell, tipStyle,
+                "温馨提示：酒店仅为参考，请以实际入住为准，入住酒店为房调中心统一安排，无法指定酒店，敬请谅解！！！",
+                "0070C0", true);
+    }
+
+    private List<PurchaseResourceEntity> referenceHotelResources(
+            Long tenantId,
+            List<SalesProductDayResourceEntity> selectedHotels
+    ) {
+        if (purchaseResourceMapper == null) return List.of();
+        List<String> cities = selectedHotels.stream()
+                .map(SalesProductDayResourceEntity::getCitySnapshot)
+                .filter(StringUtils::hasText)
+                .flatMap(city -> cityCandidates(city).stream())
+                .distinct()
+                .toList();
+        List<Long> selectedIds = selectedHotels.stream()
+                .map(SalesProductDayResourceEntity::getResourceId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        if (cities.isEmpty() && selectedIds.isEmpty()) return List.of();
+        QueryWrapper<PurchaseResourceEntity> query = new QueryWrapper<PurchaseResourceEntity>()
+                .eq("tenant_id", tenantId)
+                .eq("resource_type", "hotel")
+                .eq("is_deleted", false)
+                .and(wrapper -> wrapper.isNull("business_status")
+                        .or().notIn("business_status", List.of("closed", "suspended")));
+        query.and(wrapper -> {
+            if (!cities.isEmpty()) wrapper.in("city", cities);
+            if (!selectedIds.isEmpty()) {
+                if (!cities.isEmpty()) wrapper.or();
+                wrapper.in("id", selectedIds);
+            }
+        });
+        return purchaseResourceMapper.selectList(query
+                .orderByAsc("city")
+                .orderByAsc("resource_name")
+                .last("limit 500"));
+    }
+
+    private String hotelNightSummary(
+            List<SalesProductDayResourceEntity> hotels,
+            Map<Long, PurchaseResourceEntity> hotelById,
+            String productStandard
+    ) {
+        Map<String, Integer> nightsByStandard = new LinkedHashMap<>();
+        for (SalesProductDayResourceEntity hotel : hotels) {
+            PurchaseResourceEntity resource = hotelById.get(hotel.getResourceId());
+            String standard = resource != null && StringUtils.hasText(resource.getStarLevel())
+                    ? resource.getStarLevel().trim()
+                    : StringUtils.hasText(productStandard) ? productStandard.trim() : "酒店";
+            String label = standard.endsWith("酒店") ? standard : standard + "酒店";
+            nightsByStandard.merge(label, 1, Integer::sum);
+        }
+        return nightsByStandard.entrySet().stream()
+                .map(entry -> entry.getValue() + "晚" + entry.getKey())
+                .collect(java.util.stream.Collectors.joining("+"));
+    }
+
+    private List<String> sameStandardHotelNames(
+            String city,
+            List<SalesProductDayResourceEntity> selectedHotels,
+            List<PurchaseResourceEntity> hotelResources,
+            Map<Long, PurchaseResourceEntity> hotelById,
+            String productStandard
+    ) {
+        Set<String> standards = new java.util.LinkedHashSet<>();
+        for (SalesProductDayResourceEntity selected : selectedHotels) {
+            PurchaseResourceEntity resource = hotelById.get(selected.getResourceId());
+            if (resource != null && StringUtils.hasText(resource.getStarLevel())) {
+                standards.add(resource.getStarLevel().trim());
+            }
+        }
+        if (standards.isEmpty() && StringUtils.hasText(productStandard)) standards.add(productStandard.trim());
+
+        Set<String> names = new java.util.LinkedHashSet<>();
+        selectedHotels.stream()
+                .map(SalesProductDayResourceEntity::getResourceNameSnapshot)
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .forEach(names::add);
+        hotelResources.stream()
+                .filter(item -> sameCity(city, item.getCity()))
+                .filter(item -> standards.isEmpty()
+                        || StringUtils.hasText(item.getStarLevel()) && standards.contains(item.getStarLevel().trim()))
+                .map(PurchaseResourceEntity::getResourceName)
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .forEach(names::add);
+        return List.copyOf(names);
+    }
+
+    private String displayCity(String city) {
+        String value = city == null ? "" : city.trim();
+        return value.endsWith("市") ? value.substring(0, value.length() - 1) : value;
+    }
+
+    /** 兼容资源主档中“杭州”和行程快照中“杭州市”两种历史城市写法。 */
+    private List<String> cityCandidates(String city) {
+        String value = city == null ? "" : city.trim();
+        if (!StringUtils.hasText(value)) return List.of();
+        if (value.endsWith("市") && value.length() > 1) {
+            return List.of(value, value.substring(0, value.length() - 1));
+        }
+        return List.of(value, value + "市");
+    }
+
+    private boolean sameCity(String left, String right) {
+        if (!StringUtils.hasText(left) || !StringUtils.hasText(right)) return false;
+        return displayCity(left).equals(displayCity(right));
+    }
+
+    private List<SalesProductDayResourceOptionalItemEntity> orderedOptionalItems(
+            List<SalesProductDayResourceEntity> resources,
+            Map<Long, List<SalesProductDayResourceOptionalItemEntity>> optionalByResource
+    ) {
+        List<SalesProductDayResourceOptionalItemEntity> ordered = new ArrayList<>();
+        resources.stream()
+                .sorted(Comparator.comparing(
+                                SalesProductDayResourceEntity::getDayNo,
+                                Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(SalesProductDayResourceEntity::getSortOrder,
+                                Comparator.nullsLast(Comparator.naturalOrder())))
+                .forEach(resource -> ordered.addAll(optionalByResource.getOrDefault(resource.getId(), List.of())));
+        return ordered;
+    }
+
+    private void fillOptionalServiceValue(
+            XWPFTableRow row,
+            List<SalesProductDayResourceOptionalItemEntity> optionalItems
+    ) {
+        if (row == null || row.getTableCells().size() < 2) return;
+        XWPFTableCell cell = row.getCell(1);
+        if (optionalItems.isEmpty()) {
+            replaceCellTextPreservingStyle(cell, "");
+            return;
+        }
+        TemplateParagraphStyle itemStyle = templateParagraphStyle(cell, text -> text.contains("景区小交通"));
+        TemplateParagraphStyle policyStyle = templateParagraphStyle(cell, text -> text.contains("以上自费价格"));
+        Map<String, String> scenicTransport = new LinkedHashMap<>();
+        Map<String, String> recommended = new LinkedHashMap<>();
+        for (SalesProductDayResourceOptionalItemEntity item : optionalItems) {
+            if (!StringUtils.hasText(item.getProjectNameSnapshot())) continue;
+            java.math.BigDecimal price = optionalSalePrice(item);
+            String priceText = price == null ? "" : price.stripTrailingZeros().toPlainString() + "元/人";
+            String value = item.getProjectNameSnapshot().trim() + priceText;
+            String key = item.getProjectNameSnapshot().trim() + "|" + priceText;
+            ("scenic_transport".equals(item.getItemTypeSnapshot()) ? scenicTransport : recommended)
+                    .putIfAbsent(key, value);
+        }
+
+        clearCell(cell);
+        if (!scenicTransport.isEmpty()) {
+            addTemplateParagraph(cell, itemStyle,
+                    "景区小交通：" + String.join("；", scenicTransport.values()), null, false);
+        }
+        if (!recommended.isEmpty()) {
+            addTemplateParagraph(cell, itemStyle,
+                    "推荐活动：" + String.join("；", recommended.values()), null, false);
+        }
+        addTemplateParagraph(cell, policyStyle,
+                "以上自费价格已含门票、车费、导游讲解服务费。不参加自费的游客敬请在景区外自由活动，不使用任何优惠证件，如自行购买门票现收车费100/人/点。",
+                "0070C0", false);
+    }
+
+    private java.math.BigDecimal optionalSalePrice(SalesProductDayResourceOptionalItemEntity item) {
+        return item.getFinalSalePrice() != null
+                ? item.getFinalSalePrice()
+                : item.getSuggestedSalePriceSnapshot();
+    }
+
+    private String optionalPriceSuffix(SalesProductDayResourceOptionalItemEntity item) {
+        java.math.BigDecimal price = optionalSalePrice(item);
+        return price == null ? "" : "-" + price.stripTrailingZeros().toPlainString() + "元/人";
+    }
+
+    private TemplateParagraphStyle templateParagraphStyle(
+            XWPFTableCell cell,
+            java.util.function.Predicate<String> matcher
+    ) {
+        XWPFParagraph paragraph = cell.getParagraphs().stream()
+                .filter(item -> matcher.test(item.getText()))
+                .findFirst()
+                .orElseGet(() -> cell.getParagraphs().stream()
+                        .filter(item -> StringUtils.hasText(item.getText()))
+                        .findFirst()
+                        .orElse(null));
+        if (paragraph == null) return new TemplateParagraphStyle(null, null, null);
+        CTPPr paragraphStyle = paragraph.getCTP().isSetPPr()
+                ? (CTPPr) paragraph.getCTP().getPPr().copy()
+                : null;
+        List<XWPFRun> textRuns = paragraph.getRuns().stream()
+                .filter(run -> StringUtils.hasText(run.text()))
+                .toList();
+        CTRPr firstRun = textRuns.isEmpty() || !textRuns.getFirst().getCTR().isSetRPr()
+                ? null
+                : (CTRPr) textRuns.getFirst().getCTR().getRPr().copy();
+        CTRPr lastRun = textRuns.isEmpty() || !textRuns.getLast().getCTR().isSetRPr()
+                ? firstRun
+                : (CTRPr) textRuns.getLast().getCTR().getRPr().copy();
+        return new TemplateParagraphStyle(paragraphStyle, firstRun, lastRun);
+    }
+
+    private void addTemplateParagraph(
+            XWPFTableCell cell,
+            TemplateParagraphStyle style,
+            String text,
+            String color,
+            boolean bold
+    ) {
+        XWPFParagraph paragraph = addTemplateParagraph(cell, style);
+        XWPFRun run = addTemplateRun(paragraph, style.firstRunStyle(), text);
+        run.setBold(bold);
+        if (color != null) run.setColor(color);
+    }
+
+    private void addHotelCityParagraph(
+            XWPFTableCell cell,
+            TemplateParagraphStyle style,
+            String city,
+            String hotels
+    ) {
+        XWPFParagraph paragraph = addTemplateParagraph(cell, style);
+        XWPFRun cityRun = addTemplateRun(paragraph, style.firstRunStyle(), city);
+        cityRun.setBold(true);
+        XWPFRun hotelsRun = addTemplateRun(paragraph, style.lastRunStyle(), hotels);
+        hotelsRun.setBold(false);
+    }
+
+    private XWPFParagraph addTemplateParagraph(XWPFTableCell cell, TemplateParagraphStyle style) {
+        XWPFParagraph paragraph = cell.addParagraph();
+        if (style.paragraphStyle() != null) {
+            paragraph.getCTP().setPPr((CTPPr) style.paragraphStyle().copy());
+        }
+        return paragraph;
+    }
+
+    private XWPFRun addTemplateRun(XWPFParagraph paragraph, CTRPr runStyle, String text) {
+        XWPFRun run = paragraph.createRun();
+        if (runStyle != null) run.getCTR().setRPr((CTRPr) runStyle.copy());
+        else run.setFontSize(10);
+        run.setFontFamily(DOCUMENT_FONT);
+        run.setFontFamily(DOCUMENT_FONT, XWPFRun.FontCharRange.eastAsia);
+        markRunAsEastAsian(run);
+        run.setText(text == null ? "" : text);
+        return run;
+    }
+
+    private record TemplateParagraphStyle(CTPPr paragraphStyle, CTRPr firstRunStyle, CTRPr lastRunStyle) {}
+
+    /** 模板尾部说明使用“蓝色标题行 + 白色正文行”的固定结构。 */
+    private void addHeadingBodySection(
+            XWPFTable table,
+            CTRow headingStyle,
+            CTRow bodyStyle,
+            String title,
+            String content
+    ) {
+        if (!StringUtils.hasText(content)) return;
+        XWPFTableRow headingRow = addClonedRow(table, headingStyle);
+        rowText(headingRow, 0, title);
+        headingRow.setCantSplitRow(true);
+        keepRowWithNext(headingRow);
+        XWPFTableRow bodyRow = addClonedRow(table, bodyStyle);
+        fillContentCell(bodyRow.getCell(0), content);
     }
 
     private void appendResourceToCell(
@@ -697,7 +1235,7 @@ public class SalesProductDesignerDocumentService {
                 appendLineBreak(resourceParagraph);
             }
             appendRun(resourceParagraph, ("scenic_transport".equals(item.getItemTypeSnapshot()) ? "景区小交通：【" : "推荐自费：【")
-                    + item.getProjectNameSnapshot() + "-" + item.getFinalSalePrice().stripTrailingZeros().toPlainString() + "元/人】", "C00000", true);
+                    + item.getProjectNameSnapshot() + optionalPriceSuffix(item) + "】", "C00000", true);
             appendInlineText(resourceParagraph, item.getIntroductionContentSnapshot(), null, false);
         }
         appendImageGridToCell(document, tenantId, cell, images);
@@ -711,7 +1249,6 @@ public class SalesProductDesignerDocumentService {
     private void clearCell(XWPFTableCell cell) {
         CTTc ctCell = cell.getCTTc();
         while (ctCell.sizeOfPArray() > 0) ctCell.removeP(0);
-        ctCell.addNewP();
     }
 
     /** 同一景区的多个介绍素材共用一个 Word 段落，只有切换到下一个景区才换段。 */
@@ -740,11 +1277,12 @@ public class SalesProductDesignerDocumentService {
             appendInlineSeparator(paragraph);
             appendInlineText(paragraph, content, null, false);
         }
-        if (StringUtils.hasText(warmTip)) {
-            appendInlineSeparator(paragraph);
-            appendInlineText(paragraph, warmTip, "0070C0", false);
-        }
         appendExtensionBlocks(paragraph, extensionBlocksSnapshot);
+        if (StringUtils.hasText(warmTip)) {
+            // 按母版顺序放在扩展模块之后；只换到下一行，不额外制造空白行。
+            appendLineBreak(paragraph);
+            appendIndentedInlineText(paragraph, warmTip, "0070C0", false);
+        }
     }
 
     /** 将素材快照中的扩展内容按用户配置的标题颜色和录入顺序写入同一景区段落。 */
@@ -753,9 +1291,8 @@ public class SalesProductDesignerDocumentService {
         List<ResourceIntroductionExtensionBlock> blocks = extensionBlockCodec.decode(snapshot);
         for (ResourceIntroductionExtensionBlock block : blocks) {
             if (block == null || !StringUtils.hasText(block.title())) continue;
-            // 扩展模块是独立内容块，前面保留一个空行，不能与上一段正文或温馨提示粘在一起。
+            // 扩展模块从下一行开始；一次换行即可，不能再额外插入空白行。
             if (paragraph.getRuns().stream().anyMatch(run -> StringUtils.hasText(run.text()))) {
-                appendLineBreak(paragraph);
                 appendLineBreak(paragraph);
             }
             appendRun(paragraph, INTRODUCTION_LINE_PREFIX + block.title().trim(), colorHex(block.titleColor()), true);
@@ -794,9 +1331,15 @@ public class SalesProductDesignerDocumentService {
     }
 
     private void prepareInlineResourceParagraph(XWPFParagraph paragraph) {
+        applyIntroductionParagraphRhythm(paragraph);
+        paragraph.setIndentationFirstLine(INTRODUCTION_FIRST_LINE_INDENT_TWIPS);
+    }
+
+    /** 使用接近母版的固定行距，避免 LibreOffice 使用紧凑的默认单倍行距。 */
+    private void applyIntroductionParagraphRhythm(XWPFParagraph paragraph) {
         paragraph.setSpacingBefore(0);
         paragraph.setSpacingAfter(0);
-        paragraph.setIndentationFirstLine(INTRODUCTION_FIRST_LINE_INDENT_TWIPS);
+        paragraph.setSpacingBetween(INTRODUCTION_LINE_SPACING_POINTS, LineSpacingRule.EXACT);
     }
 
     private void appendInlineSeparator(XWPFParagraph paragraph) {
@@ -811,7 +1354,19 @@ public class SalesProductDesignerDocumentService {
                 XWPFRun breakRun = paragraph.createRun();
                 breakRun.addBreak();
             }
-            appendRun(paragraph, lines[index].strip(), color, bold);
+            String line = lines[index].strip();
+            appendRun(paragraph, index > 0 && StringUtils.hasText(line) ? INTRODUCTION_LINE_PREFIX + line : line,
+                    color, bold);
+        }
+    }
+
+    /** 温馨提示的每一行默认缩进两个中文字符。 */
+    private void appendIndentedInlineText(XWPFParagraph paragraph, String content, String color, boolean bold) {
+        if (content == null) return;
+        String[] lines = content.split("\\R", -1);
+        for (int index = 0; index < lines.length; index++) {
+            if (index > 0) appendLineBreak(paragraph);
+            appendRun(paragraph, INTRODUCTION_LINE_PREFIX + lines[index].strip(), color, bold);
         }
     }
 
@@ -837,8 +1392,7 @@ public class SalesProductDesignerDocumentService {
 
     private void addRichParagraph(XWPFTableCell cell, String value, String color, boolean bold, boolean keepWithNext) {
         XWPFParagraph paragraph = cell.addParagraph();
-        paragraph.setSpacingBefore(0);
-        paragraph.setSpacingAfter(0);
+        applyIntroductionParagraphRhythm(paragraph);
         paragraph.setKeepNext(keepWithNext);
         String text = value == null ? "" : value.strip();
         if (INTRODUCTION_LIST_LINE.matcher(text).matches()) {
@@ -973,7 +1527,7 @@ public class SalesProductDesignerDocumentService {
 
     /**
      * 将原图居中裁切成固定图片框比例：图片始终铺满框体，且不拉伸变形。
-     * 先统一转为 PNG，可避免 Word/PDF 转换时因原图格式和声明类型不一致而出现空白图。
+     * 统一裁切后以高质量 JPEG 写入，在保持打印清晰度的同时避免照片型 PNG 让 Word 体积过大。
      */
     private PreparedImage prepareCoverImage(
             byte[] imageBytes,
@@ -1005,20 +1559,38 @@ public class SalesProductDesignerDocumentService {
                 graphics.dispose();
             }
             ByteArrayOutputStream output = new ByteArrayOutputStream();
-            if (!ImageIO.write(cropped, "png", output)) {
+            if (!writeJpeg(cropped, output, 0.88f)) {
                 return new PreparedImage(imageBytes, originalPictureType, originalFilename);
             }
-            return new PreparedImage(output.toByteArray(), XWPFDocument.PICTURE_TYPE_PNG, coverFilename(originalFilename));
+            return new PreparedImage(output.toByteArray(), XWPFDocument.PICTURE_TYPE_JPEG, coverFilename(originalFilename));
         } catch (IOException ignored) {
             return new PreparedImage(imageBytes, originalPictureType, originalFilename);
         }
     }
 
     private String coverFilename(String originalFilename) {
-        if (!StringUtils.hasText(originalFilename)) return "scenic-cover.png";
+        if (!StringUtils.hasText(originalFilename)) return "scenic-cover.jpg";
         int extension = originalFilename.lastIndexOf('.');
         String baseName = extension > 0 ? originalFilename.substring(0, extension) : originalFilename;
-        return baseName + "-cover.png";
+        return baseName + "-cover.jpg";
+    }
+
+    private boolean writeJpeg(RenderedImage image, ByteArrayOutputStream output, float quality) throws IOException {
+        var writers = ImageIO.getImageWritersByFormatName("jpeg");
+        ImageWriter writer = writers.hasNext() ? writers.next() : null;
+        if (writer == null) return false;
+        try (ImageOutputStream imageOutput = ImageIO.createImageOutputStream(output)) {
+            writer.setOutput(imageOutput);
+            ImageWriteParam parameters = writer.getDefaultWriteParam();
+            if (parameters.canWriteCompressed()) {
+                parameters.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+                parameters.setCompressionQuality(quality);
+            }
+            writer.write(null, new javax.imageio.IIOImage(image, null, null), parameters);
+            return true;
+        } finally {
+            writer.dispose();
+        }
     }
 
     private record PreparedImage(byte[] bytes, int pictureType, String filename) {}
@@ -1055,7 +1627,7 @@ public class SalesProductDesignerDocumentService {
             }
             for (SalesProductDayResourceOptionalItemEntity item : optionalByResource.getOrDefault(resource.getId(), List.of())) {
                 addHiddenParagraph(document, ("scenic_transport".equals(item.getItemTypeSnapshot()) ? "景区小交通：【" : "推荐自费：【")
-                        + item.getProjectNameSnapshot() + "-" + item.getFinalSalePrice().stripTrailingZeros().toPlainString() + "元/人】", "C00000", true);
+                        + item.getProjectNameSnapshot() + optionalPriceSuffix(item) + "】", "C00000", true);
             }
         }
         if (description != null) {
@@ -1080,12 +1652,11 @@ public class SalesProductDesignerDocumentService {
     }
 
     private void addHiddenParagraph(XWPFDocument document, String value, String color, boolean bold) {
-        XWPFParagraph paragraph = document.createParagraph();
-        if (value != null && INTRODUCTION_LIST_LINE.matcher(value.strip()).matches()) {
-            paragraph.setIndentationLeft(INTRODUCTION_LIST_INDENT_TWIPS);
-            paragraph.setIndentationHanging(INTRODUCTION_LIST_INDENT_TWIPS);
-        }
-        XWPFRun run = textRun(paragraph, value == null ? "" : value, 10, bold);
+        // 兼容文本挂到已有标题段落的隐藏 run 中，不再创建数十个空白分页段落。
+        XWPFParagraph paragraph = document.getParagraphs().isEmpty()
+                ? document.createParagraph()
+                : document.getParagraphs().getFirst();
+        XWPFRun run = textRun(paragraph, value == null ? "" : value, 1, bold);
         run.setVanish(true);
         if (color != null) run.setColor(color);
     }
@@ -1100,7 +1671,7 @@ public class SalesProductDesignerDocumentService {
     /** 对外 Word 只输出最终游客价及介绍素材，不暴露供应商、成本或建议价。 */
     private void addOptionalItemFragment(XWPFDocument document, SalesProductDayResourceOptionalItemEntity item) {
         XWPFParagraph paragraph = document.createParagraph(); paragraph.setSpacingBefore(80); paragraph.setSpacingAfter(80);
-        XWPFRun run = textRun(paragraph, ("scenic_transport".equals(item.getItemTypeSnapshot()) ? "景区小交通：【" : "推荐自费：【") + item.getProjectNameSnapshot() + "-" + item.getFinalSalePrice().stripTrailingZeros().toPlainString() + "元/人】", 10, true); run.setColor("C00000");
+        XWPFRun run = textRun(paragraph, ("scenic_transport".equals(item.getItemTypeSnapshot()) ? "景区小交通：【" : "推荐自费：【") + item.getProjectNameSnapshot() + optionalPriceSuffix(item) + "】", 10, true); run.setColor("C00000");
         introductionParagraphs(document, item.getIntroductionContentSnapshot());
         introductionParagraphs(document, item.getIntroductionWarmTipSnapshot()); noticeParagraphs(document, item.getIntroductionNoticeSnapshot());
     }

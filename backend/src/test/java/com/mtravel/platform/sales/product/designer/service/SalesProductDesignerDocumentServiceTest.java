@@ -9,11 +9,13 @@ import com.mtravel.platform.sales.product.designer.entity.SalesProductAdultQuote
 import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceEntity;
 import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceIntroductionEntity;
 import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceImageEntity;
+import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceOptionalItemEntity;
 import com.mtravel.platform.sales.product.designer.entity.SalesProductDocumentVersionEntity;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductAdultQuoteMapper;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceMapper;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceImageMapper;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceIntroductionMapper;
+import com.mtravel.platform.sales.product.designer.mapper.SalesProductDayResourceOptionalItemMapper;
 import com.mtravel.platform.sales.product.designer.mapper.SalesProductDocumentVersionMapper;
 import com.mtravel.platform.sales.product.entity.SalesProductEntity;
 import com.mtravel.platform.sales.product.entity.SalesProductDescriptionEntity;
@@ -22,6 +24,9 @@ import com.mtravel.platform.sales.product.mapper.SalesProductDescriptionMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductItineraryDayMapper;
 import com.mtravel.platform.sales.product.mapper.SalesProductMapper;
 import com.mtravel.platform.purchase.resource.material.dto.ResourceIntroductionExtensionBlock;
+import com.mtravel.platform.purchase.resource.material.service.ResourceIntroductionExtensionBlockCodec;
+import com.mtravel.platform.purchase.resource.entity.PurchaseResourceEntity;
+import com.mtravel.platform.purchase.resource.mapper.PurchaseResourceMapper;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -38,8 +43,11 @@ import java.util.zip.ZipInputStream;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Assumptions;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xwpf.usermodel.LineSpacingRule;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFRun;
+import org.apache.poi.xwpf.usermodel.XWPFTable;
+import org.apache.poi.xwpf.usermodel.XWPFTableRow;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -84,6 +92,7 @@ class SalesProductDesignerDocumentServiceTest {
         itinerary.setDayTitle("杭州接团游览西湖");
         itinerary.setItineraryContent("沿湖游览并安排自由活动。");
         itinerary.setBreakfastIncluded(true);
+        itinerary.setDestinationCity("杭州市");
         when(itineraryDayMapper.selectList(any(Wrapper.class))).thenReturn(List.of(itinerary));
         when(dayResourceImageMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
         when(versionMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
@@ -106,9 +115,7 @@ class SalesProductDesignerDocumentServiceTest {
         );
         assertThat(bytesCaptor.getValue()).isNotEmpty();
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytesCaptor.getValue()))) {
-            String text = document.getParagraphs().stream()
-                    .map(paragraph -> paragraph.getText())
-                    .reduce("", (left, right) -> left + right);
+            String text = allDocumentText(document);
             assertThat(text).contains("漫步西湖", "费用包含", "行程内首道门票", "杭州接团游览西湖", "建议穿舒适鞋子", "雨天注意防滑", "请勿下水");
             assertThat(text).doesNotContain("供应商内部成本");
             assertThat(document.getParagraphs().stream()
@@ -126,24 +133,27 @@ class SalesProductDesignerDocumentServiceTest {
                     .filter(run -> "建议穿舒适鞋子".equals(run.text()))
                     .map(org.apache.poi.xwpf.usermodel.XWPFRun::getColor))
                     .containsOnlyNulls();
-            List<XWPFParagraph> paragraphs = document.getParagraphs();
-            int introductionStart = paragraphs.stream()
-                    .map(XWPFParagraph::getText)
-                    .toList()
-                    .indexOf("沿湖步行，感受杭州的城市风景。");
-            assertThat(introductionStart).isGreaterThanOrEqualTo(0);
-            assertThat(paragraphs.subList(introductionStart, introductionStart + 5))
-                    .extracting(XWPFParagraph::getText)
-                    .containsExactly(
-                            "沿湖步行，感受杭州的城市风景。",
-                            "",
-                            "灵山大佛绝佳拍照机位推荐：",
-                            "1、胜境门楼：整条灵山的中轴线尽在视觉延伸线上。",
-                            "2、佛手广场：可拍摄天下第一掌与大佛的合影。"
-                    );
-            XWPFParagraph numberedParagraph = paragraphs.get(introductionStart + 3);
-            assertThat(numberedParagraph.getIndentationLeft()).isEqualTo(420);
-            assertThat(numberedParagraph.getIndentationHanging()).isEqualTo(420);
+            var detailContentCell = document.getTables().get(1).getRow(3).getCell(0);
+            assertThat(detailContentCell.getText()).contains(
+                    "沿湖游览并安排自由活动。",
+                    "沿湖步行，感受杭州的城市风景。",
+                    "灵山大佛绝佳拍照机位推荐：",
+                    "1、胜境门楼：整条灵山的中轴线尽在视觉延伸线上。"
+            );
+            assertThat(detailContentCell.getParagraphs().getFirst().getText())
+                    .isEqualTo("沿湖游览并安排自由活动。");
+            assertThat(detailContentCell.getParagraphs())
+                    .noneMatch(paragraph -> paragraph.getText().isEmpty());
+            assertThat(document.getParagraphs()).hasSizeLessThanOrEqualTo(4);
+            assertThat(document.getParagraphs().getFirst().getAlignment())
+                    .isEqualTo(org.apache.poi.xwpf.usermodel.ParagraphAlignment.CENTER);
+            var overviewDay = document.getTables().getFirst().getRow(2);
+            assertThat(overviewDay.getCell(2).getText()).isEqualTo("早");
+            assertThat(overviewDay.getCell(3).getText()).isEqualTo("---");
+            assertThat(overviewDay.getCell(4).getText()).isEqualTo("---");
+            assertThat(overviewDay.getCell(5).getText()).isEqualTo("杭州市");
+            assertThat(overviewDay.getTableCells())
+                    .allSatisfy(cell -> assertThat(cell.getParagraphs()).hasSize(1));
             assertThat(document.getParagraphs().stream()
                     .flatMap(paragraph -> paragraph.getRuns().stream())
                     .map(run -> run.getFontFamily(org.apache.poi.xwpf.usermodel.XWPFRun.FontCharRange.eastAsia)))
@@ -189,6 +199,7 @@ class SalesProductDesignerDocumentServiceTest {
         when(dayResourceImageMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
         var firstIntroduction = introductionSnapshot(801L, 701L, 1, "灵山主体", "先游览灵山胜境。");
         firstIntroduction.setNoticeSnapshot("表演时间以景区当天安排为准");
+        firstIntroduction.setWarmTipSnapshot("温馨提示：\n①请按预约时段入园");
         firstIntroduction.setVisitDurationSnapshot("60");
         when(dayResourceIntroductionMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
                 firstIntroduction,
@@ -220,11 +231,26 @@ class SalesProductDesignerDocumentServiceTest {
             assertThat(titleIndex).as("content paragraphs: %s", contentTexts).isGreaterThanOrEqualTo(0);
             XWPFParagraph resourceParagraph = contentParagraphs.get(titleIndex);
             assertThat(resourceParagraph.getIndentationFirstLine()).isEqualTo(420);
+            assertThat(resourceParagraph.getSpacingBetween()).isEqualTo(16.0);
+            assertThat(resourceParagraph.getSpacingLineRule()).isEqualTo(LineSpacingRule.EXACT);
             assertThat(resourceParagraph.getText()).contains("表演时间以景区当天安排为准", "先游览灵山胜境。", "【九龙灌浴】", "随后观看九龙灌浴。");
             assertThat(resourceParagraph.getRuns().stream()
                     .filter(run -> "表演时间以景区当天安排为准".equals(run.text()))
                     .map(org.apache.poi.xwpf.usermodel.XWPFRun::getColor))
                     .containsOnly("C00000");
+            int warmTipRunIndex = java.util.stream.IntStream.range(0, resourceParagraph.getRuns().size())
+                    .filter(index -> "　　温馨提示：".equals(resourceParagraph.getRuns().get(index).text()))
+                    .findFirst()
+                    .orElse(-1);
+            assertThat(warmTipRunIndex).isGreaterThan(0);
+            assertThat(resourceParagraph.getRuns().get(warmTipRunIndex - 1).getCTR().sizeOfBrArray()).isEqualTo(1);
+            assertThat(resourceParagraph.getRuns().get(warmTipRunIndex).getColor()).isEqualTo("0070C0");
+            int warmTipSecondLineIndex = java.util.stream.IntStream.range(0, resourceParagraph.getRuns().size())
+                    .filter(index -> "　　①请按预约时段入园".equals(resourceParagraph.getRuns().get(index).text()))
+                    .findFirst()
+                    .orElse(-1);
+            assertThat(warmTipSecondLineIndex).isGreaterThan(warmTipRunIndex);
+            assertThat(resourceParagraph.getRuns().get(warmTipSecondLineIndex - 1).getCTR().sizeOfBrArray()).isEqualTo(1);
         }
     }
 
@@ -452,6 +478,7 @@ class SalesProductDesignerDocumentServiceTest {
         when(dayResourceImageMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
         SalesProductDayResourceIntroductionEntity introduction =
                 introductionSnapshot(801L, 701L, 1, "灵山胜境", "游览灵山胜境。");
+        introduction.setWarmTipSnapshot("温馨提示：请文明游览");
         introduction.setExtensionBlocksSnapshot(new ObjectMapper().writeValueAsString(List.of(
                 new ResourceIntroductionExtensionBlock(
                         "generic", "灵山大佛绝佳拍照机位推荐：", "#d97706", "items", null,
@@ -486,10 +513,27 @@ class SalesProductDesignerDocumentServiceTest {
                     "4、杏坛广场：最近距离拍到大佛全景。"
             );
             assertThat(text.indexOf("1、胜境门楼")).isLessThan(text.indexOf("4、杏坛广场"));
-            assertThat(paragraph.getRuns().stream()
+            List<XWPFRun> runs = paragraph.getRuns();
+            assertThat(runs.stream()
                     .filter(run -> run.text() != null && run.text().contains("灵山大佛绝佳拍照机位推荐："))
                     .map(XWPFRun::getColor))
                     .containsOnly("D97706");
+            int extensionTitleIndex = java.util.stream.IntStream.range(0, runs.size())
+                    .filter(index -> runs.get(index).text() != null
+                            && runs.get(index).text().contains("灵山大佛绝佳拍照机位推荐："))
+                    .findFirst()
+                    .orElseThrow();
+            int warmTipIndex = java.util.stream.IntStream.range(0, runs.size())
+                    .filter(index -> runs.get(index).text() != null
+                            && runs.get(index).text().contains("温馨提示：请文明游览"))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(extensionTitleIndex).isLessThan(warmTipIndex);
+            assertThat(runs.get(extensionTitleIndex - 1).getCTR().sizeOfBrArray()).isEqualTo(1);
+            assertThat(java.util.stream.IntStream.range(1, runs.size())
+                    .filter(index -> runs.get(index - 1).getCTR().sizeOfBrArray() > 0
+                            && runs.get(index).getCTR().sizeOfBrArray() > 0)
+                    .count()).isZero();
         }
     }
 
@@ -539,6 +583,105 @@ class SalesProductDesignerDocumentServiceTest {
             assertThat(text).contains("游览： 【灵山胜境】", "【九龙灌浴】", "游览： 【惠山古镇】");
             assertThat(countOccurrences(text, "游览：")).isEqualTo(2);
             assertThat(text).doesNotContain("供应商内部成本");
+            assertThat(document.getTables().getFirst().getRow(2).getCell(1).getText())
+                    .isEqualTo("西湖景区-惠山古镇");
+            assertThat(document.getTables().get(1).getRow(1).getCell(1).getText())
+                    .isEqualTo("西湖景区-惠山古镇");
+            assertThat(document.getTables().get(1).getNumberOfRows()).isEqualTo(18);
+            assertThat(text).contains("【交通】", "【酒店】", "【自费】", "不含项目", "特别申明", "其他事项");
+        }
+    }
+
+    @Test
+    void productWordShouldUseTemplateServiceRowsAndFillHotelAndOptionalItems() throws Exception {
+        SalesProductMapper productMapper = mock(SalesProductMapper.class);
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDayResourceImageMapper imageMapper = mock(SalesProductDayResourceImageMapper.class);
+        SalesProductDayResourceIntroductionMapper introductionMapper = mock(SalesProductDayResourceIntroductionMapper.class);
+        SalesProductDayResourceOptionalItemMapper optionalItemMapper = mock(SalesProductDayResourceOptionalItemMapper.class);
+        SalesProductAdultQuoteMapper adultQuoteMapper = mock(SalesProductAdultQuoteMapper.class);
+        SalesProductDescriptionMapper descriptionMapper = mock(SalesProductDescriptionMapper.class);
+        SalesProductItineraryDayMapper itineraryMapper = mock(SalesProductItineraryDayMapper.class);
+        SalesProductDocumentVersionMapper versionMapper = mock(SalesProductDocumentVersionMapper.class);
+        CommonAttachmentService attachmentService = mock(CommonAttachmentService.class);
+        PurchaseResourceMapper purchaseResourceMapper = mock(PurchaseResourceMapper.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        SalesProductDesignerDocumentService service = new SalesProductDesignerDocumentService(
+                productMapper, descriptionMapper, itineraryMapper, dayResourceMapper, imageMapper,
+                introductionMapper, adultQuoteMapper, versionMapper, attachmentService, objectMapper,
+                optionalItemMapper, new ResourceIntroductionExtensionBlockCodec(objectMapper), purchaseResourceMapper
+        );
+
+        SalesProductEntity product = product();
+        product.setReceptionStandard("舒适型");
+        when(productMapper.selectOne(any(Wrapper.class))).thenReturn(product);
+        SalesProductDayResourceEntity scenic = resource();
+        SalesProductDayResourceEntity hangzhouHotel = hotelResource(401L, 901L, 1, "杭州市", "杭州西湖酒店");
+        SalesProductDayResourceEntity nanjingHotel = hotelResource(402L, 902L, 2, "南京市", "南京中心酒店");
+        when(dayResourceMapper.selectList(any(Wrapper.class)))
+                .thenReturn(List.of(scenic, hangzhouHotel, nanjingHotel));
+        when(descriptionMapper.selectOne(any(Wrapper.class))).thenReturn(null);
+        when(itineraryMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(imageMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(introductionMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+
+        SalesProductDayResourceOptionalItemEntity transport = optionalItem(
+                501L, scenic.getId(), "scenic_transport", "景交车", "50"
+        );
+        SalesProductDayResourceOptionalItemEntity activity = optionalItem(
+                502L, scenic.getId(), "recommended_self_pay", "夜游项目", "180"
+        );
+        when(optionalItemMapper.selectList(any(Wrapper.class))).thenReturn(List.of(transport, activity));
+        when(purchaseResourceMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                hotelMaster(901L, "杭州市", "杭州西湖酒店", "舒适型"),
+                hotelMaster(903L, "杭州市", "杭州同级酒店", "舒适型"),
+                hotelMaster(902L, "南京市", "南京中心酒店", "舒适型"),
+                hotelMaster(904L, "南京市", "南京豪华酒店", "豪华型")
+        ));
+        when(versionMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(attachmentService.uploadBytes(
+                any(byte[].class), anyString(), anyString(), anyString(), anyString(), anyLong(), anyLong(), anyString()
+        )).thenReturn(uploadedAttachment());
+        when(versionMapper.insert(any(SalesProductDocumentVersionEntity.class))).thenAnswer(invocation -> 1);
+
+        ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
+        service.productWord(1L, 88L, "admin");
+        verify(attachmentService).uploadBytes(
+                bytesCaptor.capture(), anyString(), anyString(), anyString(), anyString(), eq(88L), eq(1L), eq("admin")
+        );
+
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytesCaptor.getValue()))) {
+            XWPFTable detailTable = document.getTables().get(1);
+            XWPFTableRow trafficRow = rowByLabel(detailTable, "【交通】");
+            XWPFTableRow hotelRow = rowByLabel(detailTable, "【酒店】");
+            XWPFTableRow mealRow = rowByLabel(detailTable, "【用餐】");
+            XWPFTableRow shoppingRow = rowByLabel(detailTable, "【购物】");
+            XWPFTableRow optionalRow = rowByLabel(detailTable, "【自费】");
+
+            assertThat(trafficRow.getCell(1).getText()).isEmpty();
+            assertThat(mealRow.getCell(1).getText()).isEmpty();
+            assertThat(shoppingRow.getCell(1).getText()).isEmpty();
+            assertThat(hotelRow.getCell(1).getText()).contains(
+                    "2晚舒适型酒店",
+                    "参考酒店：",
+                    "杭州：杭州西湖酒店/杭州同级酒店或同级别",
+                    "南京：南京中心酒店或同级别",
+                    "酒店仅为参考"
+            );
+            assertThat(hotelRow.getCell(1).getText()).doesNotContain("南京豪华酒店");
+            assertThat(optionalRow.getCell(1).getText()).contains(
+                    "景区小交通：景交车50元/人",
+                    "推荐活动：夜游项目180元/人",
+                    "以上自费价格已含门票、车费、导游讲解服务费"
+            );
+            assertThat(allDocumentText(document)).contains(
+                    "行程中除自己景点外所列景点第一大门票",
+                    "导游持有国家导游资格证",
+                    "旅行社责任险，赠送人身意外险",
+                    "不含项目",
+                    "特别申明",
+                    "其他事项"
+            );
         }
     }
 
@@ -635,6 +778,7 @@ class SalesProductDesignerDocumentServiceTest {
         itinerary.setBreakfastIncluded(true);
         itinerary.setLunchIncluded(true);
         itinerary.setRelatedHotel("杭州西湖武林四钻酒店");
+        itinerary.setDestinationCity("杭州市");
         itinerary.setRoadbookPlace("杭州西湖风景名胜区 -> 浙大森林");
         when(itineraryDayMapper.selectList(any(Wrapper.class))).thenReturn(List.of(itinerary));
         when(dayResourceImageMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
@@ -731,6 +875,67 @@ class SalesProductDesignerDocumentServiceTest {
         entity.setSupplierNameSnapshot("供应商内部成本");
         entity.setCostAmountSnapshot(new BigDecimal("66.00"));
         return entity;
+    }
+
+    private SalesProductDayResourceEntity hotelResource(
+            Long id,
+            Long resourceId,
+            int dayNo,
+            String city,
+            String name
+    ) {
+        SalesProductDayResourceEntity entity = new SalesProductDayResourceEntity();
+        entity.setId(id);
+        entity.setProductId(88L);
+        entity.setDayNo(dayNo);
+        entity.setResourceId(resourceId);
+        entity.setResourceNameSnapshot(name);
+        entity.setResourceTypeSnapshot("hotel");
+        entity.setArrangementRole("accommodation");
+        entity.setCitySnapshot(city);
+        entity.setIncludeInWord(true);
+        entity.setSortOrder(2);
+        return entity;
+    }
+
+    private PurchaseResourceEntity hotelMaster(Long id, String city, String name, String starLevel) {
+        PurchaseResourceEntity entity = new PurchaseResourceEntity();
+        entity.setId(id);
+        entity.setTenantId(1L);
+        entity.setResourceType("hotel");
+        entity.setResourceName(name);
+        entity.setCity(city);
+        entity.setStarLevel(starLevel);
+        entity.setBusinessStatus("open");
+        entity.setIsDeleted(false);
+        return entity;
+    }
+
+    private SalesProductDayResourceOptionalItemEntity optionalItem(
+            Long id,
+            Long dayResourceId,
+            String type,
+            String name,
+            String price
+    ) {
+        SalesProductDayResourceOptionalItemEntity entity = new SalesProductDayResourceOptionalItemEntity();
+        entity.setId(id);
+        entity.setTenantId(1L);
+        entity.setProductId(88L);
+        entity.setDayResourceId(dayResourceId);
+        entity.setItemTypeSnapshot(type);
+        entity.setProjectNameSnapshot(name);
+        entity.setFinalSalePrice(new BigDecimal(price));
+        entity.setSortOrder(1);
+        entity.setIsDeleted(false);
+        return entity;
+    }
+
+    private XWPFTableRow rowByLabel(XWPFTable table, String label) {
+        return table.getRows().stream()
+                .filter(row -> !row.getTableCells().isEmpty() && label.equals(row.getCell(0).getText().trim()))
+                .findFirst()
+                .orElseThrow();
     }
 
     private SalesProductDayResourceIntroductionEntity introductionSnapshot(

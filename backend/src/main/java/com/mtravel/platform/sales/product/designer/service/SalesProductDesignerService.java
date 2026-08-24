@@ -68,6 +68,7 @@ import com.mtravel.platform.sales.product.designer.dto.ProductDesignerSelectedOp
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerSupplierPriceLineResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerSupplierResponse;
 import com.mtravel.platform.sales.product.designer.dto.ProductDesignerSupplierOptionalItemResponse;
+import com.mtravel.platform.sales.product.designer.dto.ProductDesignerWordOptionalItemCandidateResponse;
 import com.mtravel.platform.sales.product.designer.entity.SalesProductAdultQuoteEntity;
 import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceEntity;
 import com.mtravel.platform.sales.product.designer.entity.SalesProductDayResourceImageEntity;
@@ -577,7 +578,8 @@ public class SalesProductDesignerService {
                 suppliers,
                 defaultSupplierId,
                 "scenic".equals(resource.getResourceType()) && resourceOptionalItemService != null
-                        ? resourceOptionalItemService.list(tenantId, resourceId) : List.of()
+                        ? resourceOptionalItemService.list(tenantId, resourceId) : List.of(),
+                List.of()
         );
     }
 
@@ -640,6 +642,10 @@ public class SalesProductDesignerService {
                 supplierResponsesByResource(tenantId, resourceIds);
         Map<Long, List<PurchaseResourceOptionalItemResponse>> optionalItemsByResource =
                 optionalItemsByResource(tenantId, resourceIds);
+        Map<Long, List<ProductDesignerWordOptionalItemCandidateResponse>> wordOptionalItemCandidatesByResource =
+                wordOptionalItemCandidatesByResource(
+                        tenantId, resourceIds, introductionsByResource, optionalItemsByResource
+                );
 
         Map<Long, ProductDesignerResourceDetailResponse> result = new LinkedHashMap<>();
         for (Long resourceId : resourceIds) {
@@ -680,8 +686,9 @@ public class SalesProductDesignerService {
                     suppliers,
                     defaultSupplierId,
                     "scenic".equals(resource.getResourceType())
-                            ? optionalItemsByResource.getOrDefault(resourceId, List.of())
-                            : List.of()
+                            ? optionalItemsByResource.getOrDefault(resourceId, List.of()) : List.of(),
+                    "scenic".equals(resource.getResourceType())
+                            ? wordOptionalItemCandidatesByResource.getOrDefault(resourceId, List.of()) : List.of()
             ));
         }
         return result;
@@ -777,7 +784,12 @@ public class SalesProductDesignerService {
                 .collect(Collectors.groupingBy(item -> item.value().dayResourceId(), LinkedHashMap::new, Collectors.toList()));
 
         for (SalesProductDayResourceEntity dayResource : dayResources) {
-            PurchaseResourceEntity resource = loadActiveResource(tenantId, dayResource.getResourceId());
+            PurchaseResourceEntity resource = findActiveResource(tenantId, dayResource.getResourceId());
+            if (resource == null) {
+                // 产品行程保存的是历史快照。资源主档后续被停用或删除时，保留该景区已有的
+                // 素材和图片快照，不能因此阻断同一天其他有效景区的 Word 方案保存。
+                continue;
+            }
             List<OrderedMaterial> selected = materialsByDayResource.getOrDefault(dayResource.getId(), List.of());
             List<ProductDesignerSelectedMaterialRequest> materials = selected.stream()
                     .map(item -> new ProductDesignerSelectedMaterialRequest(
@@ -909,7 +921,11 @@ public class SalesProductDesignerService {
                     .add(index + 1);
         }
         for (SalesProductDayResourceEntity dayResource : dayResources) {
-            PurchaseResourceEntity resource = loadActiveResource(tenantId, dayResource.getResourceId());
+            PurchaseResourceEntity resource = findActiveResource(tenantId, dayResource.getResourceId());
+            if (resource == null) {
+                // 已删除资源无法重新校验图片主档，保留其历史图片快照即可。
+                continue;
+            }
             saveSelectedImages(tenantId, dayResource, resource,
                     imageIdsByResource.getOrDefault(dayResource.getId(), List.of()),
                     sortOrdersByResource.getOrDefault(dayResource.getId(), List.of()), operator);
@@ -1793,12 +1809,16 @@ public class SalesProductDesignerService {
         entity.setDeletedBy(operator);
     }
 
-    private PurchaseResourceEntity loadActiveResource(Long tenantId, Long resourceId) {
-        PurchaseResourceEntity resource = resourceMapper.selectOne(new QueryWrapper<PurchaseResourceEntity>()
+    private PurchaseResourceEntity findActiveResource(Long tenantId, Long resourceId) {
+        return resourceMapper.selectOne(new QueryWrapper<PurchaseResourceEntity>()
                 .eq("tenant_id", tenantId)
                 .eq("is_deleted", false)
                 .eq("status", STATUS_ACTIVE)
                 .eq("id", resourceId));
+    }
+
+    private PurchaseResourceEntity loadActiveResource(Long tenantId, Long resourceId) {
+        PurchaseResourceEntity resource = findActiveResource(tenantId, resourceId);
         if (resource == null) {
             throw new BizException("采购资源不存在、已停用或已删除");
         }
@@ -2489,6 +2509,7 @@ public class SalesProductDesignerService {
         return resourceOptionalItemMapper.selectList(new QueryWrapper<PurchaseResourceOptionalItemEntity>()
                         .eq("tenant_id", tenantId)
                         .eq("is_deleted", false)
+                        .eq("status", STATUS_ACTIVE)
                         .in("resource_id", resourceIds)
                         .orderByAsc("resource_id")
                         .orderByAsc("project_name")
@@ -2499,6 +2520,109 @@ public class SalesProductDesignerService {
                         LinkedHashMap::new,
                         Collectors.mapping(PurchaseResourceOptionalItemResponse::fromEntity, Collectors.toList())
                 ));
+    }
+
+    /**
+     * 批量组装 Word 自费候选：只要自费主档启用且存在已发布的关联介绍，即可出现在候选中。
+     *
+     * <p>这里刻意不依赖 supplier_resource_prices，也不读取当天已选供应商。关系级自费报价
+     * 仅作为可选默认价返回：优先有建议价的默认供应商关系，其次任一有建议价的有效关系。</p>
+     */
+    private Map<Long, List<ProductDesignerWordOptionalItemCandidateResponse>> wordOptionalItemCandidatesByResource(
+            Long tenantId,
+            List<Long> resourceIds,
+            Map<Long, List<PurchaseResourceIntroductionEntity>> introductionsByResource,
+            Map<Long, List<PurchaseResourceOptionalItemResponse>> optionalItemsByResource
+    ) {
+        if (resourceIds == null || resourceIds.isEmpty() || optionalItemsByResource.isEmpty()) {
+            return Map.of();
+        }
+        List<PurchaseRelationEntity> relations = Objects.requireNonNullElse(
+                relationMapper.selectList(new QueryWrapper<PurchaseRelationEntity>()
+                        .eq("tenant_id", tenantId)
+                        .eq("is_deleted", false)
+                        .eq("status", STATUS_ACTIVE)
+                        .in("resource_id", resourceIds)),
+                List.of()
+        );
+        Map<Long, PurchaseRelationEntity> relationById = relations.stream()
+                .filter(item -> item.getId() != null)
+                .collect(Collectors.toMap(PurchaseRelationEntity::getId, Function.identity(), (left, right) -> left));
+        List<PurchaseRelationOptionalItemEntity> supplierOptionalItems = relationOptionalItemMapper == null
+                || relationById.isEmpty()
+                ? List.of()
+                : Objects.requireNonNullElse(relationOptionalItemMapper.selectList(
+                        new QueryWrapper<PurchaseRelationOptionalItemEntity>()
+                                .eq("tenant_id", tenantId)
+                                .eq("is_deleted", false)
+                                .eq("status", STATUS_ACTIVE)
+                                .in("relation_id", relationById.keySet())
+                ), List.of());
+        record RelationOptionalItem(
+                PurchaseRelationEntity relation,
+                PurchaseRelationOptionalItemEntity optionalItem
+        ) {}
+        Map<Long, List<RelationOptionalItem>> quotesByMasterId = supplierOptionalItems.stream()
+                .filter(item -> item.getResourceOptionalItemId() != null)
+                .map(item -> new RelationOptionalItem(relationById.get(item.getRelationId()), item))
+                .filter(item -> item.relation() != null)
+                .collect(Collectors.groupingBy(
+                        item -> item.optionalItem().getResourceOptionalItemId(),
+                        LinkedHashMap::new,
+                        Collectors.toList()
+                ));
+
+        Comparator<RelationOptionalItem> quotePreference = Comparator
+                .comparing((RelationOptionalItem item) -> item.optionalItem().getSuggestedSalePrice() == null)
+                .thenComparing(item -> !Boolean.TRUE.equals(item.relation().getIsDefault()))
+                .thenComparing(item -> item.optionalItem().getId());
+        Map<Long, List<ProductDesignerWordOptionalItemCandidateResponse>> result = new LinkedHashMap<>();
+        for (Long resourceId : resourceIds) {
+            List<PurchaseResourceIntroductionEntity> introductions = introductionsByResource
+                    .getOrDefault(resourceId, List.of());
+            Map<Long, List<PurchaseResourceIntroductionEntity>> introductionsByOptionalItem = introductions.stream()
+                    .filter(item -> Boolean.TRUE.equals(item.getIsOptionalItem()))
+                    .filter(item -> item.getResourceOptionalItemId() != null)
+                    .collect(Collectors.groupingBy(
+                            PurchaseResourceIntroductionEntity::getResourceOptionalItemId,
+                            LinkedHashMap::new,
+                            Collectors.toList()
+                    ));
+            List<ProductDesignerWordOptionalItemCandidateResponse> candidates = new java.util.ArrayList<>();
+            for (PurchaseResourceOptionalItemResponse optionalItem : optionalItemsByResource
+                    .getOrDefault(resourceId, List.of())) {
+                if (!STATUS_ACTIVE.equals(optionalItem.status())) {
+                    continue;
+                }
+                RelationOptionalItem quote = quotesByMasterId.getOrDefault(optionalItem.id(), List.of()).stream()
+                        // 防御历史脏数据：报价行的主档 ID 即使误关联，也不能跨资源提供建议价。
+                        .filter(item -> Objects.equals(item.relation().getResourceId(), resourceId))
+                        .min(quotePreference)
+                        .orElse(null);
+                // 介绍查询已按 published_at/id 倒序；当前一个自费项目只能选一次，取最新版本。
+                PurchaseResourceIntroductionEntity introduction = introductionsByOptionalItem
+                        .getOrDefault(optionalItem.id(), List.of())
+                        .stream()
+                        .findFirst()
+                        .orElse(null);
+                if (introduction == null) {
+                    continue;
+                }
+                candidates.add(new ProductDesignerWordOptionalItemCandidateResponse(
+                        optionalItem.id(),
+                        optionalItem.projectName(),
+                        optionalItem.optionalItemType(),
+                        introduction.getId(),
+                        introduction.getTitle(),
+                        quote == null ? null : quote.optionalItem().getId(),
+                        quote == null ? null : money(quote.optionalItem().getSuggestedSalePrice())
+                ));
+            }
+            if (!candidates.isEmpty()) {
+                result.put(resourceId, List.copyOf(candidates));
+            }
+        }
+        return result;
     }
 
     private Map<Long, List<ProductDesignerSupplierResponse>> supplierResponsesByResource(

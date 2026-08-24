@@ -6,6 +6,7 @@ import com.mtravel.platform.purchase.relation.entity.PurchaseRelationEntity;
 import com.mtravel.platform.purchase.relation.mapper.PurchaseRelationMapper;
 import com.mtravel.platform.purchase.relation.optional.entity.PurchaseRelationOptionalItemEntity;
 import com.mtravel.platform.purchase.relation.optional.mapper.PurchaseRelationOptionalItemMapper;
+import com.mtravel.platform.purchase.resource.material.entity.PurchaseResourceIntroductionEntity;
 import com.mtravel.platform.purchase.resource.material.mapper.PurchaseResourceIntroductionMapper;
 import com.mtravel.platform.purchase.resource.optional.entity.PurchaseResourceOptionalItemEntity;
 import com.mtravel.platform.purchase.resource.optional.mapper.PurchaseResourceOptionalItemMapper;
@@ -29,6 +30,45 @@ import static org.mockito.Mockito.when;
 
 /** 自费项目默认对外价规则测试。 */
 class SalesProductDesignerOptionalItemServiceTest {
+
+    @Test
+    void shouldSaveExplicitSalePriceWithoutSelectedSupplier() {
+        SalesProductDayResourceMapper dayResourceMapper = mock(SalesProductDayResourceMapper.class);
+        SalesProductDayResourceOptionalItemMapper snapshotMapper = mock(SalesProductDayResourceOptionalItemMapper.class);
+        PurchaseResourceOptionalItemMapper masterMapper = mock(PurchaseResourceOptionalItemMapper.class);
+        PurchaseResourceIntroductionMapper introductionMapper = mock(PurchaseResourceIntroductionMapper.class);
+        SalesProductDesignerOptionalItemService service = new SalesProductDesignerOptionalItemService(
+                dayResourceMapper, snapshotMapper, masterMapper,
+                mock(PurchaseRelationOptionalItemMapper.class), mock(PurchaseRelationMapper.class), introductionMapper);
+        SalesProductDayResourceEntity dayResource = new SalesProductDayResourceEntity();
+        dayResource.setId(11L);
+        dayResource.setProductId(8L);
+        dayResource.setResourceId(21L);
+        dayResource.setSupplierId(null);
+        when(dayResourceMapper.selectOne(any(Wrapper.class))).thenReturn(dayResource);
+        PurchaseResourceOptionalItemEntity master = new PurchaseResourceOptionalItemEntity();
+        master.setId(51L);
+        master.setItemType("recommended_self_pay");
+        master.setProjectName("宋城千古情");
+        when(masterMapper.selectOne(any(Wrapper.class))).thenReturn(master);
+        PurchaseResourceIntroductionEntity introduction = new PurchaseResourceIntroductionEntity();
+        introduction.setId(81L);
+        introduction.setTitle("宋城自费介绍");
+        introduction.setContent("宋城自费项目正文");
+        when(introductionMapper.selectOne(any(Wrapper.class))).thenReturn(introduction);
+        when(snapshotMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+
+        service.save(1L, new ProductDesignerOptionalItemsSaveRequest(8L, 11L, List.of(
+                new ProductDesignerSelectedOptionalItemRequest(
+                        51L, 81L, null, null, null, new BigDecimal("320.00")))), "admin");
+
+        ArgumentCaptor<SalesProductDayResourceOptionalItemEntity> captor =
+                ArgumentCaptor.forClass(SalesProductDayResourceOptionalItemEntity.class);
+        verify(snapshotMapper).insert(captor.capture());
+        assertThat(captor.getValue().getFinalSalePrice()).isEqualByComparingTo("320.00");
+        assertThat(captor.getValue().getSupplierOptionalItemId()).isNull();
+        assertThat(captor.getValue().getSelectedIntroductionId()).isEqualTo(81L);
+    }
 
     @Test
     void shouldUseCurrentSupplierSuggestedPriceWhenSalePriceIsOmitted() {
