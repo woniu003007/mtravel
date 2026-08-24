@@ -76,6 +76,7 @@ const typeLabel: Record<string, string> = {
 
 const locatedCount = computed(() => props.mapResources.length);
 const unlocatedCount = computed(() => props.resources.length - locatedCount.value);
+const markerClusterThreshold = 30;
 
 function formatMoney(value?: number) {
   return `¥${Number(value || 0).toFixed(2)}`;
@@ -174,15 +175,23 @@ function createMarker(AMap: any, resource: LocatedResource) {
   return marker;
 }
 
-async function renderMarkers(AMap: any) {
+async function renderMarkers(AMap: any, fitView = true) {
   if (!mapInstance) return;
   clearMapOverlays();
   markerInstances = props.mapResources.map((resource) => createMarker(AMap, resource));
   if (!markerInstances.length) return;
 
-  // 先按原始资源标记调整视口，再交给聚合器接管；否则聚合器尚未生成覆盖物时，
-  // setFitView 可能只看到一个聚合点，导致所有资源缩成一个大圆。
-  mapInstance.setFitView(markerInstances, false, [32, 32, 32, 32]);
+  if (fitView) {
+    // 资源集合变化时先按原始标记调整视口，再交给聚合器接管。
+    mapInstance.setFitView(markerInstances, false, [32, 32, 32, 32]);
+  }
+
+  // 少量资源直接显示名称，避免用户只能看到聚合数字；资源较多时再启用聚合，
+  // 防止大量名称同时铺在地图上影响浏览和选择。
+  if (markerInstances.length <= markerClusterThreshold) {
+    mapInstance.add(markerInstances);
+    return;
+  }
 
   await loadMarkerClusterPlugin(AMap);
   const ClusterConstructor = AMap.MarkerClusterer || AMap.MarkerCluster;
@@ -256,11 +265,21 @@ watch(() => props.open, async (open) => {
 });
 
 watch(
-  () => [props.mapResources, props.selectedResourceId, props.arrangedResourceIds],
+  () => props.mapResources,
   async () => {
     if (!props.open || !mapInstance) return;
     const AMap = await loadAmap();
-    await renderMarkers(AMap);
+    await renderMarkers(AMap, true);
+  },
+  { deep: true },
+);
+
+watch(
+  () => [props.selectedResourceId, props.arrangedResourceIds],
+  async () => {
+    if (!props.open || !mapInstance) return;
+    const AMap = await loadAmap();
+    await renderMarkers(AMap, false);
   },
   { deep: true },
 );

@@ -114,7 +114,6 @@ const resources = ref<SalesProductDesignerApi.MapResource[]>([]);
 const supplierCandidatesByResourceId = ref<Record<number, SalesProductDesignerApi.Supplier[]>>({});
 const selectedResource = ref<SalesProductDesignerApi.ResourceDetail>();
 const selectedDayResource = ref<SalesProductDesignerApi.DayResource>();
-const openingResourceId = ref<number>();
 const loading = ref(false);
 const resourceLoading = ref(false);
 const addingResourceIds = ref<Set<number>>(new Set());
@@ -163,7 +162,6 @@ const introPreview = ref<SalesProductDesignerApi.Introduction>();
 const activeDayNo = ref(1);
 const resourcePage = ref(1);
 const resourceTotal = ref(0);
-const draggedResource = ref<SalesProductDesignerApi.MapResource>();
 const mapContainer = ref<HTMLDivElement>();
 let amap: any;
 let amapMarkers: any[] = [];
@@ -177,6 +175,9 @@ let wordPlanSortableInstances: Sortable[] = [];
 let materialSortableVersion = 0;
 let wordPlanSortableVersion = 0;
 let productWordPreviewLoadVersion = 0;
+let wordPlanPrefetchTimer: number | undefined;
+const wordPlanCache = new Map<string, SalesProductDesignerApi.DayWordPlan>();
+const wordPlanRequests = new Map<string, Promise<SalesProductDesignerApi.DayWordPlan>>();
 
 const latestProductDocument = computed(() => documents.value.find(
   (item) => item.documentType === 'product_word' && item.generateStatus === 'success',
@@ -493,14 +494,6 @@ function areaText(item: { province?: string; city?: string; district?: string })
   return [item.province, item.city, item.district].filter(Boolean).join(' / ') || '所在地未维护';
 }
 
-function mapResourceAreaText(item: { city?: string; district?: string }) {
-  return [item.city, item.district].filter(Boolean).join(' / ') || '城市未维护';
-}
-
-function hasCoordinates(item: SalesProductDesignerApi.MapResource) {
-  return item.longitude != null && item.latitude != null;
-}
-
 function sameCityName(left?: string, right?: string) {
   return left?.trim().replace(/市$/, '') === right?.trim().replace(/市$/, '');
 }
@@ -627,7 +620,7 @@ function onResourceTypeChange() {
 function selectMapResource(resourceId: number) {
   selectedMapResourceId.value = resourceId;
   if (!mapFullscreenOpen.value) {
-    void renderMap();
+    void renderMap(false);
   }
 }
 
@@ -737,10 +730,6 @@ function resetResourceFilters() {
   previousProvince = undefined;
 }
 
-function handleMapAddResource(resource: SalesProductDesignerApi.MapResource) {
-  activateMapResource(resource);
-}
-
 function loadMoreMapResources() {
   resourcePage.value += 1;
   void loadResources();
@@ -762,17 +751,18 @@ function designerErrorMessage(error: unknown, fallback: string) {
   return errorMessage || fallback;
 }
 
-async function loadDetail() {
+async function loadDetail(options: { syncMapFilters?: boolean } = {}) {
   if (!productId.value) return;
   loading.value = true;
   loadError.value = '';
   try {
     detail.value = await getSalesProductDesignerDetail(productId.value);
     if (!detail.value.days.some((item) => item.dayNo === activeDayNo.value)) activeDayNo.value = 1;
-    syncMapFiltersToActiveDay();
+    if (options.syncMapFilters) syncMapFiltersToActiveDay();
     syncQuoteForm();
     await nextTick();
     void renderMap();
+    scheduleDayWordPlanPrefetch();
   } catch (error) {
     detail.value = undefined;
     loadError.value = designerErrorMessage(error, '工作台数据加载失败，请稍后重试');
@@ -880,14 +870,14 @@ async function loadAmap() {
   } catch (error) {
     amapLoader = undefined;
     document.querySelector(amapScriptSelector)?.remove();
-    mapError.value = error instanceof Error ? error.message : '地图加载失败，请使用下方资源列表继续编排';
+    mapError.value = error instanceof Error ? error.message : '地图加载失败，请打开全屏地图继续编排';
     return undefined;
   } finally {
     mapLoading.value = false;
   }
 }
 
-async function renderMap() {
+async function renderMap(fitView = true) {
   try {
     const AMap = await loadAmap();
     if (!AMap || !amap) return;
@@ -912,17 +902,21 @@ async function renderMap() {
       amap.add(marker);
       return marker;
     });
-    if (amapMarkers.length) {
+    if (mapResizeTimer) {
+      window.clearTimeout(mapResizeTimer);
+      mapResizeTimer = undefined;
+    }
+    if (amapMarkers.length && fitView) {
       amap.setFitView(amapMarkers, false, [28, 28, 28, 28]);
-      if (mapResizeTimer) window.clearTimeout(mapResizeTimer);
       mapResizeTimer = window.setTimeout(() => {
+        mapResizeTimer = undefined;
         if (!amap || !mapContainer.value) return;
         amap.resize();
         amap.setFitView(amapMarkers, false, [28, 28, 28, 28]);
       }, 120);
     }
   } catch (error) {
-    mapError.value = error instanceof Error ? error.message : '地图加载失败，请使用下方资源列表继续编排';
+    mapError.value = error instanceof Error ? error.message : '地图加载失败，请打开全屏地图继续编排';
   }
 }
 
@@ -936,7 +930,6 @@ async function retryMap() {
 
 function resetResourceEditor() {
   destroyMaterialSortable();
-  openingResourceId.value = undefined;
   selectedResource.value = undefined;
   editor.remark = '';
   editor.selectedMaterials = [];
@@ -947,35 +940,6 @@ function resetResourceEditor() {
 function handleResourceDrawerClose() {
   resetResourceEditor();
   selectedDayResource.value = undefined;
-}
-
-function hydrateSelectedMaterials(existing?: SalesProductDesignerApi.DayResource): MaterialEditorValue[] {
-  if (!existing) return [];
-  if (existing.selectedMaterials?.length) {
-    return existing.selectedMaterials.map((item) => ({
-      introductionId: item.introductionId,
-      materialType: item.materialType,
-      resourceOptionalItemId: item.resourceOptionalItemId,
-      salePrice: item.salePrice,
-      salePriceDirty: false,
-      supplierOptionalItemId: item.supplierOptionalItemId,
-    }));
-  }
-  const introductions = (existing.selectedIntroductionIds?.length
-    ? existing.selectedIntroductionIds
-    : existing.selectedIntroductionId ? [existing.selectedIntroductionId] : [])
-    .map((introductionId) => ({ introductionId, materialType: 'introduction' as const, salePriceDirty: true }));
-  const optionalItems = (existing.selectedOptionalItems || []).map((item) => ({
-    costPrice: item.referenceCostPrice,
-    introductionId: item.introductionId,
-    materialType: 'optional_item' as const,
-    resourceOptionalItemId: item.resourceOptionalItemId,
-    salePrice: item.salePrice,
-    salePriceDirty: true,
-    suggestedSalePrice: item.suggestedSalePrice,
-    supplierOptionalItemId: item.supplierOptionalItemId,
-  }));
-  return [...introductions, ...optionalItems];
 }
 
 function destroyMaterialSortable() {
@@ -1017,34 +981,11 @@ function handleMaterialSortableEnd(event: { newIndex?: number; oldIndex?: number
   editor.selectedMaterials = nextItems;
 }
 
-async function openResource(resource: SalesProductDesignerApi.MapResource) {
-  resetResourceEditor();
-  detailLoading.value = true;
-  drawerOpen.value = true;
-  openingResourceId.value = resource.id;
-  selectedDayResource.value = activeDay.value?.resources.find((item) => item.resourceId === resource.id);
-  try {
-    const resourceDetail = await getSalesProductDesignerResourceDetail(resource.id);
-    // 用户在加载期间切换了另一条资源时，不能让旧请求覆盖当前抽屉。
-    if (openingResourceId.value !== resource.id || !drawerOpen.value) return;
-    selectedResource.value = resourceDetail;
-    const existing = selectedDayResource.value;
-    editor.remark = existing?.remark || '';
-    editor.supplierId = existing?.supplierId ?? selectedResource.value.defaultSupplierId;
-    editor.selectedMaterials = hydrateSelectedMaterials(existing);
-    await nextTick();
-    productWordPreviewDirty.value = false;
-    void initializeMaterialSortable();
-  } catch {
-    resetResourceEditor();
-    drawerOpen.value = false;
-  } finally {
-    detailLoading.value = false;
-  }
-}
-
 function wordPlanMaterialKey(item: SalesProductDesignerApi.DayWordPlanMaterialSaveRequest) {
-  return `${item.dayResourceId}:${item.materialType}:${item.introductionId || item.resourceOptionalItemId || ''}`;
+  const materialId = item.materialType === 'optional_item'
+    ? item.resourceOptionalItemId
+    : item.introductionId;
+  return `${item.dayResourceId}:${item.materialType}:${materialId || ''}`;
 }
 
 function wordPlanFingerprint(items = wordPlanSelected.value) {
@@ -1067,27 +1008,130 @@ function wordPlanResource(dayResourceId: number) {
 }
 
 function wordPlanIntroduction(item: SalesProductDesignerApi.DayWordPlanMaterialSaveRequest) {
-  return wordPlanResource(item.dayResourceId)?.resourceDetail.introductions
+  return wordPlanResource(item.dayResourceId)?.resourceDetail?.introductions
     .find((introduction) => introduction.id === item.introductionId);
 }
 
 function wordPlanOptionalItem(item: SalesProductDesignerApi.DayWordPlanMaterialSaveRequest) {
-  return wordPlanResource(item.dayResourceId)?.resourceDetail.optionalItems
+  return wordPlanResource(item.dayResourceId)?.resourceDetail?.optionalItems
     ?.find((optionalItem) => optionalItem.id === item.resourceOptionalItemId);
 }
 
-function wordPlanSupplierOptionalItems(resource: SalesProductDesignerApi.DayWordPlanResource) {
-  return resource.resourceDetail.suppliers.find(
-    (supplier) => supplier.supplierId === resource.dayResource.supplierId,
-  )?.optionalItems?.filter((item) => item.status === 'active') || [];
+type WordPlanOptionalCandidate = {
+  introduction: SalesProductDesignerApi.Introduction;
+  optionalItem: SalesProductDesignerApi.ResourceOptionalItem;
+  supplierOptionalItemId?: number;
+  suggestedSalePrice?: number;
+};
+
+function wordPlanOptionalIntroduction(resource: SalesProductDesignerApi.DayWordPlanResource, optionalItemId?: number) {
+  if (!optionalItemId) return;
+  return resource.resourceDetail?.introductions.find(
+    (item) => item.isOptionalItem && item.resourceOptionalItemId === optionalItemId,
+  );
+}
+
+function wordPlanOptionalItemQuote(resource: SalesProductDesignerApi.DayWordPlanResource, optionalItemId?: number) {
+  if (!optionalItemId) return;
+  const suppliers = resource.resourceDetail?.suppliers || [];
+  const currentSupplierQuote = suppliers
+    .find((supplier) => supplier.supplierId === resource.dayResource.supplierId)
+    ?.optionalItems?.find((item) => item.resourceOptionalItemId === optionalItemId && item.status === 'active');
+  if (currentSupplierQuote) return currentSupplierQuote;
+  const defaultSupplierQuote = suppliers
+    .find((supplier) => supplier.isDefault)
+    ?.optionalItems?.find((item) => item.resourceOptionalItemId === optionalItemId && item.status === 'active');
+  if (defaultSupplierQuote) return defaultSupplierQuote;
+  return suppliers
+    .flatMap((supplier) => supplier.optionalItems || [])
+    .find((item) => item.resourceOptionalItemId === optionalItemId && item.status === 'active');
+}
+
+function wordPlanOptionalCandidates(resource: SalesProductDesignerApi.DayWordPlanResource) {
+  const candidateRows = resource.resourceDetail?.wordOptionalItemCandidates || [];
+  if (candidateRows.length) {
+    return candidateRows.flatMap((candidate): WordPlanOptionalCandidate[] => {
+      const optionalItem = resource.resourceDetail?.optionalItems?.find(
+        (item) => item.id === candidate.resourceOptionalItemId,
+      ) || {
+        id: candidate.resourceOptionalItemId,
+        optionalItemType: candidate.optionalItemType,
+        projectName: candidate.projectName,
+        status: 'active' as const,
+        suggestedSalePrice: candidate.suggestedSalePrice,
+      };
+      const introduction = resource.resourceDetail?.introductions.find(
+        (item) => item.id === candidate.introductionId,
+      ) || {
+        content: '',
+        id: candidate.introductionId,
+        indexVersion: 0,
+        isOptionalItem: true,
+        optionalItemName: candidate.projectName,
+        optionalItemType: candidate.optionalItemType,
+        resourceOptionalItemId: candidate.resourceOptionalItemId,
+        title: candidate.introductionTitle,
+      };
+      return [{
+        introduction,
+        optionalItem,
+        suggestedSalePrice: candidate.suggestedSalePrice,
+        supplierOptionalItemId: candidate.supplierOptionalItemId,
+      }];
+    });
+  }
+  const optionalItems = resource.resourceDetail?.optionalItems || [];
+  return optionalItems.flatMap((optionalItem): WordPlanOptionalCandidate[] => {
+    if (optionalItem.status !== 'active') return [];
+    const introduction = wordPlanOptionalIntroduction(resource, optionalItem.id);
+    if (!introduction) return [];
+    return [{
+      introduction,
+      optionalItem,
+      suggestedSalePrice: wordPlanOptionalItemQuote(resource, optionalItem.id)?.suggestedSalePrice,
+      supplierOptionalItemId: wordPlanOptionalItemQuote(resource, optionalItem.id)?.supplierOptionalItemId,
+    }];
+  });
+}
+
+function wordPlanOptionalCandidate(
+  resource: SalesProductDesignerApi.DayWordPlanResource,
+  optionalItemId?: number,
+) {
+  if (!optionalItemId) return;
+  return wordPlanOptionalCandidates(resource)
+    .find((candidate) => candidate.optionalItem.id === optionalItemId);
+}
+
+function wordPlanOptionalCandidateByItem(item: SalesProductDesignerApi.DayWordPlanMaterialSaveRequest) {
+  if (item.materialType !== 'optional_item' || !item.resourceOptionalItemId) return;
+  const resource = wordPlanResource(item.dayResourceId);
+  return resource ? wordPlanOptionalCandidate(resource, item.resourceOptionalItemId) : undefined;
+}
+
+function wordPlanOptionalCandidateStatus(candidate: WordPlanOptionalCandidate) {
+  return candidate.suggestedSalePrice == null ? 'missing_price' : 'ready';
+}
+
+function wordPlanOptionalCandidateStatusText(candidate: WordPlanOptionalCandidate) {
+  return wordPlanOptionalCandidateStatus(candidate) === 'missing_price'
+    ? '未配置系统建议价'
+    : `系统默认 ${formatYuanPerPerson(candidate.suggestedSalePrice!)}`;
 }
 
 /** 只提交当前已选供应商名下的报价，旧供应商遗留的报价 ID 不能再次写回。 */
 function wordPlanCurrentSupplierOptionalItem(item: SalesProductDesignerApi.DayWordPlanMaterialSaveRequest) {
   if (item.materialType !== 'optional_item' || !item.resourceOptionalItemId) return;
   const resource = wordPlanResource(item.dayResourceId);
-  return resource && wordPlanSupplierOptionalItems(resource)
-    .find((candidate) => candidate.resourceOptionalItemId === item.resourceOptionalItemId);
+  const candidate = wordPlanOptionalCandidateByItem(item);
+  if (!candidate?.supplierOptionalItemId || !resource?.dayResource.supplierId) return;
+  const currentSupplier = resource.resourceDetail?.suppliers.find(
+    (supplier) => supplier.supplierId === resource.dayResource.supplierId,
+  );
+  const matched = currentSupplier?.optionalItems?.find(
+    (optionalItem) => optionalItem.supplierOptionalItemId === candidate.supplierOptionalItemId,
+  );
+  return matched;
 }
 
 function wordPlanSelectedImages(resource: SalesProductDesignerApi.DayWordPlanResource) {
@@ -1113,7 +1157,7 @@ function wordPlanSelectedCountForResource(resource: SalesProductDesignerApi.DayW
 }
 
 function wordPlanIntroductionOptions(resource: SalesProductDesignerApi.DayWordPlanResource) {
-  return resource.resourceDetail.introductions.filter((item) => !item.isOptionalItem);
+  return resource.resourceDetail?.introductions.filter((item) => !item.isOptionalItem) || [];
 }
 
 function formatWordPlanTags(tags?: string) {
@@ -1181,6 +1225,19 @@ function validateWordPlanImages() {
   return false;
 }
 
+function validateWordPlanOptionalMaterials() {
+  const invalidItem = wordPlanSelected.value.find((item) => {
+    if (item.materialType !== 'optional_item') return false;
+    const candidate = wordPlanOptionalCandidateByItem(item);
+    return !candidate || wordPlanOptionalCandidateStatus(candidate) !== 'ready';
+  });
+  if (!invalidItem) return true;
+  const resourceName = wordPlanResource(invalidItem.dayResourceId)?.dayResource.resourceName || '当前景区';
+  const projectName = wordPlanOptionalItem(invalidItem)?.projectName || '自费项目';
+  message.error(`${resourceName} 的“${projectName}”未配置系统建议价，暂不能写入 Word`);
+  return false;
+}
+
 type WordPlanImagePickerItem = {
   image: SalesProductDesignerApi.ResourceImage;
   key: string;
@@ -1191,13 +1248,13 @@ function wordPlanImagePickerSelectedItems(): WordPlanImagePickerItem[] {
   if (wordPlanImagePickerScope.value === 'day_end') {
     return wordPlanDayEndImagePickerSelected.value.flatMap((selection) => {
       const resource = wordPlanResource(selection.dayResourceId);
-      const image = resource?.resourceDetail.images.find((candidate) => candidate.id === selection.imageId);
+      const image = resource?.resourceDetail?.images.find((candidate) => candidate.id === selection.imageId);
       return resource && image ? [{ image, key: `${selection.dayResourceId}:${selection.imageId}`, resource }] : [];
     });
   }
   const resource = wordPlanImagePickerResource.value;
   if (!resource) return [];
-  const byId = new Map(resource.resourceDetail.images.map((image) => [image.id, image]));
+  const byId = new Map((resource.resourceDetail?.images || []).map((image) => [image.id, image]));
   return wordPlanImagePickerSelected.value.flatMap((id) => {
     const image = byId.get(id);
     return image ? [{ image, key: `${resource.dayResource.id}:${image.id}`, resource }] : [];
@@ -1278,6 +1335,10 @@ function moveWordPlanImage(from: number, to: number) {
 }
 
 function openWordPlanImagePicker(resource: SalesProductDesignerApi.DayWordPlanResource) {
+  if (!resource.resourceDetail) {
+    message.warning('该景区资源资料已删除，无法选择新的图片');
+    return;
+  }
   wordPlanImagePickerScope.value = 'resource';
   wordPlanImagePickerResource.value = resource;
   wordPlanImagePickerSelected.value = [...wordPlanSelectedImages(resource)];
@@ -1295,7 +1356,7 @@ function openDayEndWordPlanImagePicker() {
 function openWordPlanImagePickerModal(resourcesToLoad: SalesProductDesignerApi.DayWordPlanResource[]) {
   wordPlanImagePickerOpen.value = true;
   wordPlanImagePickerLoading.value = true;
-  void Promise.all(resourcesToLoad.flatMap((resource) => resource.resourceDetail.images.map(async (image) => {
+  void Promise.all(resourcesToLoad.flatMap((resource) => (resource.resourceDetail?.images || []).map(async (image) => {
     if (wordPlanImageUrls[image.id]) return;
     try {
       const blob = await downloadPurchaseResourceImage(resource.dayResource.resourceId, image.id);
@@ -1419,39 +1480,27 @@ function toggleWordPlanOptionalItem(
   resource: SalesProductDesignerApi.DayWordPlanResource,
   optionalItem: SalesProductDesignerApi.ResourceOptionalItem,
 ) {
-  const supplierItem = wordPlanSupplierOptionalItems(resource)
-    .find((item) => item.resourceOptionalItemId === optionalItem.id);
-  if (!supplierItem) {
-    message.warning('请先在“供应商配置”中选择已报价的供应商');
+  const candidateConfig = wordPlanOptionalCandidate(resource, optionalItem.id);
+  if (!candidateConfig) {
+    message.warning('该自费项目缺少已发布介绍，暂不能写入 Word');
+    return;
+  }
+  if (wordPlanOptionalCandidateStatus(candidateConfig) !== 'ready') {
+    message.warning('该自费项目未配置系统建议价，暂不能写入 Word');
     return;
   }
   const candidate: SalesProductDesignerApi.DayWordPlanMaterialSaveRequest = {
     dayResourceId: resource.dayResource.id,
-    introductionId: resource.resourceDetail.introductions.find(
-      (item) => item.isOptionalItem && item.resourceOptionalItemId === optionalItem.id,
-    )?.id,
+    introductionId: candidateConfig.introduction.id,
     materialType: 'optional_item',
     resourceOptionalItemId: optionalItem.id,
-    salePrice: supplierItem.suggestedSalePrice,
-    supplierOptionalItemId: supplierItem.supplierOptionalItemId,
+    salePrice: candidateConfig.suggestedSalePrice,
+    supplierOptionalItemId: candidateConfig.supplierOptionalItemId,
   };
   const key = wordPlanMaterialKey(candidate);
   const existingIndex = wordPlanSelected.value.findIndex((item) => wordPlanMaterialKey(item) === key);
   if (existingIndex >= 0) wordPlanSelected.value = wordPlanSelected.value.filter((_, index) => index !== existingIndex);
   else addWordPlanMaterial(candidate);
-}
-
-function toggleWordPlanSupplierOptionalItem(
-  resource: SalesProductDesignerApi.DayWordPlanResource,
-  supplierItem: SalesProductDesignerApi.SupplierOptionalItem,
-) {
-  const optionalItem = resource.resourceDetail.optionalItems
-    ?.find((item) => item.id === supplierItem.resourceOptionalItemId);
-  if (!optionalItem) {
-    message.warning('该自费项目已停用或不存在，请刷新后重试');
-    return;
-  }
-  toggleWordPlanOptionalItem(resource, optionalItem);
 }
 
 function moveWordPlanGroup(from: number, to: number) {
@@ -1480,10 +1529,7 @@ function moveWordPlanMaterialWithinGroup(groupKey: string, from: number, to: num
 
 function wordPlanSuggestedSalePrice(item: SalesProductDesignerApi.DayWordPlanMaterialSaveRequest) {
   if (item.materialType !== 'optional_item') return undefined;
-  const resource = wordPlanResource(item.dayResourceId);
-  if (!resource) return undefined;
-  return wordPlanSupplierOptionalItems(resource)
-    .find((candidate) => candidate.resourceOptionalItemId === item.resourceOptionalItemId)?.suggestedSalePrice;
+  return wordPlanOptionalCandidateByItem(item)?.suggestedSalePrice;
 }
 
 function wordPlanDisplaySalePrice(item: SalesProductDesignerApi.DayWordPlanMaterialSaveRequest) {
@@ -1548,31 +1594,91 @@ async function initializeWordPlanSortable() {
   wordPlanSortableInstances = initialized;
 }
 
+function dayWordPlanCacheKey(dayNo = activeDayNo.value) {
+  const day = detail.value?.days.find((item) => item.dayNo === dayNo);
+  const scenicResources = day?.resources.filter((item) => item.resourceType === 'scenic') || [];
+  if (!productId.value || !scenicResources.length) return '';
+  return JSON.stringify([
+    productId.value,
+    dayNo,
+    scenicResources.map((item) => [
+      item.id,
+      item.resourceId,
+      item.supplierRelationId,
+      item.sortOrder,
+      item.selectedMaterials?.map((material) => [
+        material.materialType,
+        material.introductionId,
+        material.resourceOptionalItemId,
+        material.sortOrder,
+      ]),
+      item.selectedImageIds,
+    ]),
+  ]);
+}
+
+function fetchDayWordPlan(dayNo = activeDayNo.value) {
+  const cacheKey = dayWordPlanCacheKey(dayNo) || `${productId.value}:${dayNo}`;
+  const cached = wordPlanCache.get(cacheKey);
+  if (cached) return Promise.resolve(cached);
+  const pending = wordPlanRequests.get(cacheKey);
+  if (pending) return pending;
+  const request = getSalesProductDesignerDayWordPlan(productId.value, dayNo)
+    .then((data) => {
+      wordPlanCache.set(cacheKey, data);
+      return data;
+    })
+    .finally(() => wordPlanRequests.delete(cacheKey));
+  wordPlanRequests.set(cacheKey, request);
+  return request;
+}
+
+/** 页面空闲时预取全部有景区的天数；切换到 D2/D3 后不再临时等待首个请求。 */
+function scheduleDayWordPlanPrefetch() {
+  if (wordPlanPrefetchTimer) window.clearTimeout(wordPlanPrefetchTimer);
+  const dayNos = detail.value?.days
+    .filter((day) => day.resources.some((item) => item.resourceType === 'scenic'))
+    .map((day) => day.dayNo) || [];
+  if (!dayNos.length) return;
+  wordPlanPrefetchTimer = window.setTimeout(() => {
+    wordPlanPrefetchTimer = undefined;
+    dayNos.forEach((dayNo) => {
+      void fetchDayWordPlan(dayNo).catch(() => {
+        // 预取失败不打扰主页面；用户点击时仍会按正常错误流程提示。
+      });
+    });
+  }, 250);
+}
+
+async function applyDayWordPlan(data: SalesProductDesignerApi.DayWordPlan) {
+  wordPlan.value = data;
+  wordPlanImageMode.value = data.imageMode || 'follow_resource';
+  initializeWordPlanImages(data);
+  wordPlanSelected.value = data.selectedMaterials.map((item) => ({
+    dayResourceId: item.dayResourceId,
+    introductionId: item.material.introductionId,
+    materialType: item.material.materialType,
+    resourceOptionalItemId: item.material.resourceOptionalItemId,
+    salePrice: item.material.salePrice,
+    supplierOptionalItemId: item.material.supplierOptionalItemId,
+  }));
+  savedWordPlanFingerprint.value = wordPlanFingerprint();
+  await nextTick();
+  productWordPreviewDirty.value = false;
+  void initializeWordPlanSortable();
+}
+
 async function openDayWordPlan() {
   wordPlanOpen.value = true;
   wordPlanLoading.value = true;
   wordPlanEditorMode.value = 'select';
   wordPlanImageSettingsOpen.value = false;
   try {
-    const data = await getSalesProductDesignerDayWordPlan(productId.value, activeDayNo.value);
-    wordPlan.value = data;
-    wordPlanImageMode.value = data.imageMode || 'follow_resource';
-    initializeWordPlanImages(data);
-    wordPlanSelected.value = data.selectedMaterials.map((item) => ({
-      dayResourceId: item.dayResourceId,
-      introductionId: item.material.introductionId,
-      materialType: item.material.materialType,
-      resourceOptionalItemId: item.material.resourceOptionalItemId,
-      salePrice: item.material.salePrice,
-      supplierOptionalItemId: item.material.supplierOptionalItemId,
-    }));
-    savedWordPlanFingerprint.value = wordPlanFingerprint();
-    await nextTick();
-    productWordPreviewDirty.value = false;
-    void initializeWordPlanSortable();
-  } catch (error) {
+    const data = await fetchDayWordPlan(activeDayNo.value);
+    if (!wordPlanOpen.value) return;
+    await applyDayWordPlan(data);
+  } catch {
     wordPlanOpen.value = false;
-    message.error(designerErrorMessage(error, 'Word 方案加载失败'));
   } finally {
     wordPlanLoading.value = false;
   }
@@ -1609,6 +1715,7 @@ function requestCloseDayWordPlan() {
 async function saveDayWordPlan() {
   if (!wordPlan.value) return;
   if (!validateWordPlanImages()) return;
+  if (!validateWordPlanOptionalMaterials()) return;
   wordPlanSaving.value = true;
   try {
     const imagePayload = buildWordPlanImageSavePayload({
@@ -1629,7 +1736,9 @@ async function saveDayWordPlan() {
       selectedMaterials: wordPlanSelected.value.map((item) => ({
         ...item,
         supplierOptionalItemId: wordPlanCurrentSupplierOptionalItem(item)?.supplierOptionalItemId,
-        salePrice: item.materialType === 'optional_item' ? undefined : item.salePrice,
+        salePrice: item.materialType === 'optional_item'
+          ? (item.salePrice ?? wordPlanSuggestedSalePrice(item))
+          : item.salePrice,
       })),
     });
     wordPlan.value = saved;
@@ -1645,11 +1754,12 @@ async function saveDayWordPlan() {
     }));
     savedWordPlanFingerprint.value = wordPlanFingerprint();
     await loadDetail();
+    const cacheKey = dayWordPlanCacheKey(saved.dayNo);
+    if (cacheKey) wordPlanCache.set(cacheKey, saved);
     const version = await generateProductWordPreviewVersion();
     if (version?.generateStatus === 'success') message.success('当天 Word 方案已保存，预览已刷新');
     else message.warning('当天 Word 方案已保存，预览生成失败，可稍后重试');
-  } catch (error) {
-    message.error(designerErrorMessage(error, 'Word 方案保存失败，请稍后重试'));
+  } catch {
   } finally {
     wordPlanSaving.value = false;
   }
@@ -1717,14 +1827,6 @@ function resourceArrangementLabel(
   return `第 ${activeDayNo.value} 天行程`;
 }
 
-function resourceActionLabel(resource: SalesProductDesignerApi.MapResource) {
-  if (resource.resourceType === 'hotel') return activeAccommodation.value ? '更换住宿' : '安排住宿';
-  if (resource.resourceType === 'restaurant') {
-    return mealSelectionTarget.value ? `安排${mealRoleLabel[mealSelectionTarget.value]}` : '安排用餐';
-  }
-  return `加入 D${activeDayNo.value}`;
-}
-
 function clearArrangementSelection() {
   hotelSelectionTarget.value = undefined;
   mealSelectionTarget.value = undefined;
@@ -1748,32 +1850,6 @@ async function startItinerarySelection() {
   clearArrangementSelection();
   filters.resourceType = undefined;
   await loadResources(true);
-}
-
-async function addResourceForArrangement(resource: SalesProductDesignerApi.MapResource) {
-  const target = resolveArrangementTarget(resource.resourceType);
-  if ('unsupportedInDayMap' in target) {
-    message.info(resource.resourceType === 'ground_agent'
-      ? '地接服务请在真实团队安排阶段配置'
-      : '用车请在产品级全程用车区域安排');
-    return;
-  }
-  if ('requiresMealSelection' in target) {
-    if (!mealSelectionTarget.value) {
-      restaurantMealPickerResource.value = resource;
-      restaurantMealPickerRole.value = undefined;
-      restaurantMealPickerOpen.value = true;
-      return;
-    }
-    await addResource(resource, activeDayNo.value, mealSelectionTarget.value);
-    return;
-  }
-  await addResource(
-    resource,
-    hotelSelectionTarget.value || activeDayNo.value,
-    target.role,
-    target.role === 'accommodation' ? activeAccommodation.value : undefined,
-  );
 }
 
 async function addResource(
@@ -2208,18 +2284,6 @@ function documentTypeText(version: SalesProductDesignerApi.DocumentVersion) {
   return version.documentType === 'product_word' ? '产品介绍 Word' : '成人报价单';
 }
 
-function onResourceDragStart(resource: SalesProductDesignerApi.MapResource) {
-  draggedResource.value = resource;
-}
-
-async function onDayDrop(dayNo: number) {
-  if (draggedResource.value) {
-    activeDayNo.value = dayNo;
-    await addResourceForArrangement(draggedResource.value);
-    draggedResource.value = undefined;
-  }
-}
-
 function back() {
   router.push('/sales/product/designer');
 }
@@ -2258,6 +2322,7 @@ watch(() => [
 watch(activeDayNo, () => {
   selectedDayResource.value = undefined;
   syncMapFiltersToActiveDay();
+  scheduleDayWordPlanPrefetch();
 });
 watch(
   () => [activeDayNo.value, activeDay.value?.destinationCity] as const,
@@ -2289,7 +2354,7 @@ watch(wordPlanEditorMode, () => {
 
 onMounted(async () => {
   await loadStarLevelOptions();
-  await loadDetail();
+  await loadDetail({ syncMapFilters: true });
   if (detail.value) await loadDocuments();
   await loadResources(true);
   await nextTick();
@@ -2302,6 +2367,7 @@ onBeforeUnmount(() => {
   revokeProductWordPreviewUrl();
   Object.values(wordPlanImageUrls).forEach((url) => URL.revokeObjectURL(url));
   if (mapResizeTimer) window.clearTimeout(mapResizeTimer);
+  if (wordPlanPrefetchTimer) window.clearTimeout(wordPlanPrefetchTimer);
   amapMarkers.forEach((marker) => amap?.remove(marker));
   amap?.destroy?.();
   amap = undefined;
@@ -2362,8 +2428,6 @@ onBeforeUnmount(() => {
               :class="{ active: activeDayNo === day.dayNo }"
               class="day-tab"
               type="text"
-              @dragover.prevent
-              @drop="onDayDrop(day.dayNo)"
               @click="activeDayNo = day.dayNo"
             >
               <span class="day-no">D{{ day.dayNo }}</span>
@@ -2458,7 +2522,7 @@ onBeforeUnmount(() => {
                 v-if="mapError"
                 :message="mapError"
                 closable
-                description="地图不可用时，可直接从下方资源列表加入行程。"
+                description="可打开全屏地图，从右侧资源列表继续选择资源。"
                 show-icon
                 type="warning"
                 @close="mapError = ''"
@@ -2469,45 +2533,12 @@ onBeforeUnmount(() => {
                 <Alert
                   v-if="unlocatedResources.length"
                   message="找到资源，但尚未维护地图点位"
-                  description="这些资源仍会显示在下方列表，可以直接加入行程；完成地图点位后才会出现在地图上。"
+                  description="可打开全屏地图，从右侧资源列表直接加入行程；完成地图点位后才会显示在地图上。"
                   show-icon
                   type="info"
                 />
                 <Empty v-else description="没有符合条件的资源" />
               </div>
-            </div>
-            <div class="resource-list-header">
-              <strong>资源列表</strong>
-              <span>当前显示 {{ resources.length }} / {{ resourceTotal }} 项</span>
-            </div>
-            <div class="resource-list" @scroll="undefined">
-              <div
-                v-for="resource in resources"
-                :key="resource.id"
-                class="resource-row"
-                :class="{ 'is-selected': resource.id === selectedMapResourceId }"
-                role="button"
-                tabindex="0"
-                draggable="true"
-                @dragstart="onResourceDragStart(resource)"
-                @click="activateMapResource(resource)"
-                @keydown.enter="activateMapResource(resource)"
-              >
-                <div class="resource-dot" :class="`type-${resource.resourceType}`"></div>
-                <div class="resource-main">
-                  <strong>{{ resource.resourceName }}</strong>
-                  <span>{{ typeLabel[resource.resourceType] || resource.resourceType }} · {{ mapResourceAreaText(resource) }}</span>
-                </div>
-                <div class="resource-meta">
-                  <Tag v-if="!hasCoordinates(resource)" color="orange">未定位</Tag>
-                  <Tag v-if="resource.procurementMode === 'not_required'" color="green">无需采购</Tag>
-                  <span v-else class="resource-price">{{ formatMoney(resource.referenceUnitPrice) }}</span>
-                  <Tooltip :title="resourceActionLabel(resource)"><Button type="primary" size="small" :loading="addingResourceIds.has(resource.id)" @click.stop="handleMapAddResource(resource)">{{ resourceActionLabel(resource) }}</Button></Tooltip>
-                  <Tooltip title="查看详情并配置"><Button type="text" size="small" @click.stop="openResource(resource)"><IconifyIcon icon="lucide:settings-2" /></Button></Tooltip>
-                </div>
-              </div>
-              <div v-if="resourceLoading" class="list-loading"><Spin size="small" /> 正在加载资源</div>
-              <div v-if="resources.length < resourceTotal && !resourceLoading" class="load-more"><Button type="link" @click="resourcePage += 1; loadResources()">加载更多</Button></div>
             </div>
           </Card>
 
@@ -2803,7 +2834,11 @@ onBeforeUnmount(() => {
             <header class="word-plan-toolbar">
               <div class="word-plan-toolbar-title">
                 <strong>D{{ wordPlan.dayNo }} · Word 内容编排</strong>
-                <span>{{ wordPlan.resources.length }} 个景区 · 已选 {{ wordPlanSelected.length }} 项内容</span>
+                <span class="word-plan-toolbar-context">
+                  <b>{{ wordPlan.resources.length }}</b> 个景区
+                  <i></i>
+                  已选 <b>{{ wordPlanSelected.length }}</b> 项内容
+                </span>
               </div>
               <div class="word-plan-toolbar-actions">
                 <button
@@ -2830,11 +2865,14 @@ onBeforeUnmount(() => {
             <div class="day-word-plan-layout">
               <section class="word-plan-editor-pane" aria-label="Word 内容编排">
                 <div class="word-plan-editor-switcher">
+                  <div class="word-plan-editor-heading">
+                    <strong>当天内容</strong>
+                    <span>{{ wordPlanEditorMode === 'select' ? '勾选要写入当天行程的素材' : '拖动景区或素材调整 Word 输出顺序' }}</span>
+                  </div>
                   <Radio.Group v-model:value="wordPlanEditorMode" size="small" button-style="solid">
                     <Radio.Button value="select">选择内容</Radio.Button>
                     <Radio.Button value="sort">调整顺序</Radio.Button>
                   </Radio.Group>
-                  <span>{{ wordPlanEditorMode === 'select' ? '勾选要写入当天行程的素材' : '拖动景区或素材调整 Word 输出顺序' }}</span>
                 </div>
 
                 <div v-if="wordPlanEditorMode === 'select'" class="word-plan-source-scroll">
@@ -2846,9 +2884,9 @@ onBeforeUnmount(() => {
                       </Tag>
                     </header>
 
-                    <div class="word-plan-candidate-section">
+                    <div v-if="wordPlanIntroductionOptions(resource).length" class="word-plan-candidate-section">
                       <div class="word-plan-candidate-title">介绍素材</div>
-                      <div v-if="wordPlanIntroductionOptions(resource).length" class="word-plan-candidate-list">
+                      <div class="word-plan-candidate-list">
                         <Checkbox
                           v-for="introduction in wordPlanIntroductionOptions(resource)"
                           :key="introduction.id"
@@ -2861,24 +2899,31 @@ onBeforeUnmount(() => {
                           </span>
                         </Checkbox>
                       </div>
-                      <div v-else-if="!wordPlanSupplierOptionalItems(resource).length" class="word-plan-candidate-empty">暂无可写入 Word 的内容</div>
                     </div>
 
-                    <div v-if="wordPlanSupplierOptionalItems(resource).length" class="word-plan-candidate-section word-plan-optional-section">
+                    <div v-else-if="!resource.resourceDetail" class="word-plan-candidate-empty is-unavailable">
+                      资源资料已删除，仅保留当天行程快照，无法选择新的 Word 素材
+                    </div>
+
+                    <div v-if="wordPlanOptionalCandidates(resource).length" class="word-plan-candidate-section word-plan-optional-section">
                       <div class="word-plan-candidate-title">自费项目</div>
                       <div class="word-plan-candidate-list">
                         <Checkbox
-                          v-for="supplierItem in wordPlanSupplierOptionalItems(resource)"
-                          :key="supplierItem.supplierOptionalItemId"
-                          :checked="isWordPlanSelected({ dayResourceId: resource.dayResource.id, materialType: 'optional_item', resourceOptionalItemId: supplierItem.resourceOptionalItemId })"
-                          @change="toggleWordPlanSupplierOptionalItem(resource, supplierItem)"
+                          v-for="candidate in wordPlanOptionalCandidates(resource)"
+                          :key="candidate.optionalItem.id"
+                          :checked="isWordPlanSelected({ dayResourceId: resource.dayResource.id, materialType: 'optional_item', resourceOptionalItemId: candidate.optionalItem.id })"
+                          :disabled="wordPlanOptionalCandidateStatus(candidate) !== 'ready'"
+                          @change="toggleWordPlanOptionalItem(resource, candidate.optionalItem)"
                         >
                           <span class="word-plan-candidate-copy">
-                            <strong class="word-plan-candidate-name">{{ supplierItem.projectName }}</strong>
-                            <small class="word-plan-candidate-meta">系统默认 {{ formatYuanPerPerson(supplierItem.suggestedSalePrice) }}</small>
+                            <strong class="word-plan-candidate-name">{{ candidate.optionalItem.projectName }}</strong>
+                            <small class="word-plan-candidate-meta">{{ wordPlanOptionalCandidateStatusText(candidate) }}</small>
                           </span>
                         </Checkbox>
                       </div>
+                    </div>
+                    <div v-else-if="resource.resourceDetail && !wordPlanIntroductionOptions(resource).length" class="word-plan-candidate-empty">
+                      暂无可写入 Word 的内容
                     </div>
                   </section>
                 </div>
@@ -2898,7 +2943,7 @@ onBeforeUnmount(() => {
                       </button>
                       <div class="word-plan-group-title">
                         <strong>{{ group.resourceName }}</strong>
-                        <span>整组拖动，不会把其他景区插入本组</span>
+                        <span>整组排序 · 素材仅在本景区内调整</span>
                       </div>
                       <Tag>{{ group.items.length }} 项</Tag>
                     </header>
@@ -2945,6 +2990,17 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </template>
+        <div v-else class="word-plan-loading-state">
+          <div class="word-plan-loading-copy">
+            <IconifyIcon icon="lucide:file-text" />
+            <strong>正在准备 D{{ activeDayNo }} 的 Word 内容</strong>
+            <span>加载当天景区素材和已选编排，请稍候…</span>
+          </div>
+          <div class="word-plan-loading-columns" aria-hidden="true">
+            <div><i></i><i></i><i></i><i></i></div>
+            <div><i></i><i></i><i></i></div>
+          </div>
+        </div>
       </Spin>
     </Drawer>
 
@@ -2971,7 +3027,7 @@ onBeforeUnmount(() => {
               <Tag :color="wordPlanImageSelectionState(resource) === 'invalid' ? 'error' : wordPlanSelectedImages(resource).length ? 'blue' : 'default'">
                 {{ wordPlanImageTagText(resource) }}
               </Tag>
-              <Button size="small" @click="openWordPlanImagePicker(resource)">选择图片</Button>
+              <Button size="small" :disabled="!resource.resourceDetail" @click="openWordPlanImagePicker(resource)">选择图片</Button>
             </Space>
           </div>
         </div>
@@ -3050,11 +3106,11 @@ onBeforeUnmount(() => {
             <section v-for="resource in wordPlan?.resources || []" :key="resource.dayResource.id" class="word-image-resource-group">
               <header>
                 <strong>{{ resource.dayResource.resourceName }}</strong>
-                <span>{{ resource.resourceDetail.images.length }} 张可选</span>
+                <span>{{ resource.resourceDetail?.images.length || 0 }} 张可选</span>
               </header>
-              <div v-if="resource.resourceDetail.images.length" class="word-image-grid">
+              <div v-if="resource.resourceDetail?.images.length" class="word-image-grid">
                 <label
-                  v-for="image in resource.resourceDetail.images"
+                  v-for="image in resource.resourceDetail?.images || []"
                   :key="image.id"
                   class="word-image-card"
                   :class="{ 'is-selected': isWordPlanImagePickerSelected(resource, image.id) }"
@@ -3072,9 +3128,9 @@ onBeforeUnmount(() => {
             </section>
           </div>
           <template v-else-if="wordPlanImagePickerResource">
-            <div v-if="wordPlanImagePickerResource.resourceDetail.images.length" class="word-image-grid">
+            <div v-if="wordPlanImagePickerResource.resourceDetail?.images.length" class="word-image-grid">
               <label
-                v-for="image in wordPlanImagePickerResource.resourceDetail.images"
+                v-for="image in wordPlanImagePickerResource.resourceDetail?.images || []"
                 :key="image.id"
                 class="word-image-card"
                 :class="{ 'is-selected': isWordPlanImagePickerSelected(wordPlanImagePickerResource, image.id) }"
@@ -3189,7 +3245,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .designer-shell {
-  --designer-map-height: clamp(460px, calc(100vh - 470px), 680px);
+  --designer-map-height: clamp(620px, calc(100vh - 350px), 780px);
   min-height: calc(100vh - 172px);
 }
 .designer-summary { display: flex; align-items: stretch; gap: 0; padding: 0 16px; margin-bottom: 12px; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; color: #334155; }
@@ -3236,22 +3292,9 @@ onBeforeUnmount(() => {
 .map-container :deep(.designer-map-label.is-selected) { padding: 3px 7px; border-color: #69b1ff; background: #eaf3ff; color: #0958d9; font-size: 12px; font-weight: 600; box-shadow: 0 2px 8px rgb(22 119 255 / 18%); }
 .map-loading { position: absolute; inset: 45% auto auto 50%; z-index: 2; }
 .map-empty { display: grid; height: 100%; place-items: center; }
-.resource-list-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 9px; border-bottom: 1px solid #e5e7eb; color: #1f2937; }
-.resource-list-header span { color: #8c8c8c; font-size: 12px; }
-.resource-list { max-height: 248px; overflow-y: auto; border: 1px solid #f0f0f0; border-radius: 4px; }
-.resource-row { display: flex; align-items: center; gap: 6px; min-height: 56px; padding: 7px 10px; border-bottom: 1px solid #f0f0f0; cursor: grab; }
-.resource-row:last-child { border-bottom: 0; }
-.resource-row:hover, .resource-row.is-selected { background: #f6faff; }
-.resource-row.is-selected { box-shadow: inset 3px 0 0 #1677ff; }
-.resource-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #1677ff; }
-.type-hotel { background: #722ed1; }.type-restaurant { background: #fa8c16; }.type-shopping { background: #13c2c2; }.type-vehicle { background: #52c41a; }
-.resource-main, .plan-main { min-width: 0; flex: 1; }
-.resource-main strong, .resource-main span, .plan-main strong, .plan-main span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.resource-main span, .plan-main span { margin-top: 2px; color: #64748b; font-size: 11px; }
-.resource-meta { display: flex; align-items: center; gap: 6px; color: #1677ff; font-size: 12px; }
-.resource-meta :deep(.ant-tag) { margin-inline-end: 0; }
-.resource-price { color: #1677ff; font-size: 12px; white-space: nowrap; }
-.list-loading, .load-more { padding: 10px; text-align: center; color: #64748b; }
+.plan-main { min-width: 0; flex: 1; }
+.plan-main strong, .plan-main span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-main span { margin-top: 2px; color: #64748b; font-size: 11px; }
 .plan-panel { overflow: hidden; }
 .plan-panel :deep(.ant-card-body) { min-height: 0; flex: 1; overflow-y: auto; padding: 12px 16px; }
 .day-itinerary-section { margin-bottom: 12px; border: 1px solid #e5e7eb; border-radius: 4px; background: #fafcff; }
@@ -3387,16 +3430,29 @@ onBeforeUnmount(() => {
 .day-word-plan-drawer :deep(.ant-drawer-content-wrapper) { width: 100vw !important; max-width: 100vw; }
 .day-word-plan-drawer :deep(.ant-drawer-header) { min-height: 54px; padding: 13px 20px; border-bottom-color: #e5e7eb; }
 .day-word-plan-drawer :deep(.ant-drawer-title) { color: #1f2937; font-size: 16px; font-weight: 650; }
-.day-word-plan-drawer :deep(.ant-drawer-body) { padding: 0; overflow: hidden; background: #f4f6f8; }
+.day-word-plan-drawer :deep(.ant-drawer-body) { padding: 0; overflow: hidden; background: #f7f8fa; }
 .day-word-plan-drawer :deep(.ant-spin-nested-loading), .day-word-plan-drawer :deep(.ant-spin-container) { height: 100%; }
+.word-plan-loading-state { display: flex; height: calc(100vh - 55px); min-height: 0; flex-direction: column; padding: 24px; background: #f7f8fa; }
+.word-plan-loading-copy { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px; color: #64748b; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; }
+.word-plan-loading-copy svg { margin-bottom: 10px; color: #1677ff; font-size: 26px; }
+.word-plan-loading-copy strong { color: #1f2937; font-size: 15px; }
+.word-plan-loading-copy span { margin-top: 5px; font-size: 12px; }
+.word-plan-loading-columns { display: grid; min-height: 0; flex: 1; gap: 18px; margin-top: 18px; grid-template-columns: 42% 58%; }
+.word-plan-loading-columns > div { padding: 24px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; }
+.word-plan-loading-columns i { display: block; height: 14px; margin-bottom: 18px; background: linear-gradient(90deg, #eef1f5 25%, #f8fafc 50%, #eef1f5 75%); background-size: 200% 100%; border-radius: 4px; animation: word-plan-loading 1.2s ease-in-out infinite; }
+.word-plan-loading-columns i:nth-child(2n) { width: 76%; }
+.word-plan-loading-columns i:nth-child(3n) { width: 88%; }
+@keyframes word-plan-loading { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 .word-plan-workspace { display: flex; height: calc(100vh - 55px); min-height: 0; flex-direction: column; }
-.word-plan-toolbar { display: flex; min-height: 66px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 20px; padding: 10px 20px; background: #fff; border-bottom: 1px solid #e5e7eb; }
+.word-plan-toolbar { display: flex; min-height: 64px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 20px; padding: 10px 24px; background: #fff; border-bottom: 1px solid #e5e7eb; }
 .word-plan-toolbar-title { min-width: 0; }
 .word-plan-toolbar-title strong, .word-plan-toolbar-title span { display: block; }
-.word-plan-toolbar-title strong { color: #1f2937; font-size: 15px; font-weight: 650; }
-.word-plan-toolbar-title span { margin-top: 3px; color: #64748b; font-size: 12px; }
+.word-plan-toolbar-title strong { color: #1f2937; font-size: 16px; font-weight: 650; }
+.word-plan-toolbar-context { display: flex !important; align-items: center; gap: 7px; margin-top: 4px; color: #64748b; font-size: 12px; }
+.word-plan-toolbar-context b { color: #334155; font-weight: 600; }
+.word-plan-toolbar-context i { width: 3px; height: 3px; flex: 0 0 auto; border-radius: 50%; background: #b6c0cc; }
 .word-plan-toolbar-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; }
-.word-plan-image-summary { display: flex; min-width: 204px; align-items: center; gap: 9px; padding: 6px 10px; color: #475569; text-align: left; background: #fff; border: 1px solid #d9d9d9; border-radius: 6px; cursor: pointer; transition: border-color .16s ease, color .16s ease, background .16s ease; }
+.word-plan-image-summary { display: flex; min-width: 190px; align-items: center; gap: 9px; padding: 6px 10px; color: #475569; text-align: left; background: #fff; border: 1px solid #d9d9d9; border-radius: 6px; cursor: pointer; transition: border-color .16s ease, color .16s ease, background .16s ease; }
 .word-plan-image-summary:hover, .word-plan-image-summary:focus-visible { color: #1677ff; background: #f7fbff; border-color: #4096ff; outline: none; }
 .word-plan-image-summary.is-invalid { color: #cf1322; background: #fff7f6; border-color: #ffccc7; }
 .word-plan-image-summary.is-invalid small { color: #cf1322; }
@@ -3405,39 +3461,43 @@ onBeforeUnmount(() => {
 .word-plan-image-summary span { display: grid; min-width: 0; flex: 1; gap: 1px; }
 .word-plan-image-summary strong { color: #334155; font-size: 12px; font-weight: 600; }
 .word-plan-image-summary small { overflow: hidden; color: #64748b; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.day-word-plan-layout { display: grid; min-height: 0; flex: 1; grid-template-columns: minmax(460px, 42%) minmax(620px, 58%); }
+.day-word-plan-layout { display: grid; min-height: 0; flex: 1; grid-template-columns: minmax(440px, 44%) minmax(620px, 56%); }
 .word-plan-editor-pane, .word-plan-preview-pane { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
-.word-plan-editor-pane { padding: 14px 16px 16px; background: #fff; border-right: 1px solid #dfe4ea; }
-.word-plan-preview-pane { padding: 14px 18px 16px; background: #f4f6f8; }
-.word-plan-editor-switcher { display: flex; min-height: 40px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; }
-.word-plan-editor-switcher > span { overflow: hidden; color: #64748b; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.word-plan-editor-pane { padding: 16px 18px; background: #fff; border-right: 1px solid #e5e7eb; }
+.word-plan-preview-pane { padding: 16px 20px; background: #f7f8fa; }
+.word-plan-editor-switcher { display: flex; min-height: 44px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 13px; border-bottom: 1px solid #e5e7eb; }
+.word-plan-editor-heading { min-width: 0; }
+.word-plan-editor-heading strong, .word-plan-editor-heading span { display: block; }
+.word-plan-editor-heading strong { color: #1f2937; font-size: 14px; font-weight: 650; }
+.word-plan-editor-heading span { overflow: hidden; margin-top: 3px; color: #64748b; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .word-plan-editor-switcher :deep(.ant-radio-button-wrapper) { min-width: 92px; text-align: center; }
-.word-plan-pane-heading { display: flex; min-height: 40px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px 10px; border-bottom: 1px solid #dbe4ee; }
+.word-plan-pane-heading { display: flex; min-height: 44px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px 11px; border-bottom: 1px solid #e1e6ec; }
 .word-plan-pane-heading > div { min-width: 0; }
 .word-plan-pane-heading > div strong, .word-plan-pane-heading > div span { display: block; }
 .word-plan-pane-heading strong { color: #1e293b; font-size: 14px; font-weight: 650; }
 .word-plan-pane-heading > div span { margin-top: 3px; color: #64748b; font-size: 12px; line-height: 1.45; }
 .word-plan-preview-actions { display: flex; align-items: center; gap: 8px; }
-.word-plan-source-scroll, .word-plan-selected-list { min-height: 0; flex: 1; padding: 0 4px 12px 0; overflow: auto; background: #fff; scrollbar-color: #cbd5e1 transparent; scrollbar-width: thin; }
-.word-plan-source-scroll { padding-top: 2px; }
-.word-plan-resource-group { padding: 16px 4px; border-bottom: 1px solid #e8eef5; }
+.word-plan-source-scroll, .word-plan-selected-list { min-height: 0; flex: 1; padding: 0 5px 12px 0; overflow: auto; background: #fff; scrollbar-color: #cbd5e1 transparent; scrollbar-width: thin; }
+.word-plan-source-scroll { padding-top: 4px; }
+.word-plan-resource-group { padding: 17px 2px; border-bottom: 1px solid #e8eef5; }
 .word-plan-resource-group:last-child { border-bottom: 0; }
-.word-plan-resource-group > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 7px 10px; }
+.word-plan-resource-group > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 6px 11px; }
 .word-plan-resource-group > header :deep(.ant-tag) { flex: 0 0 auto; margin-inline-end: 0; font-size: 11px; }
 .word-plan-resource-group > header strong { overflow: hidden; color: #1e293b; font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.word-plan-candidate-section { padding: 0 2px; }
+.word-plan-candidate-section { padding: 0 1px; }
 .word-plan-optional-section { padding-top: 10px; margin-top: 8px; border-top: 1px dashed #e1e7ee; }
 .word-plan-candidate-title { margin: 0 5px 4px; color: #64748b; font-size: 12px; font-weight: 600; }
-.word-plan-candidate-list { display: grid; gap: 3px; }
-.word-plan-candidate-list :deep(.ant-checkbox-wrapper) { display: flex; min-width: 0; align-items: flex-start; padding: 7px; border: 1px solid transparent; border-radius: 5px; }
+.word-plan-candidate-list { display: grid; gap: 2px; }
+.word-plan-candidate-list :deep(.ant-checkbox-wrapper) { display: flex; min-width: 0; align-items: flex-start; padding: 8px 7px; border: 1px solid transparent; border-radius: 5px; }
 .word-plan-candidate-list :deep(.ant-checkbox-wrapper:hover) { border-color: #d6e7ff; background: #f6faff; }
 .word-plan-candidate-list :deep(.ant-checkbox + span) { min-width: 0; flex: 1; }
 .word-plan-candidate-copy { display: flex; min-width: 0; align-items: baseline; gap: 7px; }
 .word-plan-candidate-name { min-width: 0; overflow: hidden; color: #334155; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .word-plan-candidate-meta { flex: 0 0 auto; color: #8c8c8c; font-size: 11px; }
 .word-plan-candidate-empty { padding: 5px 7px; color: #94a3b8; font-size: 12px; }
-.word-plan-selected-list { display: block; padding-top: 12px; }
-.word-plan-selected-group { margin-bottom: 12px; overflow: hidden; border: 1px solid #dfe5ec; border-radius: 7px; background: #fff; }
+.word-plan-candidate-empty.is-unavailable { color: #ad6800; background: #fffbe6; border: 1px solid #ffe58f; border-radius: 4px; }
+.word-plan-selected-list { display: block; padding-top: 14px; }
+.word-plan-selected-group { margin-bottom: 12px; overflow: hidden; border: 1px solid #dfe5ec; border-radius: 6px; background: #fff; }
 .word-plan-selected-group:last-child { margin-bottom: 0; }
 .word-plan-selected-group-heading { display: flex; min-height: 46px; align-items: center; gap: 8px; padding: 7px 9px; background: #f7f9fb; border-bottom: 1px solid #e5eaf0; }
 .word-plan-selected-group-heading :deep(.ant-tag) { flex: 0 0 auto; margin-inline-end: 0; }
@@ -3457,7 +3517,7 @@ onBeforeUnmount(() => {
 .word-plan-selected-main strong { display: block; overflow: hidden; color: #334155; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .word-plan-sale-price { display: block; margin-top: 2px; color: #64748b; font-size: 11px; line-height: 18px; }
 .word-plan-selected-row > :deep(.ant-btn) { flex: 0 0 auto; color: #94a3b8; }
-.word-plan-preview-scroll { min-height: 0; flex: 1; margin-top: 0; border-color: #dbe4ee; border-radius: 6px; background: #e9edf2; }
+.word-plan-preview-scroll { min-height: 0; flex: 1; margin-top: 0; border-color: #dbe4ee; border-radius: 6px; background: #edf1f5; }
 .word-plan-preview-scroll.word-pdf-preview-scroll { margin-top: 0; }
 .word-plan-preview-scroll :deep(.ant-spin-nested-loading), .word-plan-preview-scroll :deep(.ant-spin-container) { height: 100%; min-height: 0; }
 .word-plan-preview-pane .word-pdf-preview-frame { height: 100%; min-height: 100%; }
@@ -3564,7 +3624,6 @@ onBeforeUnmount(() => {
   .plan-panel { position: static; }
   .resource-filters { grid-template-columns: 1fr; }
   .resource-filters > :last-child { grid-column: auto; }
-  .resource-list { max-height: 220px; }
   .detail-config-grid { grid-template-columns: 1fr; }
   .optional-item-form { grid-template-columns: 1fr; }
   .word-preview-sheet { min-height: 0; padding: 28px 24px; }

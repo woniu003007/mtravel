@@ -53,6 +53,17 @@ export namespace SalesProductDesignerApi {
     suggestedSalePrice?: number;
   }
 
+  /** 产品 Word 方案专用的自费候选，已包含介绍关联和可用建议价。 */
+  export interface WordOptionalItemCandidate {
+    introductionId: number;
+    introductionTitle: string;
+    optionalItemType: OptionalItemType;
+    projectName: string;
+    resourceOptionalItemId: number;
+    suggestedSalePrice?: number;
+    supplierOptionalItemId?: number;
+  }
+
   export interface Supplier {
     isDefault: boolean;
     priceLines: SupplierPriceLine[];
@@ -115,6 +126,7 @@ export namespace SalesProductDesignerApi {
     introductions: Introduction[];
     optionalItems?: ResourceOptionalItem[];
     suppliers: Supplier[];
+    wordOptionalItemCandidates?: WordOptionalItemCandidate[];
     warmTip?: string;
   }
 
@@ -450,7 +462,8 @@ export namespace SalesProductDesignerApi {
   /** 一个景区及其当前可选素材和供应商报价。 */
   export interface DayWordPlanResource {
     dayResource: DayResource;
-    resourceDetail: ResourceDetail;
+    /** 资源主档软删除后仍保留产品行程快照，此时不可再选择新的素材或图片。 */
+    resourceDetail: null | ResourceDetail;
   }
 
   /** 当天末尾图片的统一选择项，顺序即 Word 输出顺序。 */

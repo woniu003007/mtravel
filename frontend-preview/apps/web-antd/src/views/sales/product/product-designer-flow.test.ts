@@ -182,6 +182,29 @@ describe('sales product designer flow', () => {
     expect(wordPlanWorkspaceSource).not.toContain('供应商配置');
   });
 
+  it('prefetches and reuses the current day Word plan instead of opening on a blank request', () => {
+    const workbenchSource = readAppFile('src/views/sales/product/designer.vue');
+
+    expect(workbenchSource).toContain('const wordPlanCache = new Map');
+    expect(workbenchSource).toContain('const wordPlanRequests = new Map');
+    expect(workbenchSource).toContain('function scheduleDayWordPlanPrefetch()');
+    expect(workbenchSource).toContain("day.resources.some((item) => item.resourceType === 'scenic')");
+    expect(workbenchSource).toContain('dayNos.forEach((dayNo) =>');
+    expect(workbenchSource).toContain('void fetchDayWordPlan(dayNo)');
+    expect(workbenchSource).toContain('const data = await fetchDayWordPlan(activeDayNo.value)');
+    expect(workbenchSource).toContain('正在准备 D{{ activeDayNo }} 的 Word 内容');
+  });
+
+  it('keeps a deleted resource snapshot from crashing the day Word workbench', () => {
+    const apiSource = readAppFile('src/api/sales/product-designer.ts');
+    const workbenchSource = readAppFile('src/views/sales/product/designer.vue');
+
+    expect(apiSource).toContain('resourceDetail: null | ResourceDetail');
+    expect(workbenchSource).toContain('resource.resourceDetail?.introductions.filter');
+    expect(workbenchSource).toContain('resource.resourceDetail?.images || []');
+    expect(workbenchSource).toContain('资源资料已删除，仅保留当天行程快照');
+  });
+
   it('keeps scenic groups isolated by the day resource id and explains incompatible legacy image counts', () => {
     const workbenchSource = readAppFile('src/views/sales/product/designer.vue');
     const groupKeyStart = workbenchSource.indexOf('function wordPlanScenicGroupKey');
@@ -192,6 +215,20 @@ describe('sales product designer flow', () => {
     expect(groupKeySource).not.toContain('resourceName');
     expect(workbenchSource).toContain('历史方案已选');
     expect(workbenchSource).toContain('超过当前 3 张上限');
+  });
+
+  it('keeps optional-item checkbox keys stable with resourceOptionalItemId', () => {
+    const workbenchSource = readAppFile('src/views/sales/product/designer.vue');
+    const keyStart = workbenchSource.indexOf('function wordPlanMaterialKey');
+    const keyEnd = workbenchSource.indexOf('function wordPlanFingerprint', keyStart);
+    const keySource = workbenchSource.slice(keyStart, keyEnd);
+
+    expect(keySource).toContain("item.materialType === 'optional_item'");
+    expect(keySource).toContain('? item.resourceOptionalItemId');
+    expect(keySource).not.toContain("? item.introductionId");
+    expect(workbenchSource).toContain(
+      ":checked=\"isWordPlanSelected({ dayResourceId: resource.dayResource.id, materialType: 'optional_item', resourceOptionalItemId: candidate.optionalItem.id })\"",
+    );
   });
 
   it('builds the day-end image payload from global selections in mixed resource order', async () => {
