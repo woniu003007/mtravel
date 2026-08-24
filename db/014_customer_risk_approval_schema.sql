@@ -54,6 +54,67 @@ CREATE TABLE IF NOT EXISTS system_configs (
   CONSTRAINT uk_system_configs_tenant_key UNIQUE (tenant_id, config_key)
 );
 
+CREATE TABLE IF NOT EXISTS customer_categories (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  category_name varchar(100) NOT NULL,
+  credit_term_days integer NOT NULL DEFAULT 0,
+  allow_over_limit boolean NOT NULL DEFAULT false,
+  is_deleted boolean NOT NULL DEFAULT false,
+  CONSTRAINT uk_customer_categories_tenant_id_id UNIQUE (tenant_id, id),
+  CONSTRAINT chk_customer_categories_credit_term_days
+    CHECK (credit_term_days BETWEEN 0 AND 3650)
+);
+
+CREATE TABLE IF NOT EXISTS system_users (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  username varchar(80) NOT NULL,
+  real_name varchar(80) NOT NULL,
+  status varchar(20) NOT NULL DEFAULT 'active',
+  is_deleted boolean NOT NULL DEFAULT false,
+  CONSTRAINT uk_system_users_tenant_id_id UNIQUE (tenant_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS customer_category_approval_members (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL,
+  category_id bigint NOT NULL,
+  member_type varchar(20) NOT NULL,
+  system_user_id bigint NOT NULL,
+  step_order integer NOT NULL DEFAULT 0,
+  created_by varchar(80),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  is_deleted boolean NOT NULL DEFAULT false,
+  deleted_at timestamptz,
+  deleted_by varchar(64),
+  CONSTRAINT fk_customer_category_approval_member_category
+    FOREIGN KEY (tenant_id, category_id) REFERENCES customer_categories (tenant_id, id),
+  CONSTRAINT fk_customer_category_approval_member_user
+    FOREIGN KEY (tenant_id, system_user_id) REFERENCES system_users (tenant_id, id),
+  CONSTRAINT chk_customer_category_approval_member_type
+    CHECK (member_type IN ('approver', 'cc')),
+  CONSTRAINT chk_customer_category_approval_member_step_order
+    CHECK (step_order >= 0)
+);
+
+DROP TRIGGER IF EXISTS trg_customer_category_approval_members_updated_at ON customer_category_approval_members;
+CREATE TRIGGER trg_customer_category_approval_members_updated_at
+BEFORE UPDATE ON customer_category_approval_members
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_customer_category_approval_member_active
+  ON customer_category_approval_members (tenant_id, category_id, member_type, system_user_id)
+  WHERE is_deleted = false;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_customer_category_approval_approver_step_active
+  ON customer_category_approval_members (tenant_id, category_id, step_order)
+  WHERE is_deleted = false AND member_type = 'approver';
+
+CREATE INDEX IF NOT EXISTS idx_customer_category_approval_member_user
+  ON customer_category_approval_members (tenant_id, is_deleted, system_user_id, member_type);
+
 CREATE TABLE IF NOT EXISTS customer_risk_approval_requests (
   id BIGSERIAL PRIMARY KEY,
   tenant_id bigint NOT NULL REFERENCES tenants(id),
@@ -85,16 +146,30 @@ CREATE TABLE IF NOT EXISTS customer_risk_approval_requests (
   is_deleted boolean NOT NULL DEFAULT false,
   deleted_at timestamptz,
   deleted_by varchar(64),
+  category_id bigint,
+  category_name varchar(100),
+  credit_term_days integer NOT NULL DEFAULT 0,
+  current_approval_step integer NOT NULL DEFAULT 1,
+  applicant_user_id bigint,
   CONSTRAINT fk_customer_risk_approval_customer
     FOREIGN KEY (tenant_id, customer_id) REFERENCES customers (tenant_id, id),
   CONSTRAINT fk_customer_risk_approval_team
     FOREIGN KEY (tenant_id, team_id) REFERENCES sales_teams (tenant_id, id),
   CONSTRAINT fk_customer_risk_approval_order
     FOREIGN KEY (tenant_id, order_id) REFERENCES sales_orders (tenant_id, id),
+  CONSTRAINT fk_customer_risk_approval_category
+    FOREIGN KEY (tenant_id, category_id) REFERENCES customer_categories (tenant_id, id),
+  CONSTRAINT fk_customer_risk_approval_applicant_user
+    FOREIGN KEY (tenant_id, applicant_user_id) REFERENCES system_users (tenant_id, id),
+  CONSTRAINT uk_customer_risk_approval_tenant_id_id UNIQUE (tenant_id, id),
   CONSTRAINT chk_customer_risk_approval_status
     CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
   CONSTRAINT chk_customer_risk_approval_requested_amount
     CHECK (requested_amount >= 0),
+  CONSTRAINT chk_customer_risk_approval_credit_term_days
+    CHECK (credit_term_days BETWEEN 0 AND 3650),
+  CONSTRAINT chk_customer_risk_approval_current_step
+    CHECK (current_approval_step >= 1),
   CONSTRAINT chk_customer_risk_approval_snapshot_amounts
     CHECK (
       credit_limit >= 0
@@ -103,6 +178,48 @@ CREATE TABLE IF NOT EXISTS customer_risk_approval_requests (
       AND over_limit_amount >= 0
     )
 );
+
+CREATE TABLE IF NOT EXISTS customer_risk_approval_steps (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL,
+  request_id bigint NOT NULL,
+  step_order integer NOT NULL,
+  approver_user_id bigint NOT NULL,
+  approver_name varchar(80) NOT NULL,
+  status varchar(20) NOT NULL DEFAULT 'pending',
+  decided_at timestamptz,
+  decision_remark text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT fk_customer_risk_approval_step_request
+    FOREIGN KEY (tenant_id, request_id) REFERENCES customer_risk_approval_requests (tenant_id, id),
+  CONSTRAINT fk_customer_risk_approval_step_user
+    FOREIGN KEY (tenant_id, approver_user_id) REFERENCES system_users (tenant_id, id),
+  CONSTRAINT chk_customer_risk_approval_step_order CHECK (step_order >= 1),
+  CONSTRAINT chk_customer_risk_approval_step_status
+    CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+  CONSTRAINT uk_customer_risk_approval_step_request_order UNIQUE (tenant_id, request_id, step_order)
+);
+
+CREATE TABLE IF NOT EXISTS customer_risk_approval_ccs (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL,
+  request_id bigint NOT NULL,
+  cc_user_id bigint NOT NULL,
+  cc_name varchar(80) NOT NULL,
+  visible_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT fk_customer_risk_approval_cc_request
+    FOREIGN KEY (tenant_id, request_id) REFERENCES customer_risk_approval_requests (tenant_id, id),
+  CONSTRAINT fk_customer_risk_approval_cc_user
+    FOREIGN KEY (tenant_id, cc_user_id) REFERENCES system_users (tenant_id, id),
+  CONSTRAINT uk_customer_risk_approval_cc_request_user UNIQUE (tenant_id, request_id, cc_user_id)
+);
+
+DROP TRIGGER IF EXISTS trg_customer_risk_approval_steps_updated_at ON customer_risk_approval_steps;
+CREATE TRIGGER trg_customer_risk_approval_steps_updated_at
+BEFORE UPDATE ON customer_risk_approval_steps
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_customer_risk_approval_requests_updated_at ON customer_risk_approval_requests;
 CREATE TRIGGER trg_customer_risk_approval_requests_updated_at
@@ -124,6 +241,15 @@ CREATE INDEX IF NOT EXISTS idx_customer_risk_approval_tenant_team_order
 
 CREATE INDEX IF NOT EXISTS idx_customer_risk_approval_tenant_applicant_time
   ON customer_risk_approval_requests (tenant_id, is_deleted, applicant, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_customer_risk_approval_tenant_applicant_user_time
+  ON customer_risk_approval_requests (tenant_id, is_deleted, applicant_user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_customer_risk_approval_step_user_status
+  ON customer_risk_approval_steps (tenant_id, approver_user_id, status, request_id);
+
+CREATE INDEX IF NOT EXISTS idx_customer_risk_approval_cc_user_visible
+  ON customer_risk_approval_ccs (tenant_id, cc_user_id, visible_at, request_id);
 
 -- 已绑定订单的已同意审批单必须与订单客户一致。不一致的历史授权保留流水但取消有效授权。
 UPDATE customer_risk_approval_requests approval
@@ -167,7 +293,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_customer_risk_approval_tenant_order_approve
     AND status = 'approved'
     AND order_id IS NOT NULL;
 
-COMMENT ON TABLE customer_risk_approval_requests IS '客户风控审批申请表。用于保存客户合同到期、授信超限时的总经理审批流水和申请时快照。';
+COMMENT ON TABLE customer_risk_approval_requests IS '客户风控审批申请表。用于保存客户合同到期、授信超限时的授信审批流水和申请时快照。';
 COMMENT ON COLUMN customer_risk_approval_requests.id IS '客户风控审批申请主键 ID。';
 COMMENT ON COLUMN customer_risk_approval_requests.tenant_id IS '租户 ID，用于隔离不同地接公司的审批数据。';
 COMMENT ON COLUMN customer_risk_approval_requests.customer_id IS '客户单位 ID。';
@@ -184,7 +310,12 @@ COMMENT ON COLUMN customer_risk_approval_requests.occupied_amount IS '申请时�
 COMMENT ON COLUMN customer_risk_approval_requests.pending_approval_amount IS '申请时客户审批中额度快照。';
 COMMENT ON COLUMN customer_risk_approval_requests.available_amount IS '申请时客户可用额度快照，可能为负数。';
 COMMENT ON COLUMN customer_risk_approval_requests.over_limit_amount IS '申请时本次订单超出可用额度的金额。';
+COMMENT ON COLUMN customer_risk_approval_requests.category_id IS '申请时客户等级或分类 ID 快照关联。';
+COMMENT ON COLUMN customer_risk_approval_requests.category_name IS '申请时客户等级或分类名称快照。';
+COMMENT ON COLUMN customer_risk_approval_requests.credit_term_days IS '申请时客户等级配置的账期天数快照。';
+COMMENT ON COLUMN customer_risk_approval_requests.current_approval_step IS '当前等待处理的审批步骤序号，从1开始。';
 COMMENT ON COLUMN customer_risk_approval_requests.status IS '审批状态。pending待审批，approved已同意，rejected已拒绝，cancelled已取消。';
+COMMENT ON COLUMN customer_risk_approval_requests.applicant_user_id IS '发起审批的系统用户 ID，用于查询我发起的审批。';
 COMMENT ON COLUMN customer_risk_approval_requests.applicant IS '申请人账号或名称。';
 COMMENT ON COLUMN customer_risk_approval_requests.approved_by IS '同意审批人账号或名称。';
 COMMENT ON COLUMN customer_risk_approval_requests.approved_at IS '同意审批时间。';
@@ -203,10 +334,50 @@ COMMENT ON INDEX idx_customer_risk_approval_tenant_status_time IS '按租户、�
 COMMENT ON INDEX idx_customer_risk_approval_tenant_customer_status IS '按客户和状态查询审批申请。';
 COMMENT ON INDEX idx_customer_risk_approval_tenant_team_order IS '按团队和订单追溯审批申请。';
 COMMENT ON INDEX idx_customer_risk_approval_tenant_applicant_time IS '按申请人和创建时间查询审批申请。';
+COMMENT ON INDEX idx_customer_risk_approval_tenant_applicant_user_time IS '按发起用户和创建时间查询审批申请。';
 COMMENT ON INDEX uk_customer_risk_approval_tenant_order_approved_active IS '约束同一租户同一订单只能有一张未删除且已同意的风控审批单。';
 
+COMMENT ON TABLE customer_category_approval_members IS '客户等级授信超额审批人员配置表。保存各等级指定审批人顺序及审批通过后的抄送人。';
+COMMENT ON COLUMN customer_category_approval_members.id IS '审批人员配置主键 ID。';
+COMMENT ON COLUMN customer_category_approval_members.tenant_id IS '租户 ID。';
+COMMENT ON COLUMN customer_category_approval_members.category_id IS '客户等级或分类 ID。';
+COMMENT ON COLUMN customer_category_approval_members.member_type IS '人员类型。approver审批人，cc抄送人。';
+COMMENT ON COLUMN customer_category_approval_members.system_user_id IS '指定系统用户 ID。';
+COMMENT ON COLUMN customer_category_approval_members.step_order IS '审批顺序。审批人从1开始，抄送人为0。';
+COMMENT ON COLUMN customer_category_approval_members.created_by IS '配置创建人账号。';
+COMMENT ON COLUMN customer_category_approval_members.created_at IS '创建时间。';
+COMMENT ON COLUMN customer_category_approval_members.updated_at IS '更新时间。';
+COMMENT ON COLUMN customer_category_approval_members.is_deleted IS '是否软删除。';
+COMMENT ON COLUMN customer_category_approval_members.deleted_at IS '软删除时间。';
+COMMENT ON COLUMN customer_category_approval_members.deleted_by IS '软删除操作人。';
+
+COMMENT ON TABLE customer_risk_approval_steps IS '客户授信超额审批步骤快照表。申请发起时复制等级审批人配置，防止后续配置修改影响历史流程。';
+COMMENT ON COLUMN customer_risk_approval_steps.id IS '审批步骤主键 ID。';
+COMMENT ON COLUMN customer_risk_approval_steps.tenant_id IS '租户 ID。';
+COMMENT ON COLUMN customer_risk_approval_steps.request_id IS '客户风控审批申请 ID。';
+COMMENT ON COLUMN customer_risk_approval_steps.step_order IS '审批步骤顺序，从1开始。';
+COMMENT ON COLUMN customer_risk_approval_steps.approver_user_id IS '指定审批系统用户 ID。';
+COMMENT ON COLUMN customer_risk_approval_steps.approver_name IS '审批人姓名快照。';
+COMMENT ON COLUMN customer_risk_approval_steps.status IS '步骤状态。pending待审批，approved已同意，rejected已拒绝，cancelled已取消。';
+COMMENT ON COLUMN customer_risk_approval_steps.decided_at IS '步骤处理时间。';
+COMMENT ON COLUMN customer_risk_approval_steps.decision_remark IS '步骤审批意见。';
+COMMENT ON COLUMN customer_risk_approval_steps.created_at IS '创建时间。';
+COMMENT ON COLUMN customer_risk_approval_steps.updated_at IS '更新时间。';
+
+COMMENT ON TABLE customer_risk_approval_ccs IS '客户授信超额审批抄送快照表。审批全部通过后设置可见时间。';
+COMMENT ON COLUMN customer_risk_approval_ccs.id IS '审批抄送主键 ID。';
+COMMENT ON COLUMN customer_risk_approval_ccs.tenant_id IS '租户 ID。';
+COMMENT ON COLUMN customer_risk_approval_ccs.request_id IS '客户风控审批申请 ID。';
+COMMENT ON COLUMN customer_risk_approval_ccs.cc_user_id IS '抄送系统用户 ID。';
+COMMENT ON COLUMN customer_risk_approval_ccs.cc_name IS '抄送人姓名快照。';
+COMMENT ON COLUMN customer_risk_approval_ccs.visible_at IS '抄送可见时间。仅全部审批通过后写入。';
+COMMENT ON COLUMN customer_risk_approval_ccs.created_at IS '创建时间。';
+
+COMMENT ON COLUMN customer_categories.credit_term_days IS '默认账期天数，取值0到3650。0表示不提供账期。';
+COMMENT ON COLUMN customer_categories.allow_over_limit IS '是否允许客户授信超额后发起审批。false表示超额不可申请，true表示按本等级审批流程处理。';
+
 INSERT INTO system_configs (tenant_id, config_key, config_value, remark)
-SELECT id, 'customer_risk_approval_enabled', 'false', '客户合同到期或授信超限时是否强制总经理审批'
+SELECT id, 'customer_risk_approval_enabled', 'false', '客户合同到期或授信超限时是否启用客户授信审批'
 FROM tenants
 ON CONFLICT (tenant_id, config_key) DO NOTHING;
 

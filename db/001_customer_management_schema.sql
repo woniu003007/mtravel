@@ -33,8 +33,11 @@ CREATE TABLE IF NOT EXISTS customer_categories (
   deleted_at timestamptz,
   deleted_by varchar(64),
   default_credit_limit numeric(14,2) NOT NULL DEFAULT 0,
+  credit_term_days integer NOT NULL DEFAULT 0,
+  allow_over_limit boolean NOT NULL DEFAULT false,
   CONSTRAINT chk_customer_categories_status CHECK (status IN ('active', 'disabled')),
   CONSTRAINT chk_customer_categories_default_credit_limit CHECK (default_credit_limit >= 0),
+  CONSTRAINT chk_customer_categories_credit_term_days CHECK (credit_term_days BETWEEN 0 AND 3650),
   CONSTRAINT uk_customer_categories_tenant_id_id UNIQUE (tenant_id, id)
 );
 
@@ -251,6 +254,8 @@ COMMENT ON COLUMN customer_categories.id IS '客户分类主键ID，系统内部
 COMMENT ON COLUMN customer_categories.tenant_id IS '租户ID，标识该客户分类属于哪一家地接公司。';
 COMMENT ON COLUMN customer_categories.category_name IS '客户分类名称，例如A类客户、B类客户、组团旅行社、单位客户等。';
 COMMENT ON COLUMN customer_categories.default_credit_limit IS '默认授信额度。新增或切换客户分类时可带入客户主档，客户保存后可单独调整。';
+COMMENT ON COLUMN customer_categories.credit_term_days IS '默认账期天数，取值0到3650。0表示不提供账期。';
+COMMENT ON COLUMN customer_categories.allow_over_limit IS '是否允许客户授信超额后发起审批。false表示超额不可申请，true表示按本等级审批流程处理。';
 COMMENT ON COLUMN customer_categories.sort_order IS '排序号，数字越小越靠前。';
 COMMENT ON COLUMN customer_categories.status IS '分类状态。active表示启用，disabled表示停用。';
 COMMENT ON COLUMN customer_categories.created_by IS '创建人账号或名称。';

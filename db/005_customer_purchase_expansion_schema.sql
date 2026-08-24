@@ -11,6 +11,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE EXTENSION IF NOT EXISTS vector;
+
 CREATE TABLE IF NOT EXISTS common_attachments (
   id BIGSERIAL PRIMARY KEY,
   tenant_id bigint NOT NULL REFERENCES tenants(id),
@@ -129,6 +131,7 @@ CREATE TABLE IF NOT EXISTS suppliers (
   city varchar(80),
   district varchar(80),
   settlement_method varchar(100),
+  basic_info text,
   contact_name varchar(80),
   contact_phone varchar(40),
   agreement_name varchar(160),
@@ -155,7 +158,8 @@ CREATE TABLE IF NOT EXISTS suppliers (
 ALTER TABLE suppliers
   ADD COLUMN IF NOT EXISTS buyer_id bigint,
   ADD COLUMN IF NOT EXISTS fax_number varchar(40),
-  ADD COLUMN IF NOT EXISTS office_address varchar(240);
+  ADD COLUMN IF NOT EXISTS office_address varchar(240),
+  ADD COLUMN IF NOT EXISTS basic_info text;
 
 ALTER TABLE suppliers
   DROP CONSTRAINT IF EXISTS fk_suppliers_buyer;
@@ -185,9 +189,328 @@ CREATE TABLE IF NOT EXISTS purchase_resources (
   is_deleted boolean NOT NULL DEFAULT false,
   deleted_at timestamptz,
   deleted_by varchar(64),
-  CONSTRAINT chk_purchase_resources_type CHECK (resource_type IN ('scenic', 'hotel', 'restaurant', 'shopping')),
+  scenic_level varchar(20),
+  longitude numeric(10,7),
+  latitude numeric(9,7),
+  business_status varchar(20),
+  opening_time time,
+  closing_time time,
+  site_visit_status varchar(20),
+  last_site_visit_date date,
+  site_visit_note text,
+  contact_name varchar(80),
+  star_level varchar(120),
+  category_tags varchar(500),
+  capacity integer,
+  table_count integer,
+  meal_standard text,
+  vehicle_type varchar(80),
+  seat_count integer,
+  billing_mode varchar(40),
+  service_area varchar(200),
+  reference_days integer,
+  included_items text,
+  excluded_items text,
+  resource_unit varchar(40),
+  procurement_mode varchar(20) NOT NULL DEFAULT 'required',
+  CONSTRAINT chk_purchase_resources_type CHECK (resource_type IN ('scenic', 'hotel', 'restaurant', 'shopping', 'vehicle', 'traffic', 'ground_agent', 'other')),
   CONSTRAINT chk_purchase_resources_status CHECK (status IN ('active', 'disabled')),
+  CONSTRAINT chk_purchase_resources_scenic_level CHECK (
+    scenic_level IS NULL OR scenic_level IN ('unrated', '1a', '2a', '3a', '4a', '5a')
+  ),
+  CONSTRAINT chk_purchase_resources_business_status CHECK (
+    business_status IS NULL OR business_status IN ('unmaintained', 'open', 'suspended', 'closed')
+  ),
+  CONSTRAINT chk_purchase_resources_site_visit_status CHECK (
+    site_visit_status IS NULL OR site_visit_status IN ('unmaintained', 'not_visited', 'visited')
+  ),
+  CONSTRAINT chk_purchase_resources_coordinates CHECK (
+    (longitude IS NULL AND latitude IS NULL)
+    OR (
+      longitude IS NOT NULL AND latitude IS NOT NULL
+      AND longitude BETWEEN -180 AND 180
+      AND latitude BETWEEN -90 AND 90
+    )
+  ),
+  CONSTRAINT chk_purchase_resources_business_hours CHECK (
+    (opening_time IS NULL AND closing_time IS NULL)
+    OR (opening_time IS NOT NULL AND closing_time IS NOT NULL AND closing_time > opening_time)
+  ),
+  CONSTRAINT chk_purchase_resources_site_visit_date CHECK (
+    (site_visit_status IS NULL AND last_site_visit_date IS NULL)
+    OR
+    (site_visit_status = 'visited' AND last_site_visit_date IS NOT NULL AND last_site_visit_date <= CURRENT_DATE)
+    OR (site_visit_status IN ('unmaintained', 'not_visited') AND last_site_visit_date IS NULL)
+  ),
+  CONSTRAINT chk_purchase_resources_scenic_level_by_type CHECK (
+    (resource_type = 'scenic' AND scenic_level IS NOT NULL)
+    OR (resource_type <> 'scenic' AND scenic_level IS NULL)
+  ),
+  CONSTRAINT chk_purchase_resources_star_level_by_type CHECK (
+    star_level IS NULL OR resource_type IN ('hotel', 'restaurant')
+  ),
+  CONSTRAINT chk_purchase_resources_numeric_fields CHECK (
+    (capacity IS NULL OR capacity >= 0)
+    AND (table_count IS NULL OR table_count >= 0)
+    AND (seat_count IS NULL OR seat_count >= 0)
+    AND (reference_days IS NULL OR reference_days >= 0)
+  ),
+  CONSTRAINT chk_purchase_resources_billing_mode CHECK (
+    billing_mode IS NULL OR billing_mode IN ('daily', 'trip', 'distance_time')
+  ),
+  CONSTRAINT chk_purchase_resources_procurement_mode CHECK (
+    procurement_mode IN ('required', 'not_required')
+  ),
   CONSTRAINT uk_purchase_resources_tenant_id_id UNIQUE (tenant_id, id)
+);
+
+ALTER TABLE purchase_resources
+  ADD COLUMN IF NOT EXISTS contact_name varchar(80),
+  ADD COLUMN IF NOT EXISTS star_level varchar(120),
+  ADD COLUMN IF NOT EXISTS category_tags varchar(500),
+  ADD COLUMN IF NOT EXISTS scenic_level varchar(20),
+  ADD COLUMN IF NOT EXISTS longitude numeric(10,7),
+  ADD COLUMN IF NOT EXISTS latitude numeric(9,7),
+  ADD COLUMN IF NOT EXISTS business_status varchar(20),
+  ADD COLUMN IF NOT EXISTS opening_time time,
+  ADD COLUMN IF NOT EXISTS closing_time time,
+  ADD COLUMN IF NOT EXISTS site_visit_status varchar(20),
+  ADD COLUMN IF NOT EXISTS last_site_visit_date date,
+  ADD COLUMN IF NOT EXISTS site_visit_note text,
+  ADD COLUMN IF NOT EXISTS capacity integer,
+  ADD COLUMN IF NOT EXISTS table_count integer,
+  ADD COLUMN IF NOT EXISTS meal_standard text,
+  ADD COLUMN IF NOT EXISTS vehicle_type varchar(80),
+  ADD COLUMN IF NOT EXISTS seat_count integer,
+  ADD COLUMN IF NOT EXISTS billing_mode varchar(40),
+  ADD COLUMN IF NOT EXISTS service_area varchar(200),
+  ADD COLUMN IF NOT EXISTS reference_days integer,
+  ADD COLUMN IF NOT EXISTS included_items text,
+  ADD COLUMN IF NOT EXISTS excluded_items text,
+  ADD COLUMN IF NOT EXISTS resource_unit varchar(40),
+  ADD COLUMN IF NOT EXISTS procurement_mode varchar(20) NOT NULL DEFAULT 'required';
+
+-- 历史资源无法根据零报价或既有供应商关系判断是否免费，统一保守初始化为需要采购。
+UPDATE purchase_resources
+SET procurement_mode = 'required'
+WHERE procurement_mode IS NULL;
+
+-- 历史景区只补“未维护”类默认状态，不推断真实评级、营业情况或踩点结果。
+UPDATE purchase_resources
+SET scenic_level = COALESCE(scenic_level, 'unrated'),
+    business_status = COALESCE(business_status, 'unmaintained'),
+    site_visit_status = COALESCE(site_visit_status, 'unmaintained')
+WHERE resource_type = 'scenic';
+
+-- 地点类资源补齐“未维护”状态，不推断真实营业和踩点信息。
+UPDATE purchase_resources
+SET business_status = COALESCE(business_status, 'unmaintained'),
+    site_visit_status = COALESCE(site_visit_status, 'unmaintained')
+WHERE resource_type IN ('hotel', 'restaurant', 'shopping')
+  AND (business_status IS NULL OR site_visit_status IS NULL);
+
+-- 类型专属字段不允许残留在不适用的资源上。
+UPDATE purchase_resources
+SET scenic_level = NULL
+WHERE resource_type <> 'scenic'
+  AND scenic_level IS NOT NULL;
+
+UPDATE purchase_resources
+SET star_level = NULL
+WHERE resource_type NOT IN ('hotel', 'restaurant')
+  AND star_level IS NOT NULL;
+
+UPDATE purchase_resources
+SET longitude = NULL,
+    latitude = NULL,
+    business_status = NULL,
+    opening_time = NULL,
+    closing_time = NULL,
+    site_visit_status = NULL,
+    last_site_visit_date = NULL,
+    site_visit_note = NULL
+WHERE resource_type NOT IN ('scenic', 'hotel', 'restaurant', 'shopping')
+  AND (
+    longitude IS NOT NULL
+    OR latitude IS NOT NULL
+    OR business_status IS NOT NULL
+    OR opening_time IS NOT NULL
+    OR closing_time IS NOT NULL
+    OR site_visit_status IS NOT NULL
+    OR last_site_visit_date IS NOT NULL
+    OR site_visit_note IS NOT NULL
+  );
+
+ALTER TABLE purchase_resources
+  DROP CONSTRAINT IF EXISTS chk_purchase_resources_scenic_level,
+  DROP CONSTRAINT IF EXISTS chk_purchase_resources_business_status,
+  DROP CONSTRAINT IF EXISTS chk_purchase_resources_site_visit_status,
+  DROP CONSTRAINT IF EXISTS chk_purchase_resources_coordinates,
+  DROP CONSTRAINT IF EXISTS chk_purchase_resources_business_hours,
+  DROP CONSTRAINT IF EXISTS chk_purchase_resources_site_visit_date,
+  DROP CONSTRAINT IF EXISTS chk_purchase_resources_scenic_fields_by_type,
+  DROP CONSTRAINT IF EXISTS chk_purchase_resources_scenic_level_by_type,
+  DROP CONSTRAINT IF EXISTS chk_purchase_resources_star_level,
+  DROP CONSTRAINT IF EXISTS chk_purchase_resources_star_level_by_type,
+  DROP CONSTRAINT IF EXISTS chk_purchase_resources_numeric_fields,
+  DROP CONSTRAINT IF EXISTS chk_purchase_resources_billing_mode,
+  DROP CONSTRAINT IF EXISTS chk_purchase_resources_procurement_mode;
+
+ALTER TABLE purchase_resources
+  DROP CONSTRAINT IF EXISTS chk_purchase_resources_type;
+
+ALTER TABLE purchase_resources
+  ADD CONSTRAINT chk_purchase_resources_type CHECK (
+    resource_type IN ('scenic', 'hotel', 'restaurant', 'shopping', 'vehicle', 'traffic', 'ground_agent', 'other')
+  );
+
+ALTER TABLE purchase_resources
+  ADD CONSTRAINT chk_purchase_resources_scenic_level CHECK (
+    scenic_level IS NULL OR scenic_level IN ('unrated', '1a', '2a', '3a', '4a', '5a')
+  ),
+  ADD CONSTRAINT chk_purchase_resources_business_status CHECK (
+    business_status IS NULL OR business_status IN ('unmaintained', 'open', 'suspended', 'closed')
+  ),
+  ADD CONSTRAINT chk_purchase_resources_site_visit_status CHECK (
+    site_visit_status IS NULL OR site_visit_status IN ('unmaintained', 'not_visited', 'visited')
+  ),
+  ADD CONSTRAINT chk_purchase_resources_coordinates CHECK (
+    (longitude IS NULL AND latitude IS NULL)
+    OR (
+      longitude IS NOT NULL AND latitude IS NOT NULL
+      AND longitude BETWEEN -180 AND 180
+      AND latitude BETWEEN -90 AND 90
+    )
+  ),
+  ADD CONSTRAINT chk_purchase_resources_business_hours CHECK (
+    (opening_time IS NULL AND closing_time IS NULL)
+    OR (opening_time IS NOT NULL AND closing_time IS NOT NULL AND closing_time > opening_time)
+  ),
+  ADD CONSTRAINT chk_purchase_resources_site_visit_date CHECK (
+    (site_visit_status IS NULL AND last_site_visit_date IS NULL)
+    OR
+    (site_visit_status = 'visited' AND last_site_visit_date IS NOT NULL AND last_site_visit_date <= CURRENT_DATE)
+    OR (site_visit_status IN ('unmaintained', 'not_visited') AND last_site_visit_date IS NULL)
+  ),
+  ADD CONSTRAINT chk_purchase_resources_scenic_level_by_type CHECK (
+    (resource_type = 'scenic' AND scenic_level IS NOT NULL)
+    OR (resource_type <> 'scenic' AND scenic_level IS NULL)
+  ),
+  ADD CONSTRAINT chk_purchase_resources_star_level_by_type CHECK (
+    star_level IS NULL OR resource_type IN ('hotel', 'restaurant')
+  ),
+  ADD CONSTRAINT chk_purchase_resources_numeric_fields CHECK (
+    (capacity IS NULL OR capacity >= 0)
+    AND (table_count IS NULL OR table_count >= 0)
+    AND (seat_count IS NULL OR seat_count >= 0)
+    AND (reference_days IS NULL OR reference_days >= 0)
+  ),
+  ADD CONSTRAINT chk_purchase_resources_billing_mode CHECK (
+    billing_mode IS NULL OR billing_mode IN ('daily', 'trip', 'distance_time')
+  ),
+  ADD CONSTRAINT chk_purchase_resources_procurement_mode CHECK (
+    procurement_mode IN ('required', 'not_required')
+  );
+
+CREATE TABLE IF NOT EXISTS knowledge_documents (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  source_type varchar(40) NOT NULL,
+  source_id bigint NOT NULL,
+  attachment_id bigint NOT NULL,
+  original_filename varchar(255) NOT NULL,
+  file_ext varchar(30),
+  file_size bigint NOT NULL DEFAULT 0,
+  file_sha256 varchar(64),
+  processing_status varchar(20) NOT NULL DEFAULT 'pending',
+  review_status varchar(20) NOT NULL DEFAULT 'draft',
+  index_status varchar(20) NOT NULL DEFAULT 'pending',
+  extracted_text text,
+  index_version integer NOT NULL DEFAULT 1,
+  usage_product_manual boolean NOT NULL DEFAULT true,
+  usage_qa boolean NOT NULL DEFAULT false,
+  error_message text,
+  processed_at timestamptz,
+  published_at timestamptz,
+  status varchar(20) NOT NULL DEFAULT 'active',
+  created_by varchar(80),
+  remark text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  is_deleted boolean NOT NULL DEFAULT false,
+  deleted_at timestamptz,
+  deleted_by varchar(64),
+  CONSTRAINT chk_knowledge_documents_source_type CHECK (source_type IN ('purchase_resource')),
+  CONSTRAINT chk_knowledge_documents_file_size CHECK (file_size >= 0),
+  CONSTRAINT chk_knowledge_documents_sha256 CHECK (file_sha256 IS NULL OR file_sha256 ~ '^[0-9a-f]{64}$'),
+  CONSTRAINT chk_knowledge_documents_processing_status CHECK (
+    processing_status IN ('pending', 'processing', 'succeeded', 'failed', 'deleted')
+  ),
+  CONSTRAINT chk_knowledge_documents_review_status CHECK (
+    review_status IN ('draft', 'published', 'disabled')
+  ),
+  CONSTRAINT chk_knowledge_documents_index_status CHECK (
+    index_status IN ('pending', 'indexed', 'failed', 'deleted')
+  ),
+  CONSTRAINT chk_knowledge_documents_status CHECK (status IN ('active', 'disabled')),
+  CONSTRAINT chk_knowledge_documents_index_version CHECK (index_version >= 1),
+  CONSTRAINT fk_knowledge_documents_resource FOREIGN KEY (tenant_id, source_id)
+    REFERENCES purchase_resources (tenant_id, id),
+  CONSTRAINT fk_knowledge_documents_attachment FOREIGN KEY (tenant_id, attachment_id)
+    REFERENCES common_attachments (tenant_id, id),
+  CONSTRAINT uk_knowledge_documents_tenant_id_id UNIQUE (tenant_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_document_chunks (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  document_id bigint NOT NULL,
+  source_type varchar(40) NOT NULL,
+  source_id bigint NOT NULL,
+  chunk_no integer NOT NULL,
+  chunk_text text NOT NULL,
+  token_count integer NOT NULL DEFAULT 0,
+  page_no integer,
+  heading varchar(300),
+  embedding_model varchar(120),
+  embedding vector(1024),
+  index_version integer NOT NULL DEFAULT 1,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT chk_knowledge_document_chunks_source_type CHECK (source_type IN ('purchase_resource')),
+  CONSTRAINT chk_knowledge_document_chunks_chunk_no CHECK (chunk_no >= 1),
+  CONSTRAINT chk_knowledge_document_chunks_token_count CHECK (token_count >= 0),
+  CONSTRAINT chk_knowledge_document_chunks_index_version CHECK (index_version >= 1),
+  CONSTRAINT fk_knowledge_document_chunks_document FOREIGN KEY (tenant_id, document_id)
+    REFERENCES knowledge_documents (tenant_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_processing_tasks (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id),
+  document_id bigint NOT NULL,
+  task_type varchar(30) NOT NULL,
+  task_status varchar(20) NOT NULL DEFAULT 'pending',
+  index_version integer NOT NULL DEFAULT 1,
+  retry_count integer NOT NULL DEFAULT 0,
+  next_retry_at timestamptz,
+  locked_by varchar(120),
+  locked_at timestamptz,
+  error_message text,
+  created_by varchar(80),
+  remark text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  is_deleted boolean NOT NULL DEFAULT false,
+  deleted_at timestamptz,
+  deleted_by varchar(64),
+  CONSTRAINT chk_knowledge_processing_tasks_type CHECK (task_type IN ('extract', 'index')),
+  CONSTRAINT chk_knowledge_processing_tasks_status CHECK (
+    task_status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled')
+  ),
+  CONSTRAINT chk_knowledge_processing_tasks_index_version CHECK (index_version >= 1),
+  CONSTRAINT chk_knowledge_processing_tasks_retry_count CHECK (retry_count >= 0),
+  CONSTRAINT fk_knowledge_processing_tasks_document FOREIGN KEY (tenant_id, document_id)
+    REFERENCES knowledge_documents (tenant_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS resource_projects (
@@ -235,7 +558,7 @@ CREATE TABLE IF NOT EXISTS purchase_relations (
   deleted_at timestamptz,
   deleted_by varchar(64),
   CONSTRAINT chk_purchase_relations_resource_type CHECK (
-    resource_type IN ('hotel', 'scenic', 'vehicle', 'restaurant', 'guide', 'ground_agent', 'ticket', 'shopping', 'other')
+    resource_type IN ('hotel', 'scenic', 'vehicle', 'restaurant', 'traffic', 'ground_agent', 'guide', 'ticket', 'shopping', 'other')
   ),
   CONSTRAINT chk_purchase_relations_price CHECK (purchase_price >= 0),
   CONSTRAINT chk_purchase_relations_status CHECK (status IN ('active', 'disabled', 'expired')),
@@ -245,13 +568,31 @@ CREATE TABLE IF NOT EXISTS purchase_relations (
 );
 
 ALTER TABLE purchase_relations
-  ADD COLUMN IF NOT EXISTS group_quantity integer NOT NULL DEFAULT 0;
+  ADD COLUMN IF NOT EXISTS group_quantity integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS is_default boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS price_mode varchar(20),
+  ADD COLUMN IF NOT EXISTS unified_price numeric(14,2),
+  ADD COLUMN IF NOT EXISTS price_remark text;
 
 ALTER TABLE purchase_relations
   DROP CONSTRAINT IF EXISTS chk_purchase_relations_group_quantity;
 
 ALTER TABLE purchase_relations
   ADD CONSTRAINT chk_purchase_relations_group_quantity CHECK (group_quantity >= 0);
+
+ALTER TABLE purchase_relations
+  DROP CONSTRAINT IF EXISTS chk_purchase_relations_is_default;
+
+ALTER TABLE purchase_relations
+  ADD CONSTRAINT chk_purchase_relations_is_default CHECK (is_default IN (true, false));
+
+ALTER TABLE purchase_relations
+  DROP CONSTRAINT IF EXISTS chk_purchase_relations_resource_type;
+
+ALTER TABLE purchase_relations
+  ADD CONSTRAINT chk_purchase_relations_resource_type CHECK (
+    resource_type IN ('hotel', 'scenic', 'vehicle', 'restaurant', 'traffic', 'ground_agent', 'guide', 'ticket', 'shopping', 'other')
+  );
 
 ALTER TABLE purchase_relations
   DROP CONSTRAINT IF EXISTS uk_purchase_relations_tenant_id_id;
@@ -286,6 +627,81 @@ CREATE TABLE IF NOT EXISTS supplier_resource_prices (
   CONSTRAINT fk_supplier_resource_prices_project FOREIGN KEY (tenant_id, resource_project_id)
     REFERENCES resource_projects (tenant_id, id)
 );
+
+-- 历史关系按现有明细兼容迁移：所有启用明细团队价相同的关系视为统一报价，其余视为分类报价。
+UPDATE purchase_relations r
+SET price_mode = CASE
+  WHEN EXISTS (
+    SELECT 1 FROM supplier_resource_prices p
+    WHERE p.tenant_id = r.tenant_id
+      AND p.relation_id = r.id
+      AND p.is_deleted = false
+  )
+  AND (
+    SELECT COUNT(DISTINCT p.team_price)
+    FROM supplier_resource_prices p
+    WHERE p.tenant_id = r.tenant_id
+      AND p.relation_id = r.id
+      AND p.is_deleted = false
+  ) = 1 THEN 'unified'
+  ELSE 'classified'
+END
+WHERE r.price_mode IS NULL;
+
+-- 统一报价收拢到采购关系，不再伪装为各费用项目的分类价。
+UPDATE purchase_relations r
+SET unified_price = source.team_price,
+    price_remark = source.price_remark
+FROM (
+  SELECT p.tenant_id,
+         p.relation_id,
+         MIN(p.team_price) AS team_price,
+         CASE WHEN COUNT(DISTINCT NULLIF(BTRIM(p.price_description), '')) = 1
+              THEN MAX(NULLIF(BTRIM(p.price_description), ''))
+              ELSE NULL
+         END AS price_remark
+  FROM supplier_resource_prices p
+  WHERE p.is_deleted = false
+  GROUP BY p.tenant_id, p.relation_id
+  HAVING COUNT(DISTINCT p.team_price) = 1
+) source
+WHERE r.tenant_id = source.tenant_id
+  AND r.id = source.relation_id
+  AND r.is_deleted = false
+  AND r.price_mode = 'unified'
+  AND r.unified_price IS NULL;
+
+UPDATE supplier_resource_prices p
+SET is_deleted = true,
+    deleted_at = COALESCE(p.deleted_at, now()),
+    deleted_by = COALESCE(p.deleted_by, 'unified-price-migration')
+FROM purchase_relations r
+WHERE r.tenant_id = p.tenant_id
+  AND r.id = p.relation_id
+  AND r.is_deleted = false
+  AND r.price_mode = 'unified'
+  AND r.unified_price IS NOT NULL
+  AND p.is_deleted = false;
+
+ALTER TABLE purchase_relations
+  ALTER COLUMN price_mode SET DEFAULT 'classified',
+  ALTER COLUMN price_mode SET NOT NULL;
+
+ALTER TABLE purchase_relations
+  DROP CONSTRAINT IF EXISTS chk_purchase_relations_price_mode;
+
+ALTER TABLE purchase_relations
+  ADD CONSTRAINT chk_purchase_relations_price_mode CHECK (price_mode IN ('unified', 'classified'));
+
+ALTER TABLE purchase_relations
+  DROP CONSTRAINT IF EXISTS chk_purchase_relations_unified_price;
+
+ALTER TABLE purchase_relations
+  ADD CONSTRAINT chk_purchase_relations_unified_price CHECK (
+    is_deleted = true
+    OR (price_mode = 'unified' AND unified_price IS NOT NULL AND unified_price >= 0)
+    OR (price_mode = 'classified' AND unified_price IS NULL)
+  );
 
 CREATE TABLE IF NOT EXISTS purchase_relation_ticket_templates (
   id BIGSERIAL PRIMARY KEY,
@@ -556,6 +972,11 @@ CREATE TRIGGER trg_purchase_resources_updated_at
 BEFORE UPDATE ON purchase_resources
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_knowledge_documents_updated_at ON knowledge_documents;
+CREATE TRIGGER trg_knowledge_documents_updated_at
+BEFORE UPDATE ON knowledge_documents
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 DROP TRIGGER IF EXISTS trg_resource_projects_updated_at ON resource_projects;
 CREATE TRIGGER trg_resource_projects_updated_at
 BEFORE UPDATE ON resource_projects
@@ -579,6 +1000,11 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_purchase_relation_ticket_template_fields_updated_at ON purchase_relation_ticket_template_fields;
 CREATE TRIGGER trg_purchase_relation_ticket_template_fields_updated_at
 BEFORE UPDATE ON purchase_relation_ticket_template_fields
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_knowledge_processing_tasks_updated_at ON knowledge_processing_tasks;
+CREATE TRIGGER trg_knowledge_processing_tasks_updated_at
+BEFORE UPDATE ON knowledge_processing_tasks
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_supplier_contracts_updated_at ON supplier_contracts;
@@ -647,9 +1073,53 @@ CREATE INDEX IF NOT EXISTS idx_purchase_resources_tenant_deleted_name
   ON purchase_resources (tenant_id, is_deleted, resource_name);
 CREATE INDEX IF NOT EXISTS idx_purchase_resources_tenant_deleted_status
   ON purchase_resources (tenant_id, is_deleted, status);
+CREATE INDEX IF NOT EXISTS idx_purchase_resources_tenant_deleted_procurement_mode
+  ON purchase_resources (tenant_id, is_deleted, procurement_mode);
+CREATE INDEX IF NOT EXISTS idx_purchase_resources_tenant_scenic_level
+  ON purchase_resources (tenant_id, scenic_level)
+  WHERE is_deleted = false AND resource_type = 'scenic';
+CREATE INDEX IF NOT EXISTS idx_purchase_resources_tenant_scenic_business
+  ON purchase_resources (tenant_id, business_status)
+  WHERE is_deleted = false AND resource_type = 'scenic';
+CREATE INDEX IF NOT EXISTS idx_purchase_resources_tenant_scenic_site_visit
+  ON purchase_resources (tenant_id, site_visit_status)
+  WHERE is_deleted = false AND resource_type = 'scenic';
+CREATE INDEX IF NOT EXISTS idx_purchase_resources_tenant_star_level
+  ON purchase_resources (tenant_id, resource_type, star_level)
+  WHERE is_deleted = false AND resource_type IN ('hotel', 'restaurant');
+CREATE INDEX IF NOT EXISTS idx_purchase_resources_tenant_place_business
+  ON purchase_resources (tenant_id, resource_type, business_status)
+  WHERE is_deleted = false AND resource_type IN ('scenic', 'hotel', 'restaurant', 'shopping');
+CREATE INDEX IF NOT EXISTS idx_purchase_resources_tenant_place_site_visit
+  ON purchase_resources (tenant_id, resource_type, site_visit_status)
+  WHERE is_deleted = false AND resource_type IN ('scenic', 'hotel', 'restaurant', 'shopping');
+CREATE INDEX IF NOT EXISTS idx_purchase_resources_tenant_vehicle_seat
+  ON purchase_resources (tenant_id, seat_count)
+  WHERE is_deleted = false AND resource_type = 'vehicle';
+CREATE INDEX IF NOT EXISTS idx_purchase_resources_tenant_ground_agent_area
+  ON purchase_resources (tenant_id, service_area)
+  WHERE is_deleted = false AND resource_type = 'ground_agent';
 CREATE UNIQUE INDEX IF NOT EXISTS uk_purchase_resources_tenant_type_name_city_active
   ON purchase_resources (tenant_id, resource_type, resource_name, province, city, district)
   WHERE is_deleted = false;
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_documents_tenant_source
+  ON knowledge_documents (tenant_id, is_deleted, source_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_documents_tenant_processing
+  ON knowledge_documents (tenant_id, is_deleted, processing_status, index_status);
+CREATE INDEX IF NOT EXISTS idx_knowledge_documents_tenant_review
+  ON knowledge_documents (tenant_id, is_deleted, review_status, status);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_knowledge_documents_tenant_attachment_active
+  ON knowledge_documents (tenant_id, attachment_id)
+  WHERE is_deleted = false;
+CREATE INDEX IF NOT EXISTS idx_knowledge_document_chunks_tenant_document
+  ON knowledge_document_chunks (tenant_id, document_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_document_chunks_tenant_source
+  ON knowledge_document_chunks (tenant_id, source_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_processing_tasks_tenant_status
+  ON knowledge_processing_tasks (tenant_id, is_deleted, task_status, next_retry_at);
+CREATE INDEX IF NOT EXISTS idx_knowledge_processing_tasks_tenant_document
+  ON knowledge_processing_tasks (tenant_id, is_deleted, document_id);
 
 CREATE INDEX IF NOT EXISTS idx_resource_projects_tenant_deleted_type
   ON resource_projects (tenant_id, is_deleted, resource_type);
@@ -668,6 +1138,9 @@ CREATE INDEX IF NOT EXISTS idx_purchase_relations_tenant_deleted_status
 CREATE UNIQUE INDEX IF NOT EXISTS uk_purchase_relations_tenant_resource_supplier_group_active
   ON purchase_relations (tenant_id, resource_id, supplier_id, group_quantity)
   WHERE is_deleted = false AND resource_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uk_purchase_relations_tenant_resource_default_active
+  ON purchase_relations (tenant_id, resource_id)
+  WHERE is_deleted = false AND resource_id IS NOT NULL AND is_default = true;
 
 CREATE INDEX IF NOT EXISTS idx_supplier_resource_prices_tenant_deleted_relation
   ON supplier_resource_prices (tenant_id, is_deleted, relation_id);
@@ -822,6 +1295,7 @@ COMMENT ON COLUMN suppliers.province IS '供应商所在地省份。';
 COMMENT ON COLUMN suppliers.city IS '供应商所在地城市。';
 COMMENT ON COLUMN suppliers.district IS '供应商所在地区县。';
 COMMENT ON COLUMN suppliers.settlement_method IS '结算方式，例如现结、月结、周结。';
+COMMENT ON COLUMN suppliers.basic_info IS '供应商基础信息，用于记录简介、接待能力或其他补充说明。';
 COMMENT ON COLUMN suppliers.contact_name IS '联系人姓名。';
 COMMENT ON COLUMN suppliers.contact_phone IS '联系人电话。';
 COMMENT ON COLUMN suppliers.fax_number IS '供应商传真号码。';
@@ -837,17 +1311,41 @@ COMMENT ON COLUMN suppliers.is_deleted IS '是否已删除。false表示正常�
 COMMENT ON COLUMN suppliers.deleted_at IS '删除时间。未删除时为空。';
 COMMENT ON COLUMN suppliers.deleted_by IS '删除人账号或名称。未删除时为空。';
 
-COMMENT ON TABLE purchase_resources IS '采购资源总览表。用于维护景区、酒店、餐厅和购物等采购资源主档，支撑资源查询、供应商绑定和资源图片管理。';
+COMMENT ON TABLE purchase_resources IS '旅游资源主档表。用于维护景区、酒店、餐厅、购物、用车、大交通、地接和其它资源，支撑资源查询、地图选点、产品方案、供应商绑定和资源资料管理。';
 COMMENT ON COLUMN purchase_resources.id IS '采购资源主键ID，系统内部使用。';
 COMMENT ON COLUMN purchase_resources.tenant_id IS '租户ID，标识该资源属于哪一家地接公司。';
-COMMENT ON COLUMN purchase_resources.resource_type IS '资源类型。scenic景区，hotel酒店，restaurant餐厅，shopping购物。';
+COMMENT ON COLUMN purchase_resources.resource_type IS '资源类型。scenic景区，hotel酒店，restaurant餐厅，shopping购物，vehicle用车，traffic大交通，ground_agent地接，other其它资源。';
 COMMENT ON COLUMN purchase_resources.resource_name IS '资源名称。';
 COMMENT ON COLUMN purchase_resources.province IS '资源所在省份。';
 COMMENT ON COLUMN purchase_resources.city IS '资源所在城市。';
 COMMENT ON COLUMN purchase_resources.district IS '资源所在区县。';
 COMMENT ON COLUMN purchase_resources.phone IS '资源联系电话。';
+COMMENT ON COLUMN purchase_resources.contact_name IS '资源联系人姓名，独立于供应商联系人。';
 COMMENT ON COLUMN purchase_resources.fax IS '资源传真号码。';
 COMMENT ON COLUMN purchase_resources.address IS '资源详细地址。';
+COMMENT ON COLUMN purchase_resources.scenic_level IS '景区国家A级。unrated表示未评级，1a至5a表示对应国家A级；非景区资源为空。';
+COMMENT ON COLUMN purchase_resources.star_level IS '酒店或餐厅星级/接待标准名称，酒店由企业产品字典reception_standard提供；其它资源为空。';
+COMMENT ON COLUMN purchase_resources.category_tags IS '类型标签。餐厅可记录菜系，购物可记录商品类别，其它资源可记录业务分类，多个值用英文逗号分隔。';
+COMMENT ON COLUMN purchase_resources.longitude IS '高德地图GCJ-02坐标经度，取值范围-180至180；维护坐标后可进入产品地图。';
+COMMENT ON COLUMN purchase_resources.latitude IS '高德地图GCJ-02坐标纬度，取值范围-90至90；维护坐标后可进入产品地图。';
+COMMENT ON COLUMN purchase_resources.business_status IS '营业状态。unmaintained表示未维护，open表示营业中，suspended表示暂停营业，closed表示已停业。';
+COMMENT ON COLUMN purchase_resources.opening_time IS '每日开始营业时间，与结束营业时间成对维护。';
+COMMENT ON COLUMN purchase_resources.closing_time IS '每日结束营业时间，必须晚于同日开始营业时间。';
+COMMENT ON COLUMN purchase_resources.site_visit_status IS '踩点状态。unmaintained表示未维护，not_visited表示未踩点，visited表示已踩点。';
+COMMENT ON COLUMN purchase_resources.last_site_visit_date IS '最近一次踩点日期。已踩点时必填且不能晚于当前日期，其他状态为空。';
+COMMENT ON COLUMN purchase_resources.site_visit_note IS '踩点备注，用于记录现场考察结论和注意事项。';
+COMMENT ON COLUMN purchase_resources.capacity IS '最大接待人数或容量，用于餐厅、购物等资源的接待能力参考。';
+COMMENT ON COLUMN purchase_resources.table_count IS '餐桌数量，仅餐厅资源使用。';
+COMMENT ON COLUMN purchase_resources.meal_standard IS '团餐标准或资源规格说明，例如10人每桌、8菜1汤。';
+COMMENT ON COLUMN purchase_resources.vehicle_type IS '车辆类型，例如商务车、中巴或旅游大巴，仅用车资源使用。';
+COMMENT ON COLUMN purchase_resources.seat_count IS '车辆座位数，仅用车资源使用。';
+COMMENT ON COLUMN purchase_resources.billing_mode IS '用车计费模式。daily按天，trip按趟次或行程，distance_time按公里和时间。';
+COMMENT ON COLUMN purchase_resources.service_area IS '服务地区或服务范围，用于地接和大交通等服务类资源。';
+COMMENT ON COLUMN purchase_resources.reference_days IS '地接参考天数，仅地接资源使用。';
+COMMENT ON COLUMN purchase_resources.included_items IS '包含内容，用于地接、大交通或其它服务类资源说明。';
+COMMENT ON COLUMN purchase_resources.excluded_items IS '不包含内容，主要用于地接资源说明。';
+COMMENT ON COLUMN purchase_resources.resource_unit IS '默认计价单位，用于其它资源报价参考。';
+COMMENT ON COLUMN purchase_resources.procurement_mode IS '默认采购属性。required表示需要采购，not_required表示无需采购；产品或团队可按本次实际安排另行判断。';
 COMMENT ON COLUMN purchase_resources.warm_tip IS '资源温馨提示，用于记录接待、预约或注意事项。';
 COMMENT ON COLUMN purchase_resources.introduction IS '资源简介。';
 COMMENT ON COLUMN purchase_resources.status IS '资源状态。active表示启用，disabled表示停用。';
@@ -858,6 +1356,71 @@ COMMENT ON COLUMN purchase_resources.updated_at IS '更新时间，由触发器�
 COMMENT ON COLUMN purchase_resources.is_deleted IS '是否已删除。false表示正常，true表示已软删除。';
 COMMENT ON COLUMN purchase_resources.deleted_at IS '删除时间。未删除时为空。';
 COMMENT ON COLUMN purchase_resources.deleted_by IS '删除人账号或名称。未删除时为空。';
+
+COMMENT ON TABLE knowledge_documents IS '知识文档表。用于保存业务资料文件、抽取文本、审核状态和向量索引状态。';
+COMMENT ON COLUMN knowledge_documents.id IS '知识文档主键ID，系统内部使用。';
+COMMENT ON COLUMN knowledge_documents.tenant_id IS '租户ID，标识该知识文档属于哪一家地接公司。';
+COMMENT ON COLUMN knowledge_documents.source_type IS '业务来源类型。purchase_resource表示采购资源资料。';
+COMMENT ON COLUMN knowledge_documents.source_id IS '业务来源记录ID。本期为采购资源主档ID。';
+COMMENT ON COLUMN knowledge_documents.attachment_id IS '公共附件ID，关联原始上传文件。';
+COMMENT ON COLUMN knowledge_documents.original_filename IS '原始上传文件名快照。';
+COMMENT ON COLUMN knowledge_documents.file_ext IS '文件扩展名快照。';
+COMMENT ON COLUMN knowledge_documents.file_size IS '文件大小，单位字节。';
+COMMENT ON COLUMN knowledge_documents.file_sha256 IS '文件内容SHA-256摘要，用于后续重复文件识别。';
+COMMENT ON COLUMN knowledge_documents.processing_status IS '处理状态。pending待处理，processing处理中，succeeded处理成功，failed处理失败，deleted已删除。';
+COMMENT ON COLUMN knowledge_documents.review_status IS '审核状态。draft草稿，published已发布，disabled已停用。';
+COMMENT ON COLUMN knowledge_documents.index_status IS '向量索引状态。pending待向量化，indexed已入库，failed向量化失败，deleted已删除。';
+COMMENT ON COLUMN knowledge_documents.extracted_text IS '从文件中抽取或OCR识别得到的正文文本。';
+COMMENT ON COLUMN knowledge_documents.index_version IS '索引版本号。删除或重试时递增，防止旧任务重新写入已删除或过期向量。';
+COMMENT ON COLUMN knowledge_documents.usage_product_manual IS '是否允许作为后续产品手册生成资料来源。';
+COMMENT ON COLUMN knowledge_documents.usage_qa IS '是否允许作为后续知识库问答检索来源。';
+COMMENT ON COLUMN knowledge_documents.error_message IS '最近一次处理失败原因。';
+COMMENT ON COLUMN knowledge_documents.processed_at IS '最近一次处理完成时间。';
+COMMENT ON COLUMN knowledge_documents.published_at IS '发布时间。未发布时为空。';
+COMMENT ON COLUMN knowledge_documents.status IS '文档状态。active表示可用，disabled表示停用。';
+COMMENT ON COLUMN knowledge_documents.created_by IS '创建人账号或名称。';
+COMMENT ON COLUMN knowledge_documents.remark IS '知识文档备注。';
+COMMENT ON COLUMN knowledge_documents.created_at IS '创建时间。';
+COMMENT ON COLUMN knowledge_documents.updated_at IS '更新时间，由触发器自动维护。';
+COMMENT ON COLUMN knowledge_documents.is_deleted IS '是否已删除。false表示正常，true表示已软删除。';
+COMMENT ON COLUMN knowledge_documents.deleted_at IS '删除时间。未删除时为空。';
+COMMENT ON COLUMN knowledge_documents.deleted_by IS '删除人账号或名称。未删除时为空。';
+
+COMMENT ON TABLE knowledge_document_chunks IS '知识文档切片表。用于保存文档分段文本和pgvector向量，删除文件时按文档物理删除本表记录。';
+COMMENT ON COLUMN knowledge_document_chunks.id IS '知识文档切片主键ID，系统内部使用。';
+COMMENT ON COLUMN knowledge_document_chunks.tenant_id IS '租户ID，标识该切片属于哪一家地接公司。';
+COMMENT ON COLUMN knowledge_document_chunks.document_id IS '知识文档ID。';
+COMMENT ON COLUMN knowledge_document_chunks.source_type IS '业务来源类型。purchase_resource表示采购资源资料。';
+COMMENT ON COLUMN knowledge_document_chunks.source_id IS '业务来源记录ID。本期为采购资源主档ID。';
+COMMENT ON COLUMN knowledge_document_chunks.chunk_no IS '切片序号，从1开始。';
+COMMENT ON COLUMN knowledge_document_chunks.chunk_text IS '切片正文文本。';
+COMMENT ON COLUMN knowledge_document_chunks.token_count IS '估算token数量，用于控制后续检索上下文长度。';
+COMMENT ON COLUMN knowledge_document_chunks.page_no IS '切片来源页码。无法识别页码时为空。';
+COMMENT ON COLUMN knowledge_document_chunks.heading IS '切片附近标题或章节名。';
+COMMENT ON COLUMN knowledge_document_chunks.embedding_model IS '生成向量使用的模型名称。';
+COMMENT ON COLUMN knowledge_document_chunks.embedding IS '文本向量，固定1024维。';
+COMMENT ON COLUMN knowledge_document_chunks.index_version IS '索引版本号，必须与文档当前版本一致才可用于检索。';
+COMMENT ON COLUMN knowledge_document_chunks.created_at IS '创建时间。';
+
+COMMENT ON TABLE knowledge_processing_tasks IS '知识文档处理任务表。用于记录抽取文本、OCR和向量化任务的状态、重试和取消信息。';
+COMMENT ON COLUMN knowledge_processing_tasks.id IS '处理任务主键ID，系统内部使用。';
+COMMENT ON COLUMN knowledge_processing_tasks.tenant_id IS '租户ID，标识该任务属于哪一家地接公司。';
+COMMENT ON COLUMN knowledge_processing_tasks.document_id IS '知识文档ID。';
+COMMENT ON COLUMN knowledge_processing_tasks.task_type IS '任务类型。extract抽取文本或OCR，index生成向量索引。';
+COMMENT ON COLUMN knowledge_processing_tasks.task_status IS '任务状态。pending待执行，running执行中，succeeded成功，failed失败，cancelled已取消。';
+COMMENT ON COLUMN knowledge_processing_tasks.index_version IS '任务对应的索引版本号。与文档当前版本不一致时任务必须停止写入。';
+COMMENT ON COLUMN knowledge_processing_tasks.retry_count IS '已重试次数。';
+COMMENT ON COLUMN knowledge_processing_tasks.next_retry_at IS '下次可重试时间。为空表示可立即处理。';
+COMMENT ON COLUMN knowledge_processing_tasks.locked_by IS '任务锁持有者标识。';
+COMMENT ON COLUMN knowledge_processing_tasks.locked_at IS '任务加锁时间。';
+COMMENT ON COLUMN knowledge_processing_tasks.error_message IS '最近一次任务失败原因。';
+COMMENT ON COLUMN knowledge_processing_tasks.created_by IS '创建人账号或名称。';
+COMMENT ON COLUMN knowledge_processing_tasks.remark IS '处理任务备注。';
+COMMENT ON COLUMN knowledge_processing_tasks.created_at IS '创建时间。';
+COMMENT ON COLUMN knowledge_processing_tasks.updated_at IS '更新时间，由触发器自动维护。';
+COMMENT ON COLUMN knowledge_processing_tasks.is_deleted IS '是否已删除。false表示正常，true表示已软删除。';
+COMMENT ON COLUMN knowledge_processing_tasks.deleted_at IS '删除时间。未删除时为空。';
+COMMENT ON COLUMN knowledge_processing_tasks.deleted_by IS '删除人账号或名称。未删除时为空。';
 
 COMMENT ON TABLE resource_projects IS '资源费用项目表。用于维护不同资源类型下可选择的费用或价格项目，支撑采购价格、计调成本和财务统计口径。';
 COMMENT ON COLUMN resource_projects.id IS '资源费用项目主键ID，系统内部使用。';
@@ -875,20 +1438,24 @@ COMMENT ON COLUMN resource_projects.is_deleted IS '是否已删除。false表示
 COMMENT ON COLUMN resource_projects.deleted_at IS '删除时间。未删除时为空。';
 COMMENT ON COLUMN resource_projects.deleted_by IS '删除人账号或名称。未删除时为空。';
 
-COMMENT ON TABLE purchase_relations IS '采购关系表。用于维护资源与供应商之间的绑定关系和成团数量，不直接承载具体价格明细。';
+COMMENT ON TABLE purchase_relations IS '采购关系表。用于维护资源与供应商之间的绑定关系、成团数量和关系级统一报价。';
 COMMENT ON COLUMN purchase_relations.id IS '采购关系主键ID，系统内部使用。';
 COMMENT ON COLUMN purchase_relations.tenant_id IS '租户ID，标识该采购关系属于哪一家地接公司。';
 COMMENT ON COLUMN purchase_relations.resource_type IS '资源类型。hotel酒店，scenic景区，vehicle车辆，restaurant餐厅，guide导游，ground_agent地接，ticket票务，shopping购物，other其他。';
 COMMENT ON COLUMN purchase_relations.resource_id IS '资源ID，关联采购资源主档。';
 COMMENT ON COLUMN purchase_relations.resource_name IS '资源名称。';
 COMMENT ON COLUMN purchase_relations.supplier_id IS '供应商ID，关联供应商表。';
+COMMENT ON COLUMN purchase_relations.price_mode IS '报价模式。unified表示统一报价，classified表示按资源费用项目分别报价。';
+COMMENT ON COLUMN purchase_relations.unified_price IS '统一报价金额，仅统一报价模式使用，单位元。';
+COMMENT ON COLUMN purchase_relations.price_remark IS '统一报价的适用条件、有效范围或补充说明。';
 COMMENT ON COLUMN purchase_relations.group_quantity IS '成团数量。0表示散团同价，大于0表示达到该数量后适用对应关系价格。';
-COMMENT ON COLUMN purchase_relations.purchase_price IS '历史兼容采购价格字段，当前价格明细由 supplier_resource_prices 维护。';
-COMMENT ON COLUMN purchase_relations.price_unit IS '历史兼容价格单位字段，当前价格明细由 supplier_resource_prices 维护。';
+COMMENT ON COLUMN purchase_relations.purchase_price IS '历史兼容采购价格字段，当前统一报价使用 unified_price，分类报价由 supplier_resource_prices 维护。';
+COMMENT ON COLUMN purchase_relations.price_unit IS '历史兼容价格单位字段，当前计价单位以资源主档和业务场景为准。';
 COMMENT ON COLUMN purchase_relations.settlement_method IS '历史兼容结算方式字段，当前结算条款优先从合同或价格说明维护。';
 COMMENT ON COLUMN purchase_relations.valid_from IS '历史兼容价格有效期开始日期，当前价格明细不使用该字段。';
 COMMENT ON COLUMN purchase_relations.valid_to IS '历史兼容价格有效期结束日期，当前价格明细不使用该字段。';
 COMMENT ON COLUMN purchase_relations.priority_level IS '历史兼容优先级字段，当前页面不作为主操作字段。';
+COMMENT ON COLUMN purchase_relations.is_default IS '是否为当前资源的默认供应商。true表示默认供应商，false表示普通供应商。';
 COMMENT ON COLUMN purchase_relations.status IS '采购关系状态。active表示有效，disabled表示停用，expired表示过期。';
 COMMENT ON COLUMN purchase_relations.created_by IS '创建人账号或名称。';
 COMMENT ON COLUMN purchase_relations.remark IS '采购关系备注。';
@@ -1069,9 +1636,22 @@ COMMENT ON INDEX uk_customer_credit_accounts_tenant_customer_active IS '客户�
 COMMENT ON INDEX uk_customer_product_auth_tenant_customer_product_active IS '客户产品授权唯一索引，仅约束未删除记录。';
 COMMENT ON INDEX uk_suppliers_tenant_code_active IS '供应商编码唯一索引，仅约束未删除且编码非空记录。';
 COMMENT ON INDEX uk_suppliers_tenant_name_active IS '供应商名称唯一索引，仅约束未删除记录。';
+COMMENT ON INDEX idx_purchase_resources_tenant_scenic_level IS '有效景区按租户和国家A级筛选的部分索引。';
+COMMENT ON INDEX idx_purchase_resources_tenant_scenic_business IS '有效景区按租户和营业状态筛选的部分索引。';
+COMMENT ON INDEX idx_purchase_resources_tenant_scenic_site_visit IS '有效景区按租户和踩点状态筛选的部分索引。';
 COMMENT ON INDEX uk_purchase_resources_tenant_type_name_city_active IS '采购资源名称唯一索引，仅约束同类型、同省市区县下的未删除记录。';
+COMMENT ON INDEX idx_knowledge_documents_tenant_source IS '知识文档按租户和业务来源查询的索引。';
+COMMENT ON INDEX idx_knowledge_documents_tenant_processing IS '知识文档按处理状态和索引状态查询的索引。';
+COMMENT ON INDEX idx_knowledge_documents_tenant_review IS '知识文档按审核状态查询的索引。';
+COMMENT ON INDEX uk_knowledge_documents_tenant_attachment_active IS '知识文档附件唯一索引，仅约束未删除文档。';
+COMMENT ON INDEX idx_knowledge_document_chunks_tenant_document IS '知识切片按租户和文档删除、重建的索引。';
+COMMENT ON INDEX idx_knowledge_document_chunks_tenant_source IS '知识切片按租户和业务来源检索候选文档的索引。';
+COMMENT ON INDEX idx_knowledge_processing_tasks_tenant_status IS '知识处理任务按租户和任务状态拉取待执行任务的索引。';
+COMMENT ON INDEX idx_knowledge_processing_tasks_tenant_document IS '知识处理任务按租户和文档取消任务的索引。';
 COMMENT ON INDEX uk_resource_projects_tenant_type_name_active IS '资源费用项目唯一索引，仅约束同资源类型下未删除项目名称。';
 COMMENT ON INDEX uk_purchase_relations_tenant_resource_supplier_group_active IS '采购关系唯一索引，仅约束同资源、同供应商、同成团数量下的未删除记录。';
+COMMENT ON INDEX uk_purchase_relations_tenant_resource_default_active IS '采购关系默认供应商唯一索引，仅约束同一资源只能有一个未删除默认供应商。';
+COMMENT ON INDEX idx_purchase_relations_tenant_deleted_supplier IS '采购关系按租户和供应商筛选的索引。';
 COMMENT ON INDEX uk_supplier_resource_prices_tenant_relation_project_active IS '供应商资源价格唯一索引，仅约束同采购关系、同费用项目下的未删除价格记录。';
 COMMENT ON INDEX uk_purchase_relation_ticket_templates_tenant_relation_active IS '采购关系游客名单模板唯一索引，仅约束同采购关系下的未删除模板配置。';
 COMMENT ON INDEX uk_purchase_relation_ticket_template_fields_tenant_template_column_active IS '游客名单模板字段列唯一索引，仅约束同模板下的未删除列映射。';
@@ -1095,10 +1675,13 @@ CROSS JOIN (
   VALUES
     ('scenic', '成人', true, 10, '景区成人票价项目'),
     ('scenic', '儿童', true, 20, '景区儿童票价项目'),
-    ('scenic', '免票', true, 30, '景区免票项目'),
-    ('scenic', '60周岁', true, 40, '景区老人优惠项目'),
-    ('scenic', '套票', true, 50, '景区套票项目'),
-    ('scenic', '套票2', true, 60, '景区第二套票项目'),
+    ('scenic', '学生', true, 30, '景区学生票价项目'),
+    ('scenic', '老人', true, 40, '景区老人票价项目'),
+    ('scenic', '优待', true, 50, '景区优待票价项目'),
+    ('scenic', '免票', true, 60, '景区免票项目'),
+    ('scenic', '60周岁', true, 70, '景区老人优惠项目'),
+    ('scenic', '套票', true, 80, '景区套票项目'),
+    ('scenic', '套票2', true, 90, '景区第二套票项目'),
     ('scenic', '其它', true, 999, '景区其它费用项目'),
     ('hotel', '标间', true, 10, '酒店标准间项目'),
     ('hotel', '大床房', true, 20, '酒店大床房项目'),

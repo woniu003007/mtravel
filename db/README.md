@@ -41,6 +41,7 @@
 | `038_sales_product_design_draft_scope.sql` | 表结构迁移：补齐 `sales_products.product_scope='design_draft'` 约束、查询索引，并将产品名称唯一约束限定到正式模板和设计草稿，排除团队专属快照。 |
 | `039_resource_introduction_notice.sql` | 表结构迁移：为资源介绍增加注意事项，并为产品每日资源增加注意事项快照。 |
 | `040_sales_product_day_resource_introductions.sql` | 产品设计迁移：为一个产品日资源增加多个介绍素材快照、排序和软删除约束，生成 Word 时按素材顺序串联。 |
+| `041_sales_quote_department_manager_approval.sql` | 销售报价审批迁移：关联部门负责人企业员工账号，并增加直属领导/指定人员审批模式。 |
 | `042_purchase_relation_optional_items.sql` | 采购关系自费项目报价：维护供应商提供的景区自费门票/游览项目成本，固定按元/人计价。 |
 | `043_purchase_resource_introduction_visit_duration.sql` | 表结构迁移：为资源介绍素材增加建议游览时间。 |
 | `044_purchase_resource_introduction_warm_tip.sql` | 表结构迁移：为资源介绍及产品设计快照增加温馨提示，并明确注意事项按红色输出。 |
@@ -50,8 +51,12 @@
 | `048_purchase_resource_introduction_sort_order.sql` | 表结构迁移：为资源介绍素材增加资源内维护排序，支持资料页拖拽排序。 |
 | `049_purchase_resource_introduction_extension_blocks.sql` | 表结构迁移：为资源介绍素材增加可排序扩展内容模块，并为产品设计保存对应快照。 |
 | `050_purchase_resource_reception_standard.sql` | 表结构迁移：将酒店资源星级改为复用企业产品字典 `reception_standard`。 |
-| `051_sales_product_designer_accommodation_and_meals.sql` | 产品设计迁移：将酒店、早餐、中餐、晚餐改为明确的资源编排归属，允许当天多酒店，并保证每餐次唯一餐厅。 |
-| `052_sales_product_designer_multi_hotel_accommodation.sql` | 产品设计修正迁移：移除每天仅一个酒店的限制，保留每餐次仅一个餐厅的规则。 |
+| `051_sales_product_designer_accommodation_and_meals.sql` | 产品设计迁移：将酒店、早餐、中餐、晚餐改为明确的资源编排归属，同一天仅一间酒店，并保证每餐次唯一餐厅。 |
+| `052_sales_product_designer_multi_hotel_accommodation.sql` | 历史误迁移记录：曾移除每天仅一个酒店的限制，当前禁止新执行；已执行的库使用 055 恢复。 |
+| `053_sales_product_designer_resource_arrangement_v2.sql` | 产品设计资源编排 V2：增加地接独立编排、采购关系和报价模式快照，以及产品级全程用车表、约束和查询索引。 |
+| `054_sales_product_designer_not_required_price_mode.sql` | 产品设计资源编排修正：允许每日资源和全程用车的报价快照明确记录 `not_required`，避免将无需采购误标为待询价。 |
+| `055_sales_product_designer_single_hotel_accommodation.sql` | 产品设计规则修正：为已执行 052 的库恢复同一天仅一家酒店的唯一约束，并在多酒店数据存在时拒绝执行。 |
+| `056_sales_product_designer_day_destination.sql` | 产品设计每日主行程城市：保存每日省、市、区县，驱动日卡与地图默认城市范围，不与酒店说明混用。 |
 | `数据库设计-客户管理四表说明.md` | 客户管理四表的表作用、字段含义、软删除策略和唯一约束说明。 |
 | `数据库设计-系统操作日志说明.md` | 系统操作日志表的表作用、字段含义、脱敏规则和索引说明。 |
 | `数据库设计-系统配置说明.md` | 系统配置表的表作用、字段含义、配置项和索引说明。 |
@@ -88,3 +93,31 @@
 - 客户合同到期或授信超限是否启用客户授信审批由 `system_configs.customer_risk_approval_enabled` 控制，默认关闭时只提醒不阻断；开启后按客户等级指定审批人顺序处理。
 - 后台登录账号保存在 `system_users`，密码只保存哈希，不保存明文；员工资料保存在 `enterprise_employees`，通过账号 ID 关联登录账号。
 - 导游备用金公司规定加点率由 `system_configs.guide_imprest_company_markup_rate` 控制，默认 70，按百分数保存。
+
+## 产品设计资源编排 V2 升级说明
+
+- 当前规则为同一天只安排一家酒店；早期 `051_sales_product_designer_accommodation_and_meals.sql` 的索引谓词包含 `accommodation`，与此规则一致，已执行该脚本的库不得执行 052。
+- `052` 是已废止的历史多酒店迁移。若目标库曾执行 052，必须先预检同日多酒店数据，再执行 `055_sales_product_designer_single_hotel_accommodation.sql` 恢复酒店唯一约束。`053` 在保留历史 `vehicle`/`traffic` 每日资源可读的同时，将有效历史地接普通行程转换为 `ground_service`，新增用车写入产品级 `sales_product_designer_vehicle_arrangements`。
+- `054` 将报价快照可选值扩展为 `not_required`，用于明确无需采购且零成本的资源，不将其计为待询价。
+- 新安装结构由 `037_sales_product_designer_schema.sql` 提供最终基础定义；常规历史升级按 `051 → 053 → 054` 执行。仅已执行 052 的库补执行 `055`。执行远程迁移前须再次确认目标为当前 `mtravel` 数据库，并完成历史数据预检和备份。
+
+远程迁移完成后，使用以下只读 SQL 核验：
+
+```sql
+SELECT indexdef
+FROM pg_indexes
+WHERE schemaname = 'public'
+  AND indexname = 'uk_sales_product_day_resources_day_meal_role_active';
+
+SELECT conname, pg_get_constraintdef(oid)
+FROM pg_constraint
+WHERE conrelid = 'sales_product_day_resources'::regclass
+  AND conname LIKE 'chk_sales_product_day_resources%';
+
+SELECT column_name
+FROM information_schema.columns
+WHERE table_name = 'sales_product_designer_vehicle_arrangements'
+ORDER BY ordinal_position;
+```
+
+预期酒店餐次索引列出 `accommodation`、`breakfast`、`lunch`、`dinner`；日资源角色与采购快照列已存在；全程用车表已建立。执行 055 前仍应按目标库实际数据复核活跃住宿重复记录。

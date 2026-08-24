@@ -6,6 +6,7 @@
 
 - `backend/`：Spring Boot 后端服务。
 - `frontend-preview/apps/web-antd/`：前端管理后台。
+- `customer-service-agent/`：FastAPI + LangGraph 客服 Agent 独立服务和模拟控制台。
 - `db/`：数据库建表 SQL 和表结构说明。
 - `文档/`：需求、调研、原型和汇报材料。
 - `scripts/`：文档和原型生成脚本。
@@ -22,6 +23,12 @@
 
 ```bash
 ./scripts/dev-frontend-restart.sh
+```
+
+客服 Agent：
+
+```bash
+./scripts/dev-customer-service-agent-restart.sh
 ```
 
 首次启动前，先复制 `.env.example` 为 `.env.local` 并填写本机数据库、Redis 密码。

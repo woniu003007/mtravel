@@ -17,6 +17,21 @@
 
 `mtravel.env` 包含数据库、Redis、JWT 等敏感配置，只保存在服务器，禁止提交到 Git。
 
+共享 PostgreSQL 环境下建议在 `mtravel.env` 中显式限制连接池，避免 Spring Boot 默认每个实例常驻 10 个连接：
+
+```bash
+DB_POOL_MAX_SIZE=5
+DB_POOL_MIN_IDLE=1
+DB_POOL_IDLE_TIMEOUT_MS=300000
+DB_POOL_KEEPALIVE_TIME_MS=300000
+DB_POOL_MAX_LIFETIME_MS=1800000
+DB_POOL_CONNECTION_TIMEOUT_MS=30000
+DB_POOL_VALIDATION_TIMEOUT_MS=5000
+DB_APPLICATION_NAME=mtravel-production
+```
+
+该配置使单个实例常驻 1 个空闲连接，并发时最多扩展到 5 个；额外连接空闲 5 分钟后回收。修改后需要重启 `mtravel-api.service` 才会生效。
+
 ## 运行方式
 
 - 后端服务：`mtravel-api.service`

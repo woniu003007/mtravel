@@ -98,6 +98,9 @@ CREATE TABLE IF NOT EXISTS sales_product_itinerary_days (
   roadbook_total_distance_meters integer NOT NULL DEFAULT 0,
   roadbook_total_duration_seconds integer NOT NULL DEFAULT 0,
   word_image_mode varchar(30) NOT NULL DEFAULT 'follow_resource',
+  destination_province varchar(80),
+  destination_city varchar(80),
+  destination_district varchar(80),
   CONSTRAINT fk_sales_product_itinerary_product
     FOREIGN KEY (tenant_id, product_id) REFERENCES sales_products (tenant_id, id),
   CONSTRAINT chk_sales_product_itinerary_day CHECK (day_no >= 1),
@@ -662,6 +665,9 @@ COMMENT ON COLUMN sales_product_itinerary_days.day_title IS '当日行程标题�
 COMMENT ON COLUMN sales_product_itinerary_days.itinerary_content IS '当日行程内容。';
 COMMENT ON COLUMN sales_product_itinerary_days.accommodation_note IS '住宿说明。';
 COMMENT ON COLUMN sales_product_itinerary_days.related_hotel IS '关联酒店名称或说明。';
+COMMENT ON COLUMN sales_product_itinerary_days.destination_province IS '当天主行程目的地省份。';
+COMMENT ON COLUMN sales_product_itinerary_days.destination_city IS '当天主行程目的地城市，驱动地图默认筛选范围。';
+COMMENT ON COLUMN sales_product_itinerary_days.destination_district IS '当天主行程目的地区县，可选。';
 COMMENT ON COLUMN sales_product_itinerary_days.seasonal_surcharge IS '旺季附加费。';
 COMMENT ON COLUMN sales_product_itinerary_days.breakfast_included IS '是否含早餐。';
 COMMENT ON COLUMN sales_product_itinerary_days.lunch_included IS '是否含中餐。';

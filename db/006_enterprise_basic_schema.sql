@@ -144,6 +144,7 @@ CREATE TABLE IF NOT EXISTS enterprise_departments (
   parent_id bigint,
   department_code varchar(80),
   department_name varchar(160) NOT NULL,
+  manager_employee_id bigint,
   manager_name varchar(80),
   contact_phone varchar(40),
   sort_order integer NOT NULL DEFAULT 0,
@@ -189,6 +190,7 @@ COMMENT ON COLUMN enterprise_departments.tenant_id IS '租户ID，标识该部�
 COMMENT ON COLUMN enterprise_departments.parent_id IS '上级部门ID。为空表示一级部门。';
 COMMENT ON COLUMN enterprise_departments.department_code IS '部门编码，用于内部识别和外部数据导入匹配。';
 COMMENT ON COLUMN enterprise_departments.department_name IS '部门名称，例如销售部、计调部、财务部。';
+COMMENT ON COLUMN enterprise_departments.manager_employee_id IS '部门负责人企业员工 ID，用于审批流按登录账号路由。';
 COMMENT ON COLUMN enterprise_departments.manager_name IS '部门负责人姓名。';
 COMMENT ON COLUMN enterprise_departments.contact_phone IS '部门联系电话或负责人联系电话。';
 COMMENT ON COLUMN enterprise_departments.sort_order IS '排序值。数字越小越靠前。';
@@ -371,6 +373,25 @@ CREATE INDEX IF NOT EXISTS idx_enterprise_employees_tenant_deleted_role
 
 CREATE INDEX IF NOT EXISTS idx_enterprise_employees_tenant_deleted_sort
   ON enterprise_employees (tenant_id, is_deleted, sort_order, id);
+
+ALTER TABLE enterprise_departments
+  ADD COLUMN IF NOT EXISTS manager_employee_id bigint;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'fk_enterprise_departments_manager_employee'
+      AND conrelid = 'enterprise_departments'::regclass
+  ) THEN
+    ALTER TABLE enterprise_departments
+      ADD CONSTRAINT fk_enterprise_departments_manager_employee
+      FOREIGN KEY (tenant_id, manager_employee_id) REFERENCES enterprise_employees (tenant_id, id);
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_enterprise_departments_tenant_manager_employee
+  ON enterprise_departments (tenant_id, is_deleted, manager_employee_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_enterprise_employees_tenant_code_active
   ON enterprise_employees (tenant_id, employee_code)

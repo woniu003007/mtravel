@@ -140,6 +140,20 @@ CREATE TABLE IF NOT EXISTS sales_quote_approval_members (
   CONSTRAINT chk_sales_quote_approval_member_step_order CHECK (step_order >= 0)
 );
 
+CREATE TABLE IF NOT EXISTS sales_quote_approval_configs (
+  id BIGSERIAL PRIMARY KEY,
+  tenant_id bigint NOT NULL,
+  approval_mode varchar(30) NOT NULL DEFAULT 'specified_person',
+  created_by varchar(80),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  is_deleted boolean NOT NULL DEFAULT false,
+  deleted_at timestamptz,
+  deleted_by varchar(64),
+  CONSTRAINT chk_sales_quote_approval_config_mode
+    CHECK (approval_mode IN ('department_manager', 'specified_person'))
+);
+
 DROP TRIGGER IF EXISTS trg_sales_quote_resource_rules_updated_at ON sales_quote_resource_rules;
 CREATE TRIGGER trg_sales_quote_resource_rules_updated_at
 BEFORE UPDATE ON sales_quote_resource_rules
@@ -163,6 +177,11 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_sales_quote_approval_members_updated_at ON sales_quote_approval_members;
 CREATE TRIGGER trg_sales_quote_approval_members_updated_at
 BEFORE UPDATE ON sales_quote_approval_members
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_sales_quote_approval_configs_updated_at ON sales_quote_approval_configs;
+CREATE TRIGGER trg_sales_quote_approval_configs_updated_at
+BEFORE UPDATE ON sales_quote_approval_configs
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_sales_quote_resource_rule_active
@@ -202,6 +221,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_sales_quote_approval_approver_step_active
 
 CREATE INDEX IF NOT EXISTS idx_sales_quote_approval_member_user
   ON sales_quote_approval_members (tenant_id, is_deleted, system_user_id, member_type);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sales_quote_approval_config_active
+  ON sales_quote_approval_configs (tenant_id)
+  WHERE is_deleted = false;
 
 INSERT INTO sales_quote_guide_levels (
   tenant_id,
@@ -308,5 +331,16 @@ COMMENT ON COLUMN sales_quote_approval_members.updated_at IS '更新时间。';
 COMMENT ON COLUMN sales_quote_approval_members.is_deleted IS '是否软删除。';
 COMMENT ON COLUMN sales_quote_approval_members.deleted_at IS '软删除时间。';
 COMMENT ON COLUMN sales_quote_approval_members.deleted_by IS '软删除操作人。';
+
+COMMENT ON TABLE sales_quote_approval_configs IS '销售报价低价审批模式配置表。维护当前登录账号所属部门负责人或指定人员审批模式。';
+COMMENT ON COLUMN sales_quote_approval_configs.id IS '审批模式配置主键 ID。';
+COMMENT ON COLUMN sales_quote_approval_configs.tenant_id IS '租户 ID。';
+COMMENT ON COLUMN sales_quote_approval_configs.approval_mode IS '审批模式。department_manager按当前登录账号所属部门负责人审批，specified_person按指定人员审批。';
+COMMENT ON COLUMN sales_quote_approval_configs.created_by IS '创建或首次保存人账号。';
+COMMENT ON COLUMN sales_quote_approval_configs.created_at IS '创建时间。';
+COMMENT ON COLUMN sales_quote_approval_configs.updated_at IS '更新时间。';
+COMMENT ON COLUMN sales_quote_approval_configs.is_deleted IS '是否软删除。';
+COMMENT ON COLUMN sales_quote_approval_configs.deleted_at IS '软删除时间。';
+COMMENT ON COLUMN sales_quote_approval_configs.deleted_by IS '软删除操作人。';
 
 COMMIT;
